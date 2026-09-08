@@ -609,22 +609,52 @@ Contour output carries attributes: `value`, `is_index` (every Nth for heavier st
 
 ## 8. Spatial aggregation
 
-Thin wrappers over PostGIS and Shapely. Not the hard part, but breadth matters for adoption.
+Runs **in-process** in `webmap_geo.aggregate`, over DuckDB and Shapely. Not the hard part,
+but breadth matters for adoption.
+
+Previously these were "thin wrappers over PostGIS" — SQL issued at a database. That put
+geometry operations outside the geoprocessing module, which meant "where does geometry get
+transformed?" had a different answer depending on which operation you asked about, and the
+analysis-CRS rule below was enforced by nothing. See
+`adr/0004-geoprocessing-owns-geometry.md`.
+
+```python
+# python/webmap_geo/aggregate.py
+
+def aggregate(
+    op: str,
+    frame: AnalysisFrame,
+    inputs: list[pyarrow.Table],
+    **params,
+) -> pyarrow.Table:
+    """Dispatch a spatial aggregation.
+
+    Arrays arrive already in `frame`. The AnalysisFrame is what makes the
+    analysis-CRS rule checkable rather than aspirational: `distance` is in
+    frame.units, and the value is echoed into the lineage record, so a buffer
+    that was run in degrees is visible after the fact instead of merely wrong.
+    """
+```
 
 | Operation | Implementation | Notes |
 |---|---|---|
-| buffer | PostGIS `ST_Buffer` | Analysis CRS only |
-| dissolve | `ST_Union` grouped | |
+| buffer | `ST_Buffer` | Distance in `frame.units` |
+| dissolve | `ST_Union_Agg` grouped | |
 | clip | `ST_Intersection` | |
-| intersect / union / difference | PostGIS overlay | |
+| intersect / union / difference | DuckDB overlay | |
 | spatial_join | `ST_Intersects` + attribute transfer | Predicate configurable |
 | summarize_within | `ST_Contains` + aggregate | Stats per containing polygon |
 | aggregate_points | binning + stats | |
 | centroid | `ST_Centroid` / `ST_PointOnSurface` | Offer both; `PointOnSurface` guarantees inside |
 | convex_hull | `ST_ConvexHull` | |
 | concave_hull | `ST_ConcaveHull` | Param sensitive; expose target percent |
-| voronoi | `ST_VoronoiPolygons` | Clip to extent |
+| voronoi | `ST_VoronoiDiagram` | Clip to extent |
 | hexbin | generated grid + join | Offer H3 as an alternative indexing scheme |
+
+Every function above was checked present in duckdb 1.5.5 spatial before this table was
+written. **Anything added later needs the same check** — losing PostGIS means losing the SQL
+escape hatch, so an operation DuckDB does not cover has to be written against Shapely here
+rather than reached for in a query.
 
 **Rule:** every operation runs in the project analysis CRS. Buffering in EPSG:4326 produces
 distances in degrees, which vary with latitude and are never what anyone wanted.
@@ -680,3 +710,10 @@ Measured on 8 vCPU, 32 GB.
 
 Exceeding these is a bug, not a fact of life. Profile before optimizing; the fault-aware
 neighbor search is the expected hotspot and the caching strategy in §6.2 is the first lever.
+
+**These need re-measuring, not assuming.** They were established against a design where
+overlay and aggregation ran in PostGIS and features lived in database tables. Reading
+GeoParquet through DuckDB is columnar, lazy, and predicate-pushed — a different profile, not
+a strictly worse one, but different enough that carrying the numbers over unverified would be
+guessing. Re-baseline them in Phase 4 against the seed dataset before treating a miss as a
+regression.
