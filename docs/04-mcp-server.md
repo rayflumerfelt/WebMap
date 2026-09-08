@@ -408,8 +408,12 @@ async def webmap_render_map(
     size: Annotated[
         Literal["slide_full", "slide_half", "slide_quarter", "square", "thumbnail"],
         Field("slide_full", description=(
-            "Output dimensions. slide_full is 16:9 at 2560×1440, sized for a "
-            "full-bleed PowerPoint slide. Use consistent sizes across a deck."))
+            "Dimensions of the STORED master image, not of the preview "
+            "returned inline. slide_full is 16:9 at 2560×1440, sized for a "
+            "full-bleed PowerPoint slide. Use consistent sizes across a deck. "
+            "Choosing a smaller preset does not reduce the response size — "
+            "the inline preview is always ~1600 px — it reduces the quality "
+            "of the artifact you will put on the slide."))
     ] = "slide_full",
     show_legend: Annotated[bool, Field(True, description=(
         "Include a legend. Keep this on for any map going into a "
@@ -423,22 +427,23 @@ async def webmap_render_map(
 ) -> str:
     """Render a map image from one or more datasets.
 
-    Returns the image plus structured metadata: interpolation method and
-    parameters, value range and units, CRS, extent, and data vintage. Use
-    that metadata to write figure captions — do not describe the image from
-    its pixels, and never state a value range you did not receive here.
+    Returns a display-sized preview image plus structured metadata:
+    interpolation method and parameters, value range and units, CRS, extent,
+    and data vintage. Use that metadata to write figure captions — do not
+    describe the image from its pixels, and never state a value range you did
+    not receive here. The preview is downsampled, so do not judge label
+    placement or line weight from it.
 
     Renders are persisted with an ID. To place the same map on several
-    slides, reuse the render_id rather than calling this again.
+    slides, reuse the render_id rather than calling this again. For the
+    full-resolution image, call webmap_get_render with size="master".
     """
 ```
 
-Response — image content block plus structured text:
+Response — an image content block plus a text block:
 
 ```markdown
-![Wolfcamp A Porosity](webmap://render/3f9c...)
-
-**Render** `3f9c…a71e` · 2560×1440
+**Render** `3f9c…a71e` · master 2560×1440 · preview 1600×900
 
 - **Layers**: Wolfcamp A Porosity (grid), Midland Basin Faults, Well Control
 - **Values**: 4.1 – 21.8 % porosity
@@ -456,9 +461,63 @@ Ordinary kriging of 1,847 well control points with fault constraints;
 Open interactively: https://webmap.corp/s/k3n8fq
 ```
 
+**The image is a content block, not markdown.** A `webmap://` URI inside a markdown image is
+inert — it renders as dead text. The tool returns a list: an `ImageContent` block carrying
+base64 PNG, followed by a `TextContent` block carrying the markdown above.
+
+**Why the inline image is downsampled.** `00-overview.md` §7 places this system on an internal
+network, so `claude.ai` cannot fetch `https://webmap.corp/...`. The MCP response body is the
+*only* path by which image bytes reach Claude. A `slide_full` master is 2560×1440 — commonly
+1.5–4 MB of PNG, and base64 adds a third. Inlining that on every render fills a conversation
+with a dozen of them.
+
+So the two artifacts are separated:
+
+| | Size | Where it goes |
+|---|---|---|
+| **Preview** | ~1600 px longest edge | Inline, in the `ImageContent` block |
+| **Master** | The `size` preset, at scale factor | Object storage, addressed by `render_id` |
+
+`size` governs the **stored master**, not the preview — its description says so, because a
+caller asking for `thumbnail` to save tokens would otherwise be degrading the artifact rather
+than the preview. Both are encoded from the same page screenshot, so the preview costs CPU
+rather than a second render.
+
+When Claude needs the full-resolution bytes — assembling the deck itself — it calls
+`webmap_get_render(render_id, size="master")`. An opt-in cost, not one paid every time.
+
 Every render carries a session link. Review without blocking.
 
-### 6.2 `webmap_suggest_maps`
+If `failed_requests` is non-empty, the text block leads with it:
+
+```markdown
+⚠️ 3 tile requests failed during rendering. The northeast portion of this map
+may be incomplete — this is a fetch failure, not sparse data.
+```
+
+### 6.2 `webmap_get_render`
+
+```python
+@mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
+async def webmap_get_render(
+    ctx,
+    render_id: UUID,
+    size: Annotated[Literal["preview", "master"], Field(
+        "preview", description=(
+            "preview: ~1600 px, the same image webmap_render_map returned. "
+            "master: the full-resolution stored image. Use master only when "
+            "you are placing the image into a document you are building — it "
+            "is several megabytes and stays in the conversation."))] = "preview",
+) -> str:
+    """Retrieve a previously created render by ID.
+
+    Use this to place a map you already rendered onto another slide without
+    re-rendering it, or to fetch the full-resolution master for a deck.
+    Returns the image plus the same metadata webmap_render_map returned.
+    """
+```
+
+### 6.3 `webmap_suggest_maps`
 
 Domain knowledge the app has and Claude does not.
 

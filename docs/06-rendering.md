@@ -226,20 +226,27 @@ class RenderSpec:
     bounds: tuple[float, float, float, float]
     size_preset: str
     overlay: dict | None
-    tile_token: str
     transparent: bool = False
 
+# The auth token is NOT on RenderSpec. It is passed separately to
+# install_guards and lives only in that closure — putting it on the spec
+# would carry it into page JS via page.evaluate below, where the shell has
+# no use for it and any script the style loads could read it.
 
-async def render(pool: BrowserPool, spec: RenderSpec) -> RenderOutput:
+
+async def render(
+    pool: BrowserPool, spec: RenderSpec, auth_token: str
+) -> RenderOutput:
     validate_style(spec.style)          # 03-auth-security.md §3.1
     w, h, scale = SIZE_PRESETS[spec.size_preset]
 
     async with pool.context(w, h, scale) as ctx:
         page = await ctx.new_page()
         failed: list[dict] = []
-        await install_guards(page, ALLOWED_HOSTS, spec.tile_token, failed)
+        await install_guards(page, ALLOWED_HOSTS, auth_token, failed)
 
         await page.goto("file:///app/shell/index.html")
+        # asdict(spec) carries no credential — see the note on RenderSpec.
         await page.evaluate("(s) => window.renderMap(s)", asdict(spec))
 
         try:
@@ -260,7 +267,13 @@ async def render(pool: BrowserPool, spec: RenderSpec) -> RenderOutput:
             full_page=False,
         )
 
-    return RenderOutput(image=png, width=w * scale, height=h * scale,
+    # One screenshot, two encodes. The preview is what reaches Claude in the
+    # MCP response; the master is what goes on a slide. See
+    # adr/0006-render-image-delivery.md and 04-mcp-server.md §6.1.
+    preview = downscale_png(png, longest_edge=1600)
+
+    return RenderOutput(image=png, preview=preview,
+                        width=w * scale, height=h * scale,
                         failed_requests=failed)
 ```
 

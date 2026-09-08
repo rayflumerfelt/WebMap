@@ -112,7 +112,8 @@ The point of the project.
 
 **Acceptance**
 
-- [ ] Claude renders a map of a registered dataset in under 5 s p95
+- [ ] Claude renders a map of a registered dataset in under 5 s p95, and the image
+      actually displays — an image content block, not a markdown URI
 - [ ] The rendered image is pixel-comparable to the same view in the browser
 - [ ] Render metadata contains value range, units, CRS, and vintage — verified against the source
 - [ ] A hostile style referencing an internal host is rejected before dispatch
