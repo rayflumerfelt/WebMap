@@ -48,33 +48,38 @@ can write a technically accurate caption.
 
 ## 3. Users
 
-**One subsurface geologist**, wearing every hat: registering datasets, running the workflows,
-and producing the deck figures.
+**Primary: subsurface geologists.** Domain-expert, not GIS-expert. Fluent in Surfer and
+Petrel conventions. Care about variograms, fault sealing, depth conventions, and whether the
+map is defensible in front of a partner. Not interested in coordinate reference system
+mechanics but severely affected when they are wrong.
 
-Domain-expert, not GIS-expert. Fluent in Surfer and Petrel conventions. Cares about variograms,
-fault sealing, depth conventions, and whether the map is defensible in front of a partner. Not
-interested in coordinate reference system mechanics but severely affected when they are wrong.
+**Secondary: geotechs and analysts.** Prepare data, run standard workflows, produce deck
+figures.
 
-That last sentence is the design constraint that survives having no other users: the system
-must refuse to guess a CRS, refuse to interpolate across a sealing fault, and record enough
-provenance to explain a map a year later — because there is no reviewer to catch it if it
-does not.
+**Tertiary: data managers.** Register datasets, manage shared basemaps and style templates,
+control access.
 
 ## 4. Deployment context
 
-**Single operator.** One geologist, one machine or one internal host. Not a shared service.
+**An internal server, used by several employees.** Development and testing run the same
+stack on a workstation.
 
-- **Identity:** none. No identity provider, no login flow, no permission model. See
-  `adr/0001-single-user-deployment.md` for what was removed and what it would cost to
-  bring back.
-- **Sharing** happens by exporting a file or sending a render, not by granting access.
+- **Identity:** single sign-on against the users' Windows credentials. Written against OIDC
+  (expected Entra ID), with Kerberos/SPNEGO as the documented fallback if the organisation is
+  pure on-prem AD. Confirm which applies in week 1 — see `adr/0007-multi-user-directory-sso.md`.
+- **Authorization** is per-object ownership plus a visibility scope plus explicit grants —
+  never a partition key. Teams mirror directory groups. See `02-data-model.md` §2.
+- **Claude runs on the geologist's own workstation**, with the MCP server local to it over
+  stdio. There is no remote MCP endpoint and no OAuth authorization server — see
+  `adr/0008-local-stdio-mcp.md`.
 - **No Esri footprint.** Shapefile is an interchange format only.
 - **Data sources are mixed:** ad-hoc uploads, SMB file shares, existing PostGIS databases.
-- **Not reachable from the public internet.** This is load-bearing for §7 and for how
-  renders reach Claude — see `04-mcp-server.md` §6.1.
+- **Not reachable from the public internet.** Internal network and VPN only. This is
+  load-bearing twice over: it is why renders reach Claude as inline image bytes
+  (`04-mcp-server.md` §6.1), and it is why a local stdio MCP server costs nothing.
 
-The security posture that follows from this is in `03-auth-security.md`: the threat is
-hostile *data*, not hostile users.
+`03-auth-security.md` covers both halves of the security posture — threats from people, and
+threats from data.
 
 ## 5. Scale targets
 
@@ -83,7 +88,7 @@ hostile *data*, not hostile users.
 | Interpolation input | 10k–500k points | Local-neighborhood kriging mandatory; global solve impossible |
 | Output grid | up to 2000×2000 cells | Sparse solve, ~seconds with multigrid |
 | Vector layer display | up to 5M features | MVT from GeoParquet via DuckDB, not GeoJSON |
-| Concurrent users | 1 | Single operator; no contention to design around |
+| Concurrent users | ~5–10 | Modest; contention is on the worker, not the API |
 | Render latency | < 5 s p95 | Warm browser pool |
 | Grid job latency | < 3 min p95 | Async job queue with progress |
 
@@ -112,9 +117,11 @@ Explicitly out of scope. Do not build these; do not let them creep in.
   computed values as point attributes.
 - **Reservoir simulation.** Grids are for mapping, not for flow simulation.
 - **Esri format lock-in.** No SDE, no `.lyr`, no ArcPy, no geodatabase writing.
-- **Multi-user anything.** No accounts, no permission model, no sharing by grant, and no
-  concurrent editing — one editor per layer. See `adr/0001-single-user-deployment.md` and
-  `adr/0005-single-editor-persistence.md` for the triggers that would reopen these.
+- **Real-time collaborative editing.** Two people editing the same layer simultaneously is
+  deferred indefinitely. Copy-on-write with conflict detection only — a second committer gets
+  a 409, never a silent overwrite. See `adr/0005-single-editor-persistence.md`.
+- **Access from outside the domain.** Claude must run on a domain-joined workstation that can
+  reach the internal network. See `adr/0008-local-stdio-mcp.md` for what would change that.
 - **Mobile and tablet support.** This is a **desktop-first** application — see §7.1. Small
   viewports are not a supported target and are not tested.
 - **Public internet exposure.** Internal network and VPN only. This is load-bearing rather
@@ -161,8 +168,8 @@ Claude, and every map in it carries provenance sufficient to reproduce it a year
 |---|---|
 | `00-overview.md` | This file |
 | `01-architecture.md` | Services, topology, technology decisions with rationale |
-| `02-data-model.md` | Schema DDL, Pydantic models, CRS model, ownership |
-| `03-auth-security.md` | Threat model, SSRF controls, untrusted data, destructive-op safety |
+| `02-data-model.md` | Schema DDL, Pydantic models, CRS model, permissions |
+| `03-auth-security.md` | SSO, local MCP identity, authorization, SSRF controls, untrusted data |
 | `04-mcp-server.md` | Complete tool surface with schemas |
 | `05-geoprocessing.md` | Interpolation, fault handling, contouring, aggregation |
 | `06-rendering.md` | Playwright render service, style pipeline, tiles |

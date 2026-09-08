@@ -3,14 +3,22 @@
 ## 1. Service topology
 
 ```
-   ┌───────────────┐
-   │  Browser      │───────────────────┐
-   │  React SPA    │                   │
-   └───────────────┘                   │
+                        ┌──────────────────────────────┐
+                        │  Corporate IdP (Entra ID)    │
+                        └──────────────┬───────────────┘
+                                       │ OIDC
+   ┌─────────────────────────┐         │
+   │ WORKSTATION             │         │
+   │  Browser (React SPA)────┼─────────┤
+   │  Claude Code / Desktop  │         │
+   │        │ stdio          │         │
+   │        ▼                │         │
+   │  webmap-mcp (local)─────┼─────────┤  HTTPS + the user's
+   │   no DB, no authz       │         │  OS-brokered token
+   └─────────────────────────┘         │
                         ┌──────────────▼───────────────┐
                         │  webmap-api    (FastAPI)     │
-   Claude ──MCP HTTP───▶│  webmap-mcp    (FastMCP)     │
-   (static token)       │  Both mount on same ASGI app │
+                        │  enforces authorization      │
                         └──┬────────┬────────┬─────────┘
                            │        │        │
               ┌────────────▼──┐  ┌──▼─────┐  └──────────┐
@@ -46,18 +54,26 @@ enqueues jobs, and proxies tile requests. Stateless.
 
 Does *not* do heavy computation. Any operation that can exceed 2 seconds is enqueued.
 
-### 2.2 `webmap-mcp` — FastMCP
+### 2.2 `webmap-mcp` — FastMCP, local to each workstation
 
-Mounted on the same ASGI application as `webmap-api`, at `/mcp`. Shares the database session
-factory and service modules. It is a *presentation layer over the same services the REST API
-uses* — never a parallel implementation.
+**Runs on the geologist's machine, not the server.** Transport is stdio; Claude Code or Claude
+Desktop launches it as a subprocess. See `adr/0008-local-stdio-mcp.md`.
 
-Transport: Streamable HTTP, stateless JSON. Not stdio (this is a remote server), not SSE
-(deprecated).
+It is a thin HTTP client of `webmap-api`, authenticating as the logged-in Windows user through
+the OS credential broker. It holds **no database connection, no service credential, and no
+authorization logic** — it runs where the user can modify it, so it is trusted with nothing.
 
-Rationale for co-locating rather than a separate deployable: the MCP server needs the same
-domain services, the same validation, and the same error vocabulary. Splitting them means
-maintaining two implementations of every operation and guaranteeing they drift.
+This reverses the original decision to mount it on the API's ASGI app. That decision existed to
+avoid duplicating authorization logic, "the single most dangerous thing to duplicate." The
+concern is satisfied more strongly rather than abandoned: the local server duplicates no
+authorization logic because it has none. What it does duplicate — response formatting and the
+markdown shapes in `04-mcp-server.md` — is safe in two places.
+
+What this buys: no OAuth 2.1 authorization server, no Dynamic Client Registration, no upstream
+federation. That was four to six weeks and the largest schedule risk in the project.
+
+What it costs: Claude must run on a domain-joined workstation that can reach the internal
+network.
 
 ### 2.3 `webmap-worker` — arq
 
@@ -192,8 +208,14 @@ are *compilers* that emit Style JSON, not parallel representations. See `08-styl
 
 **Rationale.** DuckDB's spatial extension covers what PostGIS was carrying here — verified
 against 1.5.5: `ST_AsMVT`, `ST_AsMVTGeom`, `ST_TileEnvelope`, `ST_Transform`, RTREE indexes,
-and every function in the `05-geoprocessing.md` §7 catalog. The one capability it has no
-answer for is row-level security, and `adr/0001` removed the requirement for it.
+and every function in the `05-geoprocessing.md` §8 catalog.
+
+**On row-level security**, which DuckDB has no answer for: RLS lives on the control plane,
+where the registry rows are, and Postgres provides it there. It never reached feature
+*content* under either design — geometry was always going to be in objects, and Postgres
+policies do not extend to object storage. `02-data-model.md` §4.1 states plainly that the API
+is the sole enforcement point for the data plane, so that this is a decision on the record
+rather than a gap someone discovers.
 
 Running the data plane in-process is also what makes `adr/0004`'s rule — all geometry
 operations belong to `webmap_geo` — structural rather than aspirational. There is no SQL
@@ -203,8 +225,13 @@ path for a geometry operation to escape through.
 SQLite needs batch mode for nearly every `ALTER TABLE`. One small container is cheaper than
 that friction against Phase 0's "migrations apply and roll back cleanly" criterion.
 
-**Would change our mind.** Concurrent multi-writer editing becoming a requirement. DuckDB is
-a single-writer engine, and that would reopen `adr/0005` as well.
+**Would change our mind.** An operation DuckDB spatial cannot express, or a working set large
+enough that reading Parquet per request stops being viable.
+
+Not concurrency — that objection was overstated in `adr/0002` and is corrected in its
+amendment. DuckDB here is a query engine over immutable Parquet, not a database file: many
+concurrent readers are fine, and concurrent writers contend on a single Postgres row rather
+than inside DuckDB.
 
 ### 4.4 arq for job queuing
 
@@ -234,28 +261,46 @@ fast path for the common case.
 
 Detail in `05-geoprocessing.md`.
 
-### 4.6 Single owner, no authorization model
+### 4.6 Ownership + grants, not tenant partitioning
 
 **Decision.** Every object carries one `owner_user_id`. There is no visibility scope, no
 grant model, no team, and no row-level security.
 
-**Rationale.** There is one user. An authorization model exists to answer "may this principal
-see this object," and that question has no interesting answer here. Building it anyway would
-have cost most of Phase 1 and carried the project's largest schedule risk — a federated OAuth
-server with Dynamic Client Registration — to protect data from a population of one. See
-`adr/0001-single-user-deployment.md`.
+**Rationale.** Tenants here are business units inside one company. Cross-BU sharing is a
+legitimate and frequent need — one asset team's fault interpretation is exactly what another
+team wants. Hard partitioning would mean fighting our own data model within months.
 
-`owner_user_id` survives the removal because it answers a different question that stays
-interesting: *who or what produced this*. Lineage records name the actor that made a grid, and
-audit records carry `actor_channel` so "did I make this map, or did Claude make it for me" is
-answerable. Dropping the column would lose that, and provenance is what makes a map defensible
-a year later.
+RLS is retained as a backstop, with the policy written against the grant model rather than a
+partition column. Note what it does *not* reach: feature geometry lives in object storage, so
+`02-data-model.md` §4.1 states plainly where the single enforcement point is.
 
-**Would change our mind.** A second regular user. That is a real project — schema, policies,
-and an authorization server — not a flag, which is why the ADR states the cost rather than
-pretending the door is ajar.
+The schedule risk this decision used to carry — a federated OAuth server, because `claude.ai`
+needed to authenticate to a remote MCP server — is gone for an unrelated reason. See §4.7.
 
-### 4.7 Terra Draw for editing
+### 4.7 Local stdio MCP instead of an authorization server
+
+**Decision.** The MCP server runs on each geologist's workstation over stdio rather than as a
+remote HTTP endpoint. See `adr/0008-local-stdio-mcp.md`.
+
+**Rationale.** A remote MCP server authenticates with OAuth 2.1, and the specification expects
+Dynamic Client Registration so a client can register itself. Entra ID, Okta and Ping do not
+expose DCR by default and enabling it is frequently blocked by security policy — which is why
+the original plan stood up `webmap-auth`, an authorization server federating upstream, and why
+`03-auth-security.md` called itself the highest schedule risk in the set.
+
+Every user is at a domain-joined Windows workstation, on the internal network, running Claude
+locally. Moving the server there removes the requirement instead of solving it: the process
+acquires the user's own token from the OS credential broker and calls `webmap-api` over HTTPS.
+
+**Consequence for trust.** A process on the user's machine cannot enforce anything against
+that user. Authorization lives at the API, and only there. This is a strengthening of the
+co-location argument in §2.2, not an abandonment of it.
+
+**Would change our mind.** Access needed from outside the domain, or enough users that
+per-workstation installation becomes an operational burden. The fallback is not the full
+`webmap-auth` build — it is a pre-provisioned confidential OAuth client per environment.
+
+### 4.8 Terra Draw for editing
 
 **Decision.** Terra Draw, not mapbox-gl-draw or its forks.
 
@@ -314,15 +359,18 @@ GET /api/v1/jobs/{id} ◀── poll (or WS) ────────┤
 
 | Env | Purpose | Data |
 |---|---|---|
-| `local` | Docker Compose, all services | Seeded synthetic + `tests/fixtures/` |
-| `work` | The one running instance | Real |
+| `local` | Docker Compose on a workstation; development and testing | Seeded synthetic + `tests/fixtures/` |
+| `prod` | The internal server everyone uses | Real |
 
-Two, not four. A shared `dev` and a `staging` existed to coordinate a team and to rehearse
-deploys; there is no team and the deploy is `docker compose up`.
+Two, not four. A shared `dev` and a `staging` existed to coordinate a larger team and rehearse
+deploys; with a handful of users and `docker compose up` as the deploy, they earn nothing that
+`local` does not.
 
-Use **separate MCP bearer tokens** per environment anyway, and never point a Claude connector
-at `work` while developing. The reason is unchanged even without multi-tenancy: a tool call
-that deletes a dataset does not care which environment it landed in.
+**The MCP server's API base URL is fixed at install time**, not switchable at runtime
+(`03-auth-security.md` §4.5). A development install points at localhost; a production install
+points at the internal server. A tool call that deletes a dataset does not care which
+environment it landed in, and the local server is the one component sitting on a machine where
+both configurations are plausible.
 
 ## 7. Observability
 

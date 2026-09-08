@@ -77,7 +77,7 @@ exactly two legitimate callers, and both run before any solver:
 1. **Reconciling constraint and control-point datasets** that arrive in different storage
    CRSs. Faults from one source and picks from another must be in one frame before the mesh
    is built.
-2. **Converting `GridSpec.bbox`** — documented in EPSG:4326 (`02-data-model.md` §4) — into
+2. **Converting `GridSpec.bbox`** — documented in EPSG:4326 (`02-data-model.md` §5) — into
    analysis-CRS grid bounds, since `cell_size` is in analysis-CRS units.
 
 Anything else is a bug. A transformer call inside `minimum_curvature`, a kriging neighbourhood

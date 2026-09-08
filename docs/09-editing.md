@@ -17,12 +17,12 @@ Editing gets hard fast, and the hard parts are snapping and topology, not drawin
 - Attribute editing
 - Geometry validation with actionable errors
 - Undo/redo
-- Copy-on-write versioning, with every prior version addressable
+- Copy-on-write versioning with conflict detection; every prior version addressable
 
 **Deferred, deliberately:**
 
-- Concurrent editing of the same layer, real-time or otherwise. One editor per layer —
-  see `adr/0005-single-editor-persistence.md`
+- Real-time collaborative editing — two people editing the same layer simultaneously with
+  live cursors. Concurrent commits are *detected* (409 with the current version), not merged
 - Full planar topology (shared-boundary editing where moving a boundary updates both polygons
   automatically)
 - Automatic gap and sliver removal across a polygon coverage
@@ -246,11 +246,12 @@ failing a kriging job forty minutes later.
 
 ## 5. Persistence
 
-### 5.1 Copy-on-write
+### 5.1 Copy-on-write with optimistic commit
 
-One editor per layer (`adr/0005-single-editor-persistence.md`), so there is no lock to take
-and no conflict to resolve. Features are immutable GeoParquet objects
-(`02-data-model.md` §3.5.1), so an edit does not mutate anything — it writes a new version.
+Features are immutable GeoParquet objects (`02-data-model.md` §3.5.1), so an edit does not
+mutate anything — it writes a new version. Two concurrent editors therefore cannot corrupt
+each other's writes; they produce two separately-named objects and contend only on the pointer.
+See `adr/0005-single-editor-persistence.md` and its amendment.
 
 A flushed batch:
 
@@ -258,12 +259,24 @@ A flushed batch:
 2. Applies the batch's coalesced changes in memory.
 3. Writes `features/ds_<hex>/v<N+1>.parquet`.
 4. Inserts a `dataset_version` row.
-5. Advances `dataset.parquet_key` and `dataset.version` in one transaction.
+5. Advances the pointer, optimistically:
+
+```sql
+UPDATE dataset
+SET parquet_key = :new_key, version = version + 1, updated_at = now()
+WHERE id = :dataset_id AND version = :expected_version
+RETURNING version;
+```
 
 **Step 5 is the commit.** Until the pointer moves, the new object is invisible and a crash
-leaves an orphan that the retention job collects. Readers never see a half-written layer, which
-the previous design achieved only because a row `UPDATE` is atomic — here it falls out of the
-storage model rather than being a property to preserve.
+leaves an orphan that the retention job collects. Readers never see a half-written layer — that
+falls out of the storage model rather than being a property to preserve.
+
+Zero rows means someone else committed while this batch was in flight. The API returns 409 with
+the current version so the client can rebase or show a diff. Never silently overwrite.
+
+This is one row, one column, one comparison per commit — considerably less than a version
+column on every feature and a conflict path per row. The immutable objects do the hard part.
 
 Tile caches key on `(dataset_id, version, z, x, y)` (`06-rendering.md` §7), so advancing the
 pointer invalidates exactly this layer and nothing else. No purge step.
@@ -297,7 +310,7 @@ export class EditBuffer {
 ### 5.3 Never write in place
 
 Editing a dataset sourced from a file share creates a new versioned output. The source file is
-never modified (`03-auth-security.md` §4). A geologist losing a partner-delivered shapefile is
+never modified (`03-auth-security.md` §8). A geologist losing a partner-delivered shapefile is
 unrecoverable, and no editing convenience is worth that risk.
 
 Under copy-on-write this now holds all the way down. Previously the rule protected only the
@@ -393,7 +406,7 @@ editing. Say so plainly rather than degrading silently.
 | Validation rules | pytest, geometry fixtures including known-bad shapes |
 | Snapping correctness | Vitest, synthetic geometries with exact expected snap points |
 | Snap index performance | Benchmark: 50k features, query under 2 ms |
-| Version commit | Integration test: kill the process between steps 3 and 5; assert no orphan is visible and the pointer did not move |
+| Version commit | Integration test: two sessions commit against the same version — one wins, the other gets 409 with the current version. And: kill the process between steps 3 and 5; assert no orphan is visible and the pointer did not move |
 | Undo/redo | Property test — random command sequences, assert `undo(apply(s)) == s` |
 | Edit → render | E2E: edit a fault, re-grid, confirm the surface changed at the fault |
 
