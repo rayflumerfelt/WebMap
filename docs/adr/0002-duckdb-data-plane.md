@@ -82,3 +82,25 @@ Restoring PostGIS is possible but not free — the tile path, the aggregation
 implementations, and the ingest writer would all move back. Trigger to reconsider:
 concurrent multi-writer editing becomes a requirement, which would also reopen
 [[0005-single-editor-persistence]].
+
+---
+
+## Amendment — 2026-09-08
+
+**Status unchanged: Accepted.** The multi-user reversal in
+[[0007-multi-user-directory-sso]] does *not* reopen this decision, and the "would change our
+mind" clause above overstated the risk.
+
+That clause said concurrent multi-writer editing would reopen this, because DuckDB is a
+single-writer engine. That is true of a DuckDB *database file*, and this design does not use
+one. DuckDB is an embedded query engine over immutable GeoParquet on object storage: a request
+opens a connection, reads, and closes. There is no shared mutable DuckDB state, so many
+concurrent readers across many processes are fine.
+
+Write concurrency is handled by Postgres, not DuckDB. Two users editing a layer each write a
+new Parquet object — harmless, since objects are immutable and separately named — and then
+contend on `dataset.version`, which is a single-row `UPDATE`. See the amendment to
+[[0005-single-editor-persistence]].
+
+**Corrected trigger to reconsider:** an operation DuckDB spatial cannot express, or a working
+set large enough that reading Parquet per request stops being viable. Not concurrency.
