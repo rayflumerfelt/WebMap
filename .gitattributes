@@ -1,0 +1,8 @@
+# Normalize line endings. Repo carries shell scripts, Dockerfiles and
+# SQL that break under CRLF; keep LF in the index and in the worktree.
+* text=auto eol=lf
+
+*.png binary
+*.tif binary
+*.grd binary
+*.gpkg binary
