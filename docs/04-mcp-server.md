@@ -1,8 +1,12 @@
 # 04 — MCP Server
 
 Server name: `webmap_mcp` (Python convention `{service}_mcp`).
-Transport: **Streamable HTTP, stateless JSON**, mounted at `/mcp` on the `webmap-api` ASGI app.
+Transport: **stdio**, launched by the Claude client on the user's own workstation.
 Framework: FastMCP (Python SDK).
+
+> **A thin client, not a service.** It runs locally, holds no database connection and no
+> authorization logic, and forwards every call to `webmap-api` over HTTPS carrying the
+> logged-in user's identity. See `adr/0008-local-stdio-mcp.md` and `03-auth-security.md` §4.
 
 ---
 
@@ -11,9 +15,10 @@ Framework: FastMCP (Python SDK).
 **Tool names carry the service prefix.** `webmap_list_datasets`, not `list_datasets`. This
 server will run alongside others; generic names collide and confuse tool selection.
 
-**The MCP layer is a presentation layer.** It calls the same service functions as the REST
-API. It never contains business logic and never talks to the database directly. If you find
-yourself writing domain logic in a tool handler, it belongs in `webmap_core.services`.
+**The MCP layer is a presentation layer.** It calls the REST API and formats the response. It
+never contains business logic, never talks to the database, and never re-implements a
+permission check — it *cannot*, since it runs on the user's own machine. If you find yourself
+writing domain logic in a tool handler, it belongs in `webmap_core.services`, behind the API.
 
 **Responses are shaped for a reader with limited context.** List responses are compact and
 paginated. Detail responses are full. Never return a 5 MB GeoJSON blob into a conversation.
@@ -64,8 +69,9 @@ from uuid import UUID
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from webmap_core import services
-from webmap_core.actor import Actor, local_actor
+import httpx
+
+from webmap_core.settings import settings
 
 mcp = FastMCP(
     name="webmap",
@@ -84,18 +90,27 @@ mcp = FastMCP(
 )
 
 
-def actor_from_context(ctx) -> Actor:
-    """The actor to attribute this call to.
+async def api() -> httpx.AsyncClient:
+    """An HTTP client authenticated as the logged-in Windows user.
 
-    Single-user deployment: resolves to the one local user, tagged with
-    channel='claude' so audit records distinguish agent-initiated work from
-    work done in the SPA. The bearer token is checked by middleware before
-    this runs; it gates access, it does not carry identity.
+    The token comes from the OS credential broker — MSAL/WAM against Entra ID,
+    or SSPI/Kerberos against on-prem AD — so there is no prompt and no stored
+    password. It is the user's own token; this process holds nothing extra.
 
-    This exists so that reintroducing real identity is a change here rather
-    than at every call site. See adr/0001-single-user-deployment.md.
+    There is no fallback and no service account. If acquisition fails, the tool
+    call fails. See 03-auth-security.md §4.
+
+    Every permission decision happens on the other end of this client. Do not
+    add one here — this process runs where the user can edit it.
     """
-    return local_actor(channel="claude")
+    token = await broker.acquire_token_silent(scopes=[settings.api_scope])
+    return httpx.AsyncClient(
+        base_url=settings.api_base_url,          # fixed at install time, §4.5
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-WebMap-Channel": "claude",        # drives actor_channel in audit
+        },
+    )
 ```
 
 ---
@@ -112,23 +127,25 @@ async def webmap_list_datasets(
     ctx,
     project_id: Annotated[UUID | None, Field(
         None, description="Restrict to one project. Omit to list across all "
-                          "projects.")] = None,
+                          "projects the user can access.")] = None,
     kind: Annotated[Literal["vector", "grid", "pointset", "fault_network"] | None,
         Field(None, description="Filter by dataset kind.")] = None,
     limit: Annotated[int, Field(25, ge=1, le=100)] = 25,
     offset: Annotated[int, Field(0, ge=0)] = 0,
     response_format: Literal["markdown", "json"] = "markdown",
 ) -> str:
-    """List registered spatial datasets.
+    """List spatial datasets the user can access.
 
     Returns compact summaries. Call webmap_describe_dataset for full detail
     including attribute schema and value ranges.
     """
-    a = actor_from_context(ctx)
-    page = await services.datasets.list_(
-        a, project_id=project_id, kind=kind, limit=limit, offset=offset
-    )
-    return format_page(page, response_format)
+    async with await api() as client:
+        r = await client.get("/api/v1/datasets", params={
+            "project_id": project_id, "kind": kind,
+            "limit": limit, "offset": offset,
+        })
+        r.raise_for_status()
+    return format_page(r.json(), response_format)
 ```
 
 Markdown response shape — dense, scannable, IDs present but not dominant:
@@ -670,6 +687,8 @@ class DatasetNotFound(WebMapToolError):
 - Validation errors quote the offending value and the constraint.
 - Resource-limit errors name the limit, the offending value, and a value that would work
   (see `10-jobs-async.md` §7).
+- Permission errors name the owner to ask (`03-auth-security.md` §3.2). That turns a dead end
+  into a next step: Claude can tell the geologist exactly who to ask.
 
 ---
 
@@ -703,13 +722,14 @@ selection is invisible without them.
 
 ## 11. Implementation checklist
 
-- [ ] Streamable HTTP transport, stateless JSON
+- [ ] stdio transport; installs and registers itself in the Claude client config
+- [ ] Holds no database connection, no service credential, and no permission logic
 - [ ] All tools prefixed `webmap_`
 - [ ] All tools annotated (readOnly / destructive / idempotent / openWorld)
 - [ ] Every list tool paginates and returns `has_more` / `next_offset` / `total`
 - [ ] Every tool supports `response_format` where it returns data
 - [ ] No business logic in tool handlers — all delegate to `webmap_core.services`
-- [ ] `principal_from_context` used in every handler; no service-account path
+- [ ] Every handler goes through the authenticated API client; no service-account path
 - [ ] Destructive tools require `confirm: true`
 - [ ] Error messages name a next action
 - [ ] Render responses include full metadata and a suggested caption

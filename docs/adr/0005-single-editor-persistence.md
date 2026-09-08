@@ -69,3 +69,38 @@ regular editor, which is the same trigger as
 The E2E test that `09` §9 calls the one that matters most — edit a fault, re-grid,
 confirm the surface changed at the fault — is unaffected and still the highest-value
 test in the editing surface.
+
+---
+
+## Amendment — 2026-09-08
+
+**Copy-on-write is retained. The single-editor assumption is not**, following
+[[0007-multi-user-directory-sso]].
+
+The storage model was the good half of this decision and it survives intact: a flushed batch
+writes a new versioned GeoParquet object, and advancing `dataset.version` is the commit.
+Immutable objects mean two concurrent editors cannot corrupt each other's writes — they
+produce two separate objects.
+
+What returns is **optimistic concurrency on the version pointer**, and only there:
+
+```sql
+UPDATE dataset
+SET parquet_key = :new_key, version = version + 1, updated_at = now()
+WHERE id = :dataset_id AND version = :expected_version
+RETURNING version;
+```
+
+Zero rows means someone else committed while this batch was in flight. The API returns 409
+with the current version so the client can rebase or surface a diff. Never silently overwrite.
+
+This is less machinery than the per-feature optimistic locking this ADR originally removed —
+one row, one column, one comparison per commit, rather than a version column on every feature
+and a conflict path per row. The immutable objects do the hard part.
+
+`EditHistory.onFlushFailed()` covers this case already; it does not need a separate
+`onConflict()`.
+
+**Unchanged:** the retention rule (every version 30 days, then thinned to daily), the 5,000-
+feature viewport working set that keeps rewrites cheap, and the crash-safety property that a
+half-written object is invisible until the pointer moves.

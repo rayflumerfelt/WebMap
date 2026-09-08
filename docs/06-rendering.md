@@ -237,7 +237,7 @@ class RenderSpec:
 async def render(
     pool: BrowserPool, spec: RenderSpec, auth_token: str
 ) -> RenderOutput:
-    validate_style(spec.style)          # 03-auth-security.md §3.1
+    validate_style(spec.style)          # 03-auth-security.md §7.1
     w, h, scale = SIZE_PRESETS[spec.size_preset]
 
     async with pool.context(w, h, scale) as ctx:
@@ -295,7 +295,7 @@ may be incomplete.
 ## 6. Style assembly
 
 Styles are **always assembled server-side** from validated layer references. Client-supplied
-symbology is accepted; client-supplied source URLs are not (`03-auth-security.md` §3.3).
+symbology is accepted; client-supplied source URLs are not (`03-auth-security.md` §7.3).
 
 ```python
 # apps/api/services/style_builder.py

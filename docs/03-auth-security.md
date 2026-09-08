@@ -1,61 +1,424 @@
-# 03 — Data Security
+# 03 — Authentication and Security
 
-> **Scope changed.** This document previously covered OIDC login, an OAuth 2.1
-> authorization server with Dynamic Client Registration, a grant model, row-level
-> security, and end-to-end identity propagation. All of that assumed the multi-user
-> deployment described in `00-overview.md` §4. See `adr/0001-single-user-deployment.md`.
+> **Two things changed since this document was first written**, both recorded in `adr/`.
 >
-> What remains is the part that was never about users: defending against hostile
-> **data**. A partner-supplied shapefile with a crafted layer name, and a style document
-> handed to a headless browser, are exactly as dangerous with one operator as with two
-> hundred.
+> The authorization model is back after a single-user detour — see
+> `adr/0007-multi-user-directory-sso.md`. Deployment is an internal server used by several
+> employees, authenticating against their Windows credentials.
+>
+> `webmap-auth` is **not**. The OAuth 2.1 authorization server with Dynamic Client
+> Registration existed so `claude.ai` could authenticate to a remote MCP server. The MCP
+> server now runs locally on each workstation over stdio, so nothing needs one — see
+> `adr/0008-local-stdio-mcp.md` and §4. That removes what this document previously called
+> the highest schedule risk in the set.
 
 ---
 
 ## 1. Threat model
 
-The actor is a file, not a person. Datasets arrive from partners, vendors, regulators,
-and file shares; nobody authored them with this system in mind, and some were authored
-by someone who was.
+Two classes of threat, and they are unrelated. Conflating them is how one gets neglected.
+
+**Threats from people** — several employees share this system, and not everyone should see
+everything.
 
 | Threat | Vector | Control |
 |---|---|---|
-| SSRF into the local network | Malicious style JSON given to the headless browser | Style validation + request allowlist (§3) |
-| Data exfiltration via render | A style points a source at an internal endpoint; the response appears in the image | Same as above, plus network isolation (§3.3) |
-| Prompt injection via data | Attribute values reach Claude through tool responses | Treat all dataset content as untrusted (§5) |
-| Path traversal | A layer named `../../etc/passwd`, or a crafted share URI | Filename sanitization (§5), share-root confinement (`11` §2.2) |
-| Destructive overwrite | An edit writes back to a partner-delivered source file | Never write in place; versioned outputs (§4) |
-| Accidental data loss | A delete that turns out to have been wrong | Soft delete, 30 days (§4) |
+| User reads data they aren't cleared for | Missing permission check on a service function | Application check + RLS backstop (§3) |
+| Same, via MCP | Claude calls a tool as the wrong identity | Identity propagation, no service account (§5) |
+| Same, via tiles | Unauthenticated tile endpoints | Signed, scoped tile URLs (§6) |
+| Same, via feature objects | Object storage reachable directly | API is the only reader; see `02-data-model.md` §4.1 |
+| Privilege escalation via grants | User grants themselves editor | Grants writable only by object owner (§3.3) |
+| Token theft | Long-lived bearer tokens in browser storage | Short-lived access tokens, refresh in httpOnly cookie |
 
-**Not in the model:** one user reading another's data, privilege escalation, token theft
-between principals, tenant isolation. There is one principal.
+**Threats from data** — datasets arrive from partners, vendors, and regulators. Nobody
+authored them with this system in mind, and some were authored by someone who was. These are
+unchanged by user count and were correct even during the single-user detour.
 
----
-
-## 2. Access
-
-Single operator, internal network or localhost. There is no identity provider, no login
-flow, and no permission model.
-
-- **The SPA** runs against a local session. No OIDC, no refresh-token rotation.
-- **The MCP server** authenticates with a static bearer token read from the local secret
-  store. It is an access gate, not an identity — it says "this caller may use this
-  server," not "this caller is Alice."
-- **Tile and asset endpoints** sit behind the same token, checked by the API. They are
-  never exposed directly.
-- **The render service** receives that token to inject on its own requests (§3.2).
-
-`webmap_core` service functions still take an explicit actor argument. It resolves to the
-single local user today, and it exists so lineage and audit records name someone — and so
-that reintroducing real identity later is a change of implementation rather than of every
-signature. See `adr/0001-single-user-deployment.md` for what that would cost.
-
-**Secrets** come from the local secret store or the environment, never from a file baked
-into an image. `gitleaks` runs in pre-commit (`CLAUDE.md` §11).
+| Threat | Vector | Control |
+|---|---|---|
+| SSRF into the internal network | Malicious style JSON given to the headless browser | Style validation + request allowlist (§7) |
+| Data exfiltration via render | A style points a source at an internal endpoint; the response appears in the image | Same, plus network isolation (§7.3) |
+| Prompt injection via data | Attribute values reach Claude through tool responses | Treat dataset content as untrusted (§9) |
+| Path traversal | A layer named `../../etc/passwd`, or a crafted share URI | Filename sanitization (§9), share-root confinement (`11` §2.2) |
+| Destructive overwrite | An edit writes back to a partner-delivered source file | Never write in place; versioned outputs (§8) |
 
 ---
 
-## 3. SSRF prevention in the render service
+## 2. Human authentication (browser)
+
+Standard OIDC Authorization Code + PKCE against the corporate IdP.
+
+```
+Browser ──▶ /auth/login ──▶ IdP ──▶ /auth/callback ──▶ session cookie
+```
+
+- Access token: JWT, 15 min lifetime, held in memory by the SPA.
+- Refresh token: httpOnly, Secure, SameSite=Lax cookie. Never readable by JS.
+- Group claims map to `team.idp_group_id`. Team membership is synced on every login —
+  the directory is the source of truth, `team_member` is a cache.
+
+```python
+# apps/api/auth/oidc.py
+
+from authlib.integrations.starlette_client import OAuth
+from webmap_core.settings import settings
+
+oauth = OAuth()
+oauth.register(
+    name="corp",
+    server_metadata_url=settings.oidc_discovery_url,
+    client_id=settings.oidc_client_id,
+    client_secret=settings.oidc_client_secret,
+    client_kwargs={"scope": "openid profile email groups"},
+)
+
+
+async def sync_user_from_claims(db, claims: dict) -> AppUser:
+    """Upsert user and reconcile team membership from directory groups.
+
+    The directory is authoritative. A user removed from a group in the IdP
+    loses team access on their next login — do not require manual cleanup.
+    """
+    user = await upsert_user(
+        db,
+        subject=claims["sub"],
+        email=claims["email"],
+        display_name=claims.get("name", claims["email"]),
+    )
+    group_ids = claims.get("groups", [])
+    await reconcile_team_membership(db, user.id, group_ids)
+    return user
+```
+
+---
+
+## 3. Authorization
+
+### 3.1 Two layers, both required
+
+1. **Application layer** — an explicit permission check in the service function. This is where
+   good error messages come from.
+2. **Row-level security** — a database backstop. Makes the failure mode "no rows" instead of
+   "wrong user's rows" when someone forgets layer 1.
+
+Never rely on only one. RLS alone gives unhelpful 404s; application checks alone fail open on
+the one query someone forgets.
+
+### 3.2 Permission resolution
+
+```python
+# python/webmap_core/permissions.py
+
+from enum import IntEnum
+from uuid import UUID
+
+
+class Permission(IntEnum):
+    """Ordered so comparisons work: OWNER > EDITOR > VIEWER > NONE."""
+    NONE = 0
+    VIEWER = 1
+    EDITOR = 2
+    OWNER = 3
+
+
+class Principal:
+    """The authenticated actor. Constructed once per request, never mutated."""
+
+    def __init__(self, user_id: UUID, team_ids: frozenset[UUID], channel: str):
+        self.user_id = user_id
+        self.team_ids = team_ids
+        self.channel = channel  # 'web' | 'claude'
+
+
+async def effective_permission(db, principal: Principal, obj) -> Permission:
+    if obj.owner_user_id == principal.user_id:
+        return Permission.OWNER
+
+    grant_role = await lookup_grant(db, obj, principal)
+    if grant_role == "editor":
+        return Permission.EDITOR
+
+    base = Permission.NONE
+    if obj.visibility == "org":
+        base = Permission.VIEWER
+    elif obj.visibility == "team" and obj.owner_team_id in principal.team_ids:
+        base = Permission.VIEWER
+
+    if grant_role == "viewer":
+        base = max(base, Permission.VIEWER)
+    return base
+
+
+async def require(db, principal: Principal, obj, level: Permission) -> None:
+    actual = await effective_permission(db, principal, obj)
+    if actual < level:
+        raise PermissionDenied(
+            f"You have {actual.name.lower()} access to "
+            f"'{getattr(obj, 'name', obj.id)}' but {level.name.lower()} is required. "
+            f"Ask {await owner_display_name(db, obj)} to grant access."
+        )
+```
+
+The error message names the owner. Claude can then tell the geologist exactly who to ask,
+which turns a dead end into a next step.
+
+### 3.3 Grant rules
+
+- Only an object's **owner** may create or revoke grants on it.
+- A grant can widen access, never narrow it. There is no "deny" grant.
+- Granting `editor` on a dataset does **not** grant permission to delete it. Delete is
+  owner-only.
+- Transferring ownership is an explicit operation, audited.
+
+### 3.4 Setting RLS context
+
+```python
+# apps/api/db/session.py
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def principal_session(engine, principal: Principal):
+    """Every DB session used to serve a request must go through this.
+
+    Direct engine.connect() outside this helper is a lint error — see CLAUDE.md.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("SELECT set_config('webmap.user_id', :uid, true)"),
+            {"uid": str(principal.user_id)},
+        )
+        await conn.execute(
+            text("SELECT set_config('webmap.team_ids', :tids, true)"),
+            {"tids": "{" + ",".join(str(t) for t in principal.team_ids) + "}"},
+        )
+        yield conn
+```
+
+`set_config(..., true)` makes it transaction-local, so it cannot leak across pooled
+connections. Using `SET` without the local flag is a serious bug — verify in review.
+
+### 3.5 Startup assertion
+
+```python
+async def assert_rls_enforced(engine) -> None:
+    """Fail loudly at boot if the app role can bypass RLS."""
+    async with engine.connect() as conn:
+        row = await conn.execute(text(
+            "SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user"
+        ))
+        if row.scalar():
+            raise RuntimeError(
+                "Application DB role has BYPASSRLS. All row-level security is "
+                "inert. Refusing to start."
+            )
+```
+
+---
+
+## 4. MCP authentication
+
+### 4.1 There is no OAuth flow
+
+The MCP server runs **locally on each geologist's workstation, over stdio**, and is a thin
+client of `webmap-api`. See `adr/0008-local-stdio-mcp.md`.
+
+```
+workstation                              internal server
+┌─────────────────────────┐              ┌──────────────────────┐
+│ Claude Code / Desktop   │              │  webmap-api          │
+│         │ stdio         │   HTTPS +    │  - enforces authz    │
+│         ▼               │   user's     │  - owns the database │
+│ webmap-mcp (local)      │──identity───▶│  - RLS backstop      │
+│  - no DB connection     │              └──────────────────────┘
+│  - no authz logic       │
+└─────────────────────────┘
+```
+
+Remote MCP servers authenticate with OAuth 2.1 and the specification expects Dynamic Client
+Registration, which Entra ID, Okta and Ping do not expose by default. That requirement is what
+made a bespoke authorization server necessary. Moving the server onto the workstation removes
+the requirement rather than solving it.
+
+### 4.2 The local server is trusted with nothing
+
+It runs where the user can read and modify it. Therefore:
+
+- **No database connection.** It speaks HTTPS to `webmap-api` and nothing else.
+- **No service credential.** Nothing it holds grants more than the user already has.
+- **No permission logic.** Every check happens at the API, against the live grant model.
+- **No secret worth stealing.** Tokens are acquired per-session from the OS credential broker
+  and are the user's own.
+
+> A local MCP process that enforces a permission check is a bug, not a defence. The user owns
+> that process. Treat every request arriving at `webmap-api` from it as if the user typed it
+> by hand — because they can.
+
+### 4.3 Acquiring the user's identity
+
+With **Entra ID** (expected): MSAL's Windows broker (WAM) obtains a token silently for the
+logged-in Windows account. No prompt, no stored password, no device-code dance.
+
+With **on-prem Active Directory** (fallback): `httpx-gssapi` over SSPI obtains a Kerberos
+ticket for the API's SPN using the logged-in user's credentials.
+
+Either way the geologist sees nothing — they open Claude and the tools work — and
+`webmap-api` receives a verifiable assertion of who is calling.
+
+### 4.4 Token requirements
+
+- **Audience-bound.** Tokens must carry `aud` naming the WebMap API. Reject tokens issued for
+  anything else, so a token stolen from another service cannot be replayed here.
+- **Short-lived.** 30 minutes, with silent renewal through the broker.
+- **Carry identity, not privilege.** The token says who the user is. What they may do is
+  resolved per request against the live grant model, so revoking access takes effect
+  immediately rather than at token expiry.
+
+### 4.5 Environment guardrail
+
+The local server points at exactly one API base URL, configured per install. A development
+install points at localhost; a production install points at the internal server. Never make
+the target switchable at runtime — a tool call that deletes a dataset does not care which
+environment it landed in.
+
+---
+
+## 5. Identity propagation
+
+**The single most important control in this document.**
+
+When Claude calls `webmap_list_datasets`, the query must execute as the requesting geologist.
+If any part of the chain uses a service account, you have built a system where any user can
+ask Claude for data they are not cleared to see, and the audit log will show a service
+principal instead of a person.
+
+```
+Claude → stdio → webmap-mcp (local, on the user's workstation)
+       → HTTPS + the user's OS-brokered token → webmap-api
+       → Principal(user_id, team_ids, channel='claude')
+       → principal_session(engine, principal)   # RLS context set
+       → service function with explicit permission check
+       → worker job carrying requested_by=user_id
+       → render service with a render-scoped token carrying that identity
+```
+
+Note where the chain begins. The local MCP server asserts nothing — it forwards a token the
+OS broker issued for the logged-in Windows account, and `webmap-api` verifies it. A local
+process cannot be a link in a trust chain (§4.2); it is a client of one.
+
+### 5.1 Workers must carry identity
+
+Jobs run asynchronously, after the request is gone. The identity must travel with the job
+payload.
+
+```python
+# apps/worker/tasks/base.py
+
+from dataclasses import dataclass
+from uuid import UUID
+
+
+@dataclass(frozen=True)
+class JobContext:
+    """Every job payload embeds this. There is no such thing as an
+    anonymous job in this system."""
+    job_id: UUID
+    requested_by: UUID
+    team_ids: frozenset[UUID]
+
+    def principal(self) -> Principal:
+        return Principal(self.requested_by, self.team_ids, channel="worker")
+
+
+async def run_with_identity(ctx: JobContext, fn, *args, **kwargs):
+    async with principal_session(engine, ctx.principal()) as conn:
+        return await fn(conn, *args, **kwargs)
+```
+
+> A job that resolves datasets without a `JobContext` is a security bug, not a style issue.
+> Reject in review.
+
+---
+
+## 6. Tile and asset authorization
+
+Tile endpoints are hit thousands of times during a single pan. The temptation to leave them
+open for performance is exactly how data leaks.
+
+**Approach: short-TTL signed URLs, minted by the API after a permission check.**
+
+```python
+# python/webmap_core/signing.py
+
+import hmac, hashlib, time, base64
+from uuid import UUID
+
+
+def mint_tile_token(
+    dataset_id: UUID, user_id: UUID, ttl_seconds: int = 900, secret: bytes = ...
+) -> str:
+    """Scope: one dataset, one user, 15 minutes.
+
+    Not a general-purpose token. A token for dataset A cannot fetch dataset B,
+    so a leaked tile URL exposes exactly one already-authorized layer.
+    """
+    expires = int(time.time()) + ttl_seconds
+    payload = f"{dataset_id}:{user_id}:{expires}"
+    sig = hmac.new(secret, payload.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(f"{payload}:{sig.hex()}".encode()).decode()
+
+
+def verify_tile_token(token: str, dataset_id: UUID, secret: bytes) -> UUID:
+    """Returns the user_id, or raises. Constant-time comparison."""
+    raw = base64.urlsafe_b64decode(token).decode()
+    ds, uid, expires, sig_hex = raw.rsplit(":", 3)
+    if UUID(ds) != dataset_id:
+        raise InvalidToken("Token is not valid for this dataset")
+    if int(expires) < time.time():
+        raise InvalidToken("Token expired")
+    expected = hmac.new(secret, f"{ds}:{uid}:{expires}".encode(), hashlib.sha256)
+    if not hmac.compare_digest(bytes.fromhex(sig_hex), expected.digest()):
+        raise InvalidToken("Signature mismatch")
+    return UUID(uid)
+```
+
+Martin and TiTiler sit behind an auth proxy in `webmap-api` that verifies the token before
+forwarding. Neither is exposed directly.
+
+### 6.1 The render service
+
+`mint_tile_token` scopes a token to **one dataset and one user**, which is right for the
+browser — a leaked tile URL exposes exactly one already-authorized layer — but wrong for a
+render, which is multi-layer by definition. One token cannot fetch three layers.
+
+So the render path does not use signed per-dataset URLs. `webmap-render` runs inside the trust
+boundary and is issued a short-lived **render-scoped token** carrying the requesting user's
+identity:
+
+```python
+{
+  "sub":       str(user_id),
+  "teams":     [str(t) for t in team_ids],
+  "render_id": str(render_id),
+  "aud":       "webmap-tiles",
+  "iss":       "webmap-api",
+  "exp":       now + 300,        # renders finish in under 5 s (06 §11)
+}
+```
+
+The tile proxy accepts either credential. For a signed per-dataset token it authorizes that
+dataset directly; for a render token it builds a `Principal` and runs the ordinary
+`require(..., Permission.VIEWER)` check per dataset. **One authorization code path, not two** —
+which is what §3.1 asks for, and it means a render can never reach a layer its requester
+cannot, even if style assembly has a bug.
+
+The token is injected by the Playwright route handler (§7.2) and never enters the page's
+JavaScript context.
+
+---
+
+## 7. SSRF prevention in the render service
 
 **This is the most important section in the document.** A MapLibre style document is a
 structure full of URLs, and we hand it to a browser running inside the network. Without
@@ -64,7 +427,7 @@ service, and the response appears in the rendered image.
 
 **Three layers, all required.**
 
-### 3.1 Style validation before dispatch
+### 7.1 Style validation before dispatch
 
 ```python
 # apps/render/security.py
@@ -111,7 +474,7 @@ def validate_style(style: dict) -> None:
             )
 ```
 
-### 3.2 Request interception in Playwright
+### 7.2 Request interception in Playwright
 
 Defense in depth — catches anything the validator missed, including redirects.
 
@@ -137,7 +500,7 @@ The token is injected here, in the route handler's closure. It is **not** passed
 page's JavaScript context — the shell has no need for it, and putting it there would
 expose it to any script the style manages to load.
 
-### 3.3 Network isolation
+### 7.3 Network isolation
 
 Render workers run in a network segment with egress permitted only to the tile, glyph,
 sprite, and object-storage services. Not the database. Not the API. Not the internet.
@@ -148,7 +511,7 @@ Client-supplied *symbology* is accepted; client-supplied *source URLs* are not.
 
 ---
 
-## 4. Destructive operation safety
+## 8. Destructive operation safety
 
 - **Never write in place.** Editing a dataset sourced from a file share creates a new
   versioned output; the source is never modified. This is non-negotiable — a geologist
@@ -166,7 +529,7 @@ working copy too, not only for the upstream source file.
 
 ---
 
-## 5. Treating dataset content as untrusted
+## 9. Treating dataset content as untrusted
 
 Dataset attribute values, layer names, and file contents come from shapefiles authored
 elsewhere. They reach Claude through tool responses.
@@ -184,35 +547,63 @@ one of them asserts on the *error message*, not just the failure.
 
 ---
 
-## 6. Provenance and audit
-
-Audit exists here for provenance — answering "how did this dataset come to exist, and what
-produced it" — rather than for compliance. Records are written for:
-
-- Dataset create, update, delete
-- Export and download
-- Job submission and completion
-- Render creation
-
-Records carry `actor_channel`, distinguishing `web` from `claude`, so "what did Claude do
-on my behalf" stays answerable. That question is still worth answering with one user; it is
-the difference between a map you made and a map an agent made for you.
-
-Retention follows the soft-delete window: keep indefinitely for datasets that still exist,
-and until the lineage chain is purged otherwise. Lineage records (`02-data-model.md` §3.10)
-are the durable provenance artifact; the audit log is the activity trail.
 
 ---
 
-## 7. Checklist before running against real data
+## 10. Audit requirements
 
+Every one of these emits an `audit_event` (`02-data-model.md` §3.12):
+
+- Authentication (success and failure)
+- Dataset read via MCP (not via tiles — too high volume)
+- Dataset create, update, delete
+- Grant create and revoke
+- Ownership transfer
+- Export and download
+- Render creation
+- Job submission
+
+Records carry `actor_channel` distinguishing `web` from `claude`, so "what did Claude do on my
+behalf" is answerable — which matters more with several users than it did with one, because
+the answer now also identifies *whose* Claude.
+
+Retention: 2 years minimum. Confirm against corporate policy before launch.
+
+---
+
+## 11. Security checklist before production
+
+**Identity and authorization**
+
+- [ ] App DB role lacks `BYPASSRLS`; startup assertion in place
+- [ ] RLS policies exist on every ownable table
+- [ ] `set_config(..., true)` used everywhere (transaction-local)
+- [ ] No service-account path from MCP to data
+- [ ] The local MCP server holds no database connection and no permission logic
+- [ ] Token audience validation enforced
+- [ ] Every endpoint that reads the data plane has an explicit permission check —
+      RLS does not cover it (`02-data-model.md` §4.1)
+- [ ] Permission logic tested exhaustively: every visibility × grant × role combination
+
+**Tiles and rendering**
+
+- [ ] Tile endpoints unreachable without a valid scoped token
+- [ ] A render token authorizes per dataset through the same `require()` path as the browser
 - [ ] Style validation rejects non-allowlisted hosts
 - [ ] Playwright `page.route` allowlist active and tested with a hostile style fixture
-- [ ] Render workers network-isolated; verified by attempting egress in a test
 - [ ] The auth token is injected in the route handler, never passed into page JS
+- [ ] Render workers network-isolated; verified by attempting egress in a test
+
+**Data**
+
 - [ ] Destructive MCP tools require `confirm: true`
 - [ ] Every `hostile/` fixture in `11` §8 fails with an actionable message
 - [ ] Dataset names sanitized before use in any filesystem path
 - [ ] Delete is soft; lineage survives it
-- [ ] Secrets from the local secret store, never an env file in the image
+
+**Operations**
+
+- [ ] Audit events emitted for all actions in §10
+- [ ] Secrets from the corporate secret manager, never environment files in the image
+- [ ] Separate API base URLs per environment, fixed at install time (§4.5)
 - [ ] `gitleaks` passing in pre-commit

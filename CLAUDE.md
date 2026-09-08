@@ -62,20 +62,18 @@ Violating these produces bugs that are invisible in review and expensive in prod
   is not licence to call it inside a solver — `05-geoprocessing.md` §2.2 names the only two
   legitimate callers.
 
-### 3.2 Provenance
+### 3.2 Identity
 
-Single-user deployment — there is no permission model to enforce. See
-`docs/adr/0001-single-user-deployment.md`. What survives is the requirement to know who
-or what produced a thing.
-
-- **Never** write a job payload without an actor. A job whose output cannot be attributed
-  is a provenance hole, and provenance is what makes a map defensible a year later.
-- **Never** drop `actor_channel`. `web` versus `claude` is the difference between a map
-  you made and one an agent made for you.
-- **Never** register a derived dataset without a lineage record. See §3.3.
-- Service functions take an explicit actor argument even though it resolves to one user.
-  Keeping it in the signature is what makes real identity an implementation change later
-  rather than a rewrite of every call site.
+- **Never** create a database session without a `Principal`. Use `principal_session()`.
+- **Never** write a job payload without a `JobContext`. An anonymous job is a security bug.
+- **Never** add a service-account path from MCP to data.
+- `set_config(..., true)` — transaction-local. Without the `true`, RLS context leaks across
+  pooled connections.
+- **Never** put a permission check in `webmap-mcp`. It runs on the user's workstation, where
+  they can edit it — a check there is theatre, and worse, it invites someone to assume the API
+  is already protected. Authorization lives at the API and only at the API.
+  See `docs/adr/0008-local-stdio-mcp.md`.
+- **Never** give the local MCP server a database connection or a service credential.
 
 ### 3.3 Determinism
 
@@ -238,7 +236,7 @@ This application targets workstations (`00-overview.md` §7.1). Write desktop as
 | Code | Requirement |
 |---|---|
 | `webmap_geo` algorithms | Reference comparison + property tests. Highest bar in the repo. |
-| Ingest and file readers | Every `hostile/` fixture, asserting on the error message |
+| Permission logic | Exhaustive: every visibility × grant × role combination |
 | Style compilation | Shared TS/Python vectors, both must pass |
 | File readers | Every `hostile/` fixture, asserting on the error message |
 | MCP tools | Evaluations, plus schema validation |
@@ -290,8 +288,8 @@ Notes for both human and AI contributors.
 
 1. Read the relevant spec in `docs/`.
 2. Search for existing implementations. This codebase has deliberate abstractions —
-   `Connector`, `CrsContext`, `AnalysisFrame`, `Symbology`. Use them rather than adding
-   parallel ones.
+   `Connector`, `CrsContext`, `AnalysisFrame`, `Principal`, `Symbology`. Use them rather than
+   adding parallel ones.
 3. Check the package boundary rules. If your change needs a new cross-package import, stop and
    reconsider.
 
@@ -309,7 +307,8 @@ Say so. A wrong guess in geoprocessing produces output that looks plausible and 
 which is worse than no output, because someone will put it in a partner deck.
 
 Specifically escalate rather than guessing on: CRS handling, variogram parameters, fault
-semantics, and anything that changes what a stored grid or lineage record means.
+semantics, permission edge cases, anything touching identity propagation, and anything
+that changes what a stored grid or lineage record means.
 
 ### 7.4 Verification before completion
 
@@ -352,6 +351,15 @@ raise MissingCRS(
 
 # Bad
 raise ValueError("No CRS")
+```
+
+For permission errors, name the owner so the conversation can continue:
+
+```python
+raise PermissionDenied(
+    f"You have viewer access to '{obj.name}' but editor is required. "
+    f"Ask {owner_name} to grant edit access."
+)
 ```
 
 For resource limits, name the limit and the offending value so the caller knows what to
@@ -574,7 +582,7 @@ Terms that appear throughout and are not general software vocabulary.
 | Need | Location |
 |---|---|
 | Entity model, DDL | `docs/02-data-model.md` |
-| Ownership and actor | `python/webmap_core/actor.py` |
+| Permission logic | `python/webmap_core/permissions.py` |
 | CRS handling | `python/webmap_core/crs.py` |
 | Interpolation | `python/webmap_geo/interpolate/` |
 | Style compilation | `packages/style-model/` and `python/webmap_core/style/` |

@@ -3,12 +3,13 @@
 Six phases. Each has a demoable outcome and explicit acceptance criteria. A phase is not
 complete until every criterion passes.
 
-Estimates assume a solo build with AI assistance. Treat them as relative weights, not
+Estimates assume a small team with AI assistance. Treat them as relative weights, not
 commitments — the ordering is the part worth defending.
 
-Phase 1 was "Identity and data plane" at 4–6 weeks. `adr/0001-single-user-deployment.md`
-removed the identity half; what is left is about a week, and the project's largest identified
-schedule risk went with it.
+Phase 1 is shorter than originally planned, but not for the reason a previous revision of this
+document gave. The identity work is real and is back (`adr/0007-multi-user-directory-sso.md`).
+What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registration — because
+`adr/0008-local-stdio-mcp.md` removes the requirement for one rather than solving it.
 
 ---
 
@@ -39,33 +40,46 @@ Scaffolding. Boring, and skipping it costs triple later.
 
 ---
 
-## Phase 1 — Data plane (~1 week)
+## Phase 1 — Identity and data plane (2–3 weeks)
 
-Previously "Identity and data plane," at 4–6 weeks. The identity half is gone — see
-`adr/0001-single-user-deployment.md`. What remains is getting real data into the system,
-which was always the part Phase 2 actually needed.
+**Auth starts here, not later.** Identity propagation touches every service, every query, and
+every job payload; retrofitting it means rewriting all of them.
+
+The original plan put 4–6 weeks here, most of it building `webmap-auth`. That is gone —
+`adr/0008-local-stdio-mcp.md` removes the requirement for an authorization server rather than
+solving it, which takes the largest schedule risk in the project off the board.
 
 **Deliverables**
 
+- OIDC login against the corporate IdP; team sync from group claims
+- Permission model, RLS policies on all ownable tables, startup assertion
+- Local MCP server: stdio, OS-brokered token acquisition, packaged install
 - Dataset registry with the upload connector
 - Vector read for shapefile, GeoJSON, GeoPackage, CSV/XYZ
 - Ingest pipeline with validation, normalization, and warnings
-- REST CRUD for projects and datasets
-- Static bearer token on the API and MCP endpoints
-- Audit and lineage records written on ingest
+- REST CRUD for projects, datasets, grants
+- Audit logging
 
 **Acceptance**
 
+- [ ] A geologist logs in via SSO and lands with the correct team memberships
 - [ ] Uploading a shapefile with a `.prj` registers a dataset with correct CRS and bbox
 - [ ] Uploading a shapefile *without* a `.prj` fails with the message from `11-file-io.md` §3
+- [ ] User A cannot read User B's private dataset — verified at both application and RLS layer
+- [ ] The app DB role lacks `BYPASSRLS`; the assertion fires when it is granted
+- [ ] Every endpoint reading the data plane has an explicit permission check — RLS does not
+      cover object storage (`02-data-model.md` §4.1)
+- [ ] The local MCP server acquires a token silently and calls an authenticated tool, with no
+      prompt and no stored password
+- [ ] MCP calls execute as the requesting user (verify: two users, different results)
+- [ ] The local MCP server holds no database connection and no permission logic — verified by
+      inspection, and by confirming it still works with the database firewalled from it
 - [ ] All hostile fixtures from `11-file-io.md` §8 fail with actionable messages
-- [ ] An ingested dataset carries a lineage record naming its source and actor
-- [ ] A request without the bearer token is rejected on both the REST and MCP surfaces
-- [ ] Claude calls an authenticated tool end to end
 
-**Risk.** Low, now. The previous risk here — DCR brokering blocked by corporate security
-policy — was the largest in the project and no longer exists. The remaining variance is in
-file I/O breadth, which `11-file-io.md` §8 makes testable up front.
+**Risk.** Which directory backs the Windows credentials. Entra ID gives plain OIDC and silent
+token acquisition through MSAL's broker; pure on-prem AD means Kerberos for the browser and
+SSPI for the local process, and a keytab and SPN registration for the API. Confirm in week 1 —
+the fallback path is well-trodden but it is not the same week of work.
 
 ---
 
@@ -89,14 +103,14 @@ First phase with something a geologist recognizes.
 **Acceptance**
 
 - [ ] A 500k-feature layer pans and zooms at 30+ fps
-- [ ] Tile requests without the API token return 403
+- [ ] Tile requests without a valid scoped token return 403
 - [ ] TypeScript and Python compilers produce identical Style JSON for every test vector
 - [ ] A session saved in the browser reloads with identical appearance
 - [ ] Scale bar is correct at three latitudes spanning the working area
 - [ ] Layer reorder, visibility, and opacity persist across reload
 - [ ] At 1920×1080, layer tree + symbology + attribute table are all usable without
       occluding the map
-- [ ] Panel widths and collapsed state persist across sessions
+- [ ] Panel widths and collapsed state persist per user across sessions
 - [ ] Below 1280 px the app shows the minimum-width notice rather than reflowing
 - [ ] Status bar shows analysis CRS, live cursor coordinates in that CRS, and map scale
 - [ ] Every documented keyboard shortcut works; every context menu is reachable via
@@ -126,8 +140,8 @@ The point of the project.
 - [ ] A hostile style referencing an internal host is rejected before dispatch
 - [ ] `page.route` blocks a redirect to a non-allowlisted host (test with a fixture)
 - [ ] Render workers cannot reach the database or the internet (verify by attempting egress)
-- [ ] `webmap_open_session` produces a link that loads the session, and a link to a deleted
-      or expired session fails with a message naming what happened
+- [ ] `webmap_open_session` produces a link that loads correctly for the same user, and shows
+      a helpful permission error for a different user
 - [ ] All 10 evaluations pass
 - [ ] Legends appear correctly in rendered output, matching the interactive legend
 
@@ -197,7 +211,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - Terra Draw integration, vertex editing
 - Snapping with spatial index
 - Geometry validation, blocking on errors
-- Copy-on-write version commit; version history browser
+- Copy-on-write version commit with 409 conflict detection; version history browser
 - Undo/redo
 - Attribute editing
 
@@ -237,7 +251,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - [ ] `webmap_suggest_maps` proposes sensible products for the seed dataset
 - [ ] All performance targets met
 - [ ] Keyboard navigation reaches every control; focus is always visible
-- [ ] Checklist in `03-auth-security.md` §7 fully green
+- [ ] Security checklist in `03-auth-security.md` §11 fully green
 
 ---
 
@@ -261,8 +275,8 @@ Not scheduled. Revisit only with a stated trigger.
 
 | Item | Trigger to reconsider |
 |---|---|
-| Multi-user access: accounts, permissions, sharing by grant | A second regular user (`adr/0001`) |
-| Concurrent editing of the same layer | A second regular editor — reopens `adr/0002` too, since DuckDB is single-writer (`adr/0005`) |
+| Real-time collaborative editing | Sustained demand; concurrent commits are already detected, just not merged (`adr/0005`) |
+| Remote MCP endpoint | Access needed from outside the domain, or enough users that per-workstation install is a burden (`adr/0008`) |
 | MapLibre Native renderer | Render throughput > 100/min, or container size becomes an operational blocker |
 | Full planar topology | Coverage editing becomes a primary workflow |
 | PostGIS for the data plane | An operation DuckDB spatial cannot express, or concurrent writers (`adr/0002`) |
@@ -274,7 +288,7 @@ Not scheduled. Revisit only with a stated trigger.
 
 ## Sequencing rationale
 
-One ordering that might look wrong and is deliberate.
+Two orderings that might look wrong and are deliberate.
 
 **Claude integration before gridding.** Phase 3 renders existing data; it does not need
 kriging. Getting Claude end-to-end early validates the riskiest architectural assumption in the
@@ -282,12 +296,12 @@ project — that the conversational interface is actually good — while there i
 change course. Building six months of geoprocessing first and discovering the interaction model
 is wrong would be the expensive failure.
 
-This was previously one of two arguments; "auth before display" is gone with the auth. That
-makes this one carry more weight, not less — there is now nothing else forcing the order, so
-the temptation to start on kriging because it is the interesting part is unopposed by anything
-except this paragraph.
+**Auth before display.** Tempting to build a pretty map first and bolt on auth later. Do not.
+Identity propagation touches every service, every query, and every job payload. Retrofitting it
+means rewriting all of them, and the version that ships without it will leak data between
+colleagues who were never meant to see each other's work.
 
-**A note on Phase 4.** It is untouched by the single-user revisions and remains the longest
-phase and the differentiator. Nothing in `adr/0001` through `adr/0006` makes fault-constrained
-interpolation easier or shorter. Do not let the newly cheap Phase 1 create the impression that
-the whole plan compressed.
+**A note on Phase 4.** It is untouched by every architectural revision so far and remains the
+longest phase and the differentiator. Nothing in `adr/0001` through `adr/0008` makes
+fault-constrained interpolation easier or shorter. Do not let a cheaper Phase 1 create the
+impression that the whole plan compressed.
