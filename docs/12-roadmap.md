@@ -189,7 +189,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - Terra Draw integration, vertex editing
 - Snapping with spatial index
 - Geometry validation, blocking on errors
-- Optimistic locking, conflict UI
+- Copy-on-write version commit; version history browser
 - Undo/redo
 - Attribute editing
 
@@ -201,8 +201,6 @@ the first lever; reducing default `n_neighbors` is the second.
 - [ ] Snapping lands within tolerance on vertices, edges, and intersections, with visual
       feedback
 - [ ] Snap index query completes in under 2 ms with 50k features in view
-- [ ] Concurrent edits from two sessions produce a 409 with a usable diff, never a silent
-      overwrite
 - [ ] A polygon digitized against an existing boundary with snapping on produces no sliver
 - [ ] Editing a fault and re-gridding produces a surface reflecting the new geometry
 - [ ] Undo restores exact prior state across 20 random operation sequences

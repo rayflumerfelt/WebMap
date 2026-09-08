@@ -17,11 +17,12 @@ Editing gets hard fast, and the hard parts are snapping and topology, not drawin
 - Attribute editing
 - Geometry validation with actionable errors
 - Undo/redo
-- Optimistic locking with conflict detection
+- Copy-on-write versioning, with every prior version addressable
 
 **Deferred, deliberately:**
 
-- Real-time collaborative editing on the same layer
+- Concurrent editing of the same layer, real-time or otherwise. One editor per layer —
+  see `adr/0005-single-editor-persistence.md`
 - Full planar topology (shared-boundary editing where moving a boundary updates both polygons
   automatically)
 - Automatic gap and sliver removal across a polygon coverage
@@ -245,21 +246,30 @@ failing a kriging job forty minutes later.
 
 ## 5. Persistence
 
-### 5.1 Optimistic locking
+### 5.1 Copy-on-write
 
-```sql
-UPDATE feat.ds_9f3a...
-SET geom = ST_GeomFromGeoJSON(:geom),
-    props = :props,
-    version = version + 1,
-    updated_at = now(),
-    updated_by = :user_id
-WHERE id = :feature_id AND version = :expected_version
-RETURNING version;
-```
+One editor per layer (`adr/0005-single-editor-persistence.md`), so there is no lock to take
+and no conflict to resolve. Features are immutable GeoParquet objects
+(`02-data-model.md` §3.5.1), so an edit does not mutate anything — it writes a new version.
 
-Zero rows means someone else changed it. The API returns 409 with the current server state so
-the client can show a diff and let the user choose. Never silently overwrite.
+A flushed batch:
+
+1. Reads the current version's Parquet object.
+2. Applies the batch's coalesced changes in memory.
+3. Writes `features/ds_<hex>/v<N+1>.parquet`.
+4. Inserts a `dataset_version` row.
+5. Advances `dataset.parquet_key` and `dataset.version` in one transaction.
+
+**Step 5 is the commit.** Until the pointer moves, the new object is invisible and a crash
+leaves an orphan that the retention job collects. Readers never see a half-written layer, which
+the previous design achieved only because a row `UPDATE` is atomic — here it falls out of the
+storage model rather than being a property to preserve.
+
+Tile caches key on `(dataset_id, version, z, x, y)` (`06-rendering.md` §7), so advancing the
+pointer invalidates exactly this layer and nothing else. No purge step.
+
+The whole-object rewrite is why the viewport working set in §8 matters: edits apply to a
+bounded extract, capped at 5,000 features, and only that extract is rewritten.
 
 ### 5.2 Edit batching
 
@@ -287,8 +297,16 @@ export class EditBuffer {
 ### 5.3 Never write in place
 
 Editing a dataset sourced from a file share creates a new versioned output. The source file is
-never modified (`03-auth-security.md` §8). A geologist losing a partner-delivered shapefile is
+never modified (`03-auth-security.md` §4). A geologist losing a partner-delivered shapefile is
 unrecoverable, and no editing convenience is worth that risk.
+
+Under copy-on-write this now holds all the way down. Previously the rule protected only the
+*upstream* file while the working copy in the database was mutated freely; there is no mutable
+working copy any more.
+
+**Retention.** Every version for 30 days, matching the soft-delete window, then thinned to
+daily. Storage grows with edit count — that is the cost of this model, and it needs a
+scheduled job. `10-jobs-async.md` §3 has the cron slot.
 
 ---
 
@@ -296,6 +314,10 @@ unrecoverable, and no editing convenience is worth that risk.
 
 Command pattern. The unit is the flushed batch, so undo restores a state the user recognises
 rather than an intermediate drag position.
+
+Undo has a durable counterpart here: the prior version is a real object, not a state
+reconstructed by inverting commands. An undo past the in-memory history can fall back to
+re-pointing `dataset.version`.
 
 ```typescript
 export interface EditCommand {
@@ -309,9 +331,10 @@ export class EditHistory {
   private redoStack: EditCommand[] = [];
   private readonly limit = 50;
 
-  /** Server-side conflict clears the redo stack — replaying forward over
-   *  someone else's change would produce a state nobody authored. */
-  onConflict(): void { this.redoStack = []; }
+  /** A flush that failed leaves the client ahead of the server. Clear redo —
+   *  replaying forward from a state the server never accepted produces a
+   *  layer nobody authored. */
+  onFlushFailed(): void { this.redoStack = []; }
 }
 ```
 
@@ -370,7 +393,7 @@ editing. Say so plainly rather than degrading silently.
 | Validation rules | pytest, geometry fixtures including known-bad shapes |
 | Snapping correctness | Vitest, synthetic geometries with exact expected snap points |
 | Snap index performance | Benchmark: 50k features, query under 2 ms |
-| Optimistic locking | Integration test with two concurrent sessions |
+| Version commit | Integration test: kill the process between steps 3 and 5; assert no orphan is visible and the pointer did not move |
 | Undo/redo | Property test — random command sequences, assert `undo(apply(s)) == s` |
 | Edit → render | E2E: edit a fault, re-grid, confirm the surface changed at the fault |
 
