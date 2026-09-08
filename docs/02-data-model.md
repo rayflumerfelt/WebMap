@@ -98,8 +98,8 @@ change rather than a rewrite of every call site.
 ### 3.1 Extensions and enums
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS postgis_raster;
+-- No PostGIS. Geometry lives in the data plane (GeoParquet + COG on object
+-- storage, queried by DuckDB in-process). See adr/0002-duckdb-data-plane.md.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;      -- gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS pg_trgm;       -- dataset name search
 
@@ -162,7 +162,9 @@ CREATE TABLE project (
     -- Geologists disagree about this constantly; make it explicit per project.
     depth_positive_down BOOLEAN NOT NULL DEFAULT TRUE,
 
-    default_extent  GEOMETRY(Polygon, 4326),
+    -- [west, south, east, north] in EPSG:4326. Four floats, not a geometry —
+    -- the control plane has no PostGIS.
+    default_extent  DOUBLE PRECISION[4],
 
     owner_user_id   UUID NOT NULL REFERENCES app_user(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -195,10 +197,12 @@ CREATE TABLE dataset (
 
     -- Spatial
     storage_srid        INTEGER NOT NULL,
-    bbox_4326           GEOMETRY(Polygon, 4326),
+    bbox_4326           DOUBLE PRECISION[4],    -- [w, s, e, n]
 
-    -- Vector payload
-    feature_table       TEXT,                   -- 'feat.ds_<uuid_hex>'
+    -- Vector payload. Features are versioned GeoParquet objects, not rows;
+    -- parquet_key names the CURRENT version. See §3.5.1 and adr/0005.
+    parquet_key         TEXT,                   -- 'features/ds_<hex>/v<N>.parquet'
+    version             INTEGER NOT NULL DEFAULT 1,
     feature_count       BIGINT,
     attribute_schema    JSONB,                  -- [{name, type, nullable, description}]
 
@@ -220,42 +224,62 @@ CREATE TABLE dataset (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT vector_has_table CHECK (
-        kind NOT IN ('vector','pointset','fault_network') OR feature_table IS NOT NULL),
+    CONSTRAINT vector_has_parquet CHECK (
+        kind NOT IN ('vector','pointset','fault_network') OR parquet_key IS NOT NULL),
     CONSTRAINT grid_has_cog CHECK (
         kind <> 'grid' OR cog_key IS NOT NULL)
 );
 
-CREATE INDEX ON dataset USING GIST (bbox_4326);
 CREATE INDEX ON dataset USING GIN (name gin_trgm_ops);
 CREATE INDEX ON dataset (project_id, kind);
 CREATE INDEX ON dataset (owner_user_id);
 ```
 
-Vector features live in per-dataset tables in the `feat` schema, created dynamically on ingest:
+#### 3.5.1 Feature storage
 
-```sql
-CREATE SCHEMA IF NOT EXISTS feat;
+Vector features are **versioned GeoParquet objects on object storage**, not rows in the
+control plane. `dataset.parquet_key` and `dataset.version` name the current one; advancing
+that pointer is the atomic commit for an edit (`adr/0005-single-editor-persistence.md`).
 
--- Template, instantiated per dataset as feat.ds_<uuid_hex>
-CREATE TABLE feat.ds_TEMPLATE (
-    id          BIGSERIAL PRIMARY KEY,
-    geom        GEOMETRY NOT NULL,             -- typed + SRID-constrained at creation
-    -- 4326 projection for tiling and bbox queries, maintained by PostGIS
-    geom_4326   GEOMETRY GENERATED ALWAYS AS (ST_Transform(geom, 4326)) STORED,
-    props       JSONB NOT NULL DEFAULT '{}'::jsonb,
-    version     INTEGER NOT NULL DEFAULT 1,    -- optimistic locking
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_by  UUID REFERENCES app_user(id)
-);
-CREATE INDEX ON feat.ds_TEMPLATE USING GIST (geom);
-CREATE INDEX ON feat.ds_TEMPLATE USING GIST (geom_4326);
-CREATE INDEX ON feat.ds_TEMPLATE USING GIN (props jsonb_path_ops);
+```
+features/ds_<uuid_hex>/v1.parquet      <- superseded, retained
+features/ds_<uuid_hex>/v2.parquet      <- superseded, retained
+features/ds_<uuid_hex>/v3.parquet      <- dataset.parquet_key, dataset.version = 3
 ```
 
-Rationale for table-per-dataset over one wide features table: independent geometry type and
-SRID constraints, independent indexes and statistics, cheap `DROP TABLE` on delete, and no
-single index hotspot across millions of unrelated features.
+Schema of each object:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INT64` | Stable across versions; the edit identity of a feature |
+| `geometry` | GeoParquet WKB | In the dataset's `storage_srid` |
+| `props` | JSON string | Attribute values |
+| `updated_at` | `TIMESTAMP` | |
+
+GeoParquet metadata carries the CRS, so an object is self-describing — a `.parquet` handed
+to someone else does not need this database to be readable, which is not true of a row in a
+`feat.ds_*` table.
+
+```sql
+CREATE TABLE dataset_version (
+    dataset_id   UUID NOT NULL REFERENCES dataset(id) ON DELETE CASCADE,
+    version      INTEGER NOT NULL,
+    parquet_key  TEXT NOT NULL,
+    feature_count BIGINT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by   UUID REFERENCES app_user(id),
+    PRIMARY KEY (dataset_id, version)
+);
+```
+
+**Retention.** Every version for 30 days, matching the soft-delete window in
+`03-auth-security.md` §4, then thinned to daily. Copy-on-write means storage grows with edit
+count; this is the cost of the model and it needs a scheduled job, not good intentions.
+
+**Why an object per dataset rather than one wide table:** independent geometry type and CRS
+per dataset, cheap delete, no index hotspot across unrelated features — the same reasons the
+previous table-per-dataset design gave — plus DuckDB reads Parquet columnar and predicate-
+pushed, so a tile query touching two columns does not pay for the attribute payload.
 
 ### 3.6 Fault networks
 
@@ -385,7 +409,7 @@ CREATE TABLE render (
 
     -- The exact style used. Reproducibility.
     style_json      JSONB NOT NULL,
-    extent_4326     GEOMETRY(Polygon, 4326) NOT NULL,
+    extent_4326     DOUBLE PRECISION[4] NOT NULL,   -- [w, s, e, n]
 
     -- Everything Claude needs to write a caption without inventing anything.
     metadata        JSONB NOT NULL,

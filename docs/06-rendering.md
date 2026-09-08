@@ -321,7 +321,7 @@ Source construction per dataset kind:
 
 | Kind | Source type | URL |
 |---|---|---|
-| vector, pointset, fault_network | `vector` (MVT) | `{martin}/ds_{hex}/{z}/{x}/{y}` |
+| vector, pointset, fault_network | `vector` (MVT) | `{api}/tiles/{dataset_id}/{z}/{x}/{y}` |
 | grid | `raster` | `{titiler}/cog/tiles/{z}/{x}/{y}?url={cog}&colormap={ramp}&rescale={min},{max}` |
 
 **The COG + TiTiler payoff:** changing a color ramp is a URL parameter change, not a regrid.
@@ -331,35 +331,48 @@ Palette editing feels instant.
 
 ## 7. Vector tiles
 
-Martin serving MVT directly from PostGIS. Dynamic, no build step — which matters because these
-layers are edited.
+MVT is generated **in-process** by the API, from the dataset's current GeoParquet object via
+DuckDB. No tile service, no build step — which still matters, because layers are edited and a
+tile must reflect the current version the moment the version pointer advances.
 
-```sql
--- Function-source per dataset, created on ingest
-CREATE OR REPLACE FUNCTION feat.mvt_ds_TEMPLATE(
-    z integer, x integer, y integer, query_params json
-) RETURNS bytea AS $$
-DECLARE
-    result bytea;
-BEGIN
-    SELECT ST_AsMVT(tile, 'ds_TEMPLATE', 4096, 'geom') INTO result
-    FROM (
-        SELECT
-            id,
-            ST_AsMVTGeom(
-                ST_Transform(geom, 3857),
-                ST_TileEnvelope(z, x, y),
-                4096, 64, true
-            ) AS geom,
-            props
-        FROM feat.ds_TEMPLATE
-        WHERE ST_Transform(geom, 3857) && ST_TileEnvelope(z, x, y)
-    ) AS tile
-    WHERE tile.geom IS NOT NULL;
-    RETURN result;
-END;
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
+```python
+# apps/api/services/tiles.py
+
+TILE_SQL = """
+SELECT ST_AsMVT(t, $layer, 4096, 'geom')
+FROM (
+    SELECT
+        id,
+        ST_AsMVTGeom(
+            ST_Transform(geometry, $storage_srid, 3857),
+            ST_TileEnvelope($z, $x, $y),
+            4096, 64, true
+        ) AS geom,
+        props
+    FROM read_parquet($parquet_key)
+    -- Bbox filter in storage CRS against the back-transformed tile envelope,
+    -- so the Parquet row-group statistics can prune. Filtering on a
+    -- transformed geometry column would read every row group.
+    WHERE bbox.xmin <= $env_xmax AND bbox.xmax >= $env_xmin
+      AND bbox.ymin <= $env_ymax AND bbox.ymax >= $env_ymin
+) AS t
+WHERE t.geom IS NOT NULL
+"""
 ```
+
+Two things carry the performance here, and both were defects in the previous PostGIS design:
+
+- **The filter is on the stored bbox columns, not on a transformed geometry.** GeoParquet
+  writes per-row-group bounding boxes; a predicate over them lets DuckDB skip row groups
+  without decoding them. Wrapping the geometry in `ST_Transform` inside the predicate — which
+  is what the Martin function did — defeats every index and statistic and reads the whole
+  layer per tile.
+- **The tile envelope is transformed once, into storage CRS**, rather than transforming every
+  feature into 3857 before comparing. 3857 → storage is separable and monotonic for the
+  projections in scope, so a corner transform is an exact bound.
+
+Tiles are cached by `(dataset_id, version, z, x, y)`. The version in the key means an edit
+invalidates exactly the layer that changed, and nothing else, with no explicit purge.
 
 ### 7.1 GeoJSON vs MVT
 

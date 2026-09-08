@@ -81,8 +81,8 @@ hostile *data*, not hostile users.
 |---|---|---|
 | Interpolation input | 10k–500k points | Local-neighborhood kriging mandatory; global solve impossible |
 | Output grid | up to 2000×2000 cells | Sparse solve, ~seconds with multigrid |
-| Vector layer display | up to 5M features | Dynamic MVT from PostGIS, not GeoJSON |
-| Concurrent users | ~30 peak | Modest; horizontal scaling on render and job workers |
+| Vector layer display | up to 5M features | MVT from GeoParquet via DuckDB, not GeoJSON |
+| Concurrent users | 1 | Single operator; no contention to design around |
 | Render latency | < 5 s p95 | Warm browser pool |
 | Grid job latency | < 3 min p95 | Async job queue with progress |
 
@@ -90,12 +90,15 @@ hostile *data*, not hostile users.
 
 Detail in `01-architecture.md`. In one paragraph:
 
-React/Mantine frontend with MapLibre GL JS. FastAPI backend on PostGIS. Separate worker pools
-for geoprocessing (`arq`) and rendering (Playwright + headless Chromium running real MapLibre
-GL JS). Rasters as Cloud-Optimized GeoTIFF served through TiTiler; vectors as dynamic MVT.
-MapLibre Style JSON is the single source of truth for appearance — the interactive map and the
-headless renderer consume byte-identical style documents. An MCP server exposes the whole thing
-to Claude over Streamable HTTP with OAuth 2.1.
+React/Mantine frontend with MapLibre GL JS. FastAPI backend on PostgreSQL for the control
+plane — registry, sessions, jobs, lineage. Feature geometry and gridded values live in the
+data plane: GeoParquet and Cloud-Optimized GeoTIFF on object storage, queried in-process by
+DuckDB inside the geoprocessing module. Separate workers for geoprocessing (`arq`) and
+rendering (Playwright + headless Chromium running real MapLibre GL JS). Rasters served
+through TiTiler for dynamic colormaps; vectors as MVT generated in-process. MapLibre Style
+JSON is the single source of truth for appearance — the interactive map and the headless
+renderer consume byte-identical style documents. An MCP server exposes the whole thing to
+Claude over Streamable HTTP.
 
 ## 7. Non-goals
 

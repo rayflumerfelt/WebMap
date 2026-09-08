@@ -141,7 +141,7 @@ class PostgisConnector(Connector):
 ### 2.4 Materialization
 
 **Reading shapefiles off a share for every map render will be miserably slow.** Treat all
-external sources as upstream and sync into PostGIS or COG.
+external sources as upstream and sync into GeoParquet or COG.
 
 ```python
 async def sync_dataset(ctx: JobContext, dataset_id: UUID) -> SyncResult:
@@ -381,9 +381,10 @@ async def ingest(ctx: JobContext, source_uri: str, options: IngestOptions) -> UU
     4. read            format-specific reader
     5. validate        CRS present, geometries valid, encoding sane
     6. normalise       ring orientation, drop empty geometries, coerce types
-    7. load            create feat.ds_<hex>, bulk COPY
-    8. index           GIST on geom and geom_4326, GIN on props
-    9. register        dataset row, attribute_schema, bbox, feature_count
+    7. write           GeoParquet v1 to features/ds_<hex>/v1.parquet, sorted
+                       on a Hilbert curve so row-group bboxes are tight
+    8. register        dataset row + dataset_version row, attribute_schema,
+                       bbox, feature_count
    10. caption         generate the one-line description for Claude
    11. audit           emit ingest event
 
@@ -394,19 +395,27 @@ async def ingest(ctx: JobContext, source_uri: str, options: IngestOptions) -> UU
     """
 ```
 
-### 6.1 Bulk loading
+### 6.1 Writing the Parquet object
 
 ```python
-async def bulk_load(conn, table: str, result: ReadResult, batch: int = 50_000) -> int:
-    """COPY, not INSERT.
+async def write_features(result: ReadResult, key: str) -> int:
+    """Write a GeoParquet object for a dataset version.
 
-    500k features via INSERT is minutes. Via COPY with binary format it is
-    seconds. Build indexes AFTER loading — maintaining a GIST index during
-    a bulk load roughly triples the time.
+    SORT BEFORE WRITING. Parquet prunes by row-group statistics, and the tile
+    query in 06 §7 filters on the bbox columns. Features in file order have
+    row-group bboxes covering the whole layer, so nothing prunes and every
+    tile reads everything. Sorting on a Hilbert index of the centroid makes
+    row groups spatially compact and the pruning actually work — this is the
+    single highest-leverage decision in the ingest path.
+
+    Row group size 128 MB, ZSTD. Larger groups compress better and prune
+    worse; this is the balance point for the tile query at our layer sizes.
     """
 ```
 
----
+Writing is a whole-object operation. There is no incremental append — an edit produces a new
+version (`adr/0005-single-editor-persistence.md`), and the 5,000-feature viewport cap in
+`09-editing.md` §8 is what keeps that cheap.
 
 ## 7. Export
 

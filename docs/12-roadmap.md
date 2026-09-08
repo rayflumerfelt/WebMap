@@ -15,7 +15,7 @@ Scaffolding. Boring, and skipping it costs triple later.
 **Deliverables**
 
 - Monorepo: pnpm + Turborepo, uv workspaces, package boundary lint rules enforced
-- Docker Compose: Postgres+PostGIS, Redis, MinIO, Martin, TiTiler
+- Docker Compose: Postgres, Redis, MinIO, TiTiler
 - Alembic migrations for the full schema in `02-data-model.md`
 - CI: lint, typecheck, test, build on every PR
 - `CLAUDE.md` in place; pre-commit hooks active
@@ -69,7 +69,7 @@ First phase with something a geologist recognizes.
 **Deliverables**
 
 - `@webmap/map` component with the API in `07-frontend.md` §2
-- Martin MVT function-sources; automatic GeoJSON/MVT switching
+- In-process MVT generation from GeoParquet via DuckDB; automatic GeoJSON/MVT switching
 - TiTiler COG serving with dynamic colormaps
 - Auth proxy for tile endpoints with scoped signed tokens
 - Style compilation in both TypeScript and Python, sharing test vectors

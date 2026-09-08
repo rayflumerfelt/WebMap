@@ -14,6 +14,7 @@ separately versionable.
 name = "webmap-geo"
 requires-python = ">=3.12"
 dependencies = [
+    "duckdb>=1.5",         # data plane: GeoParquet reads, spatial ops, MVT
     "numpy>=2.0",
     "scipy>=1.14",
     "shapely>=2.0",

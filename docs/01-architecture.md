@@ -15,21 +15,26 @@
                            │        │        │
               ┌────────────▼──┐  ┌──▼─────┐  └──────────┐
               │  PostgreSQL   │  │ Redis  │             │
-              │  + PostGIS    │  │ (arq)  │             │
-              └───────┬───────┘  └──┬─────┘             │
-                      │             │                   │
-        ┌─────────────┼─────────────┼───────────────────┼──────────┐
-        │             │             │                   │          │
-   ┌────▼─────┐  ┌────▼──────┐ ┌────▼──────┐    ┌───────▼──────┐  │
-   │ Martin   │  │ TiTiler   │ │ webmap-   │    │ webmap-      │  │
-   │ (MVT)    │  │ (COG)     │ │ worker    │    │ render       │  │
-   │          │  │           │ │ (arq)     │    │ (Playwright) │  │
-   └──────────┘  └────┬──────┘ └────┬──────┘    └──────────────┘  │
-                      │             │                              │
-                 ┌────▼─────────────▼──────────────────────────────▼┐
-                 │  Object storage (S3-compatible / MinIO)          │
-                 │  COGs, renders, uploads, exports                 │
-                 └──────────────────────────────────────────────────┘
+              │  (control     │  │ (arq)  │             │
+              │   plane only) │  │        │             │
+              └───────────────┘  └──┬─────┘             │
+                                    │                   │
+              ┌─────────────────────┼───────────────────┼──────────┐
+              │                     │                   │          │
+        ┌─────▼─────┐        ┌──────▼────┐      ┌───────▼──────┐   │
+        │ TiTiler   │        │ webmap-   │      │ webmap-      │   │
+        │ (COG)     │        │ worker    │      │ render       │   │
+        │           │        │ (arq)     │      │ (Playwright) │   │
+        └─────┬─────┘        └─────┬─────┘      └──────────────┘   │
+              │            DuckDB in-process                       │
+              │            (webmap_geo)                            │
+              │                    │                               │
+         ┌────▼────────────────────▼───────────────────────────────▼┐
+         │  Object storage (S3-compatible / MinIO)                  │
+         │  GeoParquet features, COG grids, renders, uploads        │
+         └──────────────────────────────────────────────────────────┘
+
+MVT is generated in-process from DuckDB, by the API. There is no tile service.
 ```
 
 ## 2. Services
@@ -68,17 +73,15 @@ Headless Chromium running real MapLibre GL JS. Produces PNGs from Style JSON.
 Kept as a separate service because the container is ~2 GB and its scaling profile is unlike
 anything else. See `06-rendering.md`.
 
-### 2.5 `martin` — vector tiles
-
-Off-the-shelf. Serves MVT directly from PostGIS via `ST_AsMVT`. Dynamic, no tile build step,
-which matters because layers are edited.
-
-Runs behind `webmap-api`'s auth proxy — never exposed directly.
-
-### 2.6 `titiler` — raster tiles
+### 2.5 `titiler` — raster tiles
 
 Off-the-shelf. Serves COGs with dynamic colormap application. Changing a color ramp is a URL
-parameter change, not a regrid. Also behind the auth proxy.
+parameter change, not a regrid — that is what makes palette editing feel instant. Behind the
+API's auth proxy, never exposed directly.
+
+Vector tiles have no equivalent service. MVT is generated in-process from DuckDB over the
+dataset's GeoParquet object (`06-rendering.md` §7), which keeps the "dynamic, no build step"
+property that matters for edited layers without a second process reading the data plane.
 
 ## 3. Repository layout
 
@@ -98,7 +101,7 @@ webmap/
 │   ├── ui/                        # @webmap/ui — ramp editor, style editor
 │   └── style-model/               # @webmap/style-model — TS types + compilers
 ├── python/                        # Reusable Python
-│   ├── webmap_geo/                # Interpolation, contouring, aggregation
+│   ├── webmap_geo/                # Interpolation, contouring, aggregation, data plane
 │   ├── webmap_io/                 # Format readers/writers, connectors
 │   └── webmap_core/               # Models, services, style compilation
 ├── infra/
@@ -127,8 +130,8 @@ These are enforced, not advisory. See `CLAUDE.md` for the lint configuration.
 It is the highest-value and highest-risk code in the project. Isolating it means:
 
 - It can be tested against reference outputs from Surfer without spinning up a database.
-- Its heavy numeric dependencies (`scipy`, `gstools`, `triangle`, `pyamg`) do not bloat the API
-  container.
+- Its heavy dependencies (`scipy`, `gstools`, `triangle`, `pyamg`, `duckdb`) do not bloat the
+  API container.
 - It can be versioned and pinned independently, so a change to the kriging neighborhood search
   is a deliberate version bump rather than an accidental deploy.
 
@@ -176,17 +179,32 @@ like," and it must be the one the renderer actually consumes.
 **Consequence.** Higher-level style concepts (graduated symbology, classification schemes)
 are *compilers* that emit Style JSON, not parallel representations. See `08-styling-palettes.md`.
 
-### 4.3 PostGIS as the system of record
+### 4.3 Postgres for control, DuckDB and GeoParquet for data
 
-**Decision.** PostgreSQL 16 + PostGIS 3.4. Geometry stored in the dataset's declared storage
-CRS; a generated column holds EPSG:4326 for indexing and tiling.
+**Decision.** Two planes, two engines. See `adr/0002-duckdb-data-plane.md`.
 
-**Rationale.** No Esri footprint means no reason to compromise. PostGIS gives us the spatial
-operations, `ST_AsMVT` for tiling, and row-level security as an authorization backstop.
+- **Control plane — PostgreSQL 16, no PostGIS.** Dataset registry, projects, sessions,
+  palettes, style templates, preferences, jobs, lineage. Small transactional rows. Nothing
+  here is spatial except `dataset.bbox_4326`, which is four floats.
+- **Data plane — DuckDB over GeoParquet and COG on object storage.** Feature geometry,
+  gridded values, tile generation, and the aggregation catalog. DuckDB runs in-process
+  inside `webmap_geo`; it is a library, not a service.
 
-**Alternative considered.** GeoParquet on object storage for very large layers. Deferred —
-add it as a storage backend behind the same dataset abstraction if a layer exceeds ~10M
-features.
+**Rationale.** DuckDB's spatial extension covers what PostGIS was carrying here — verified
+against 1.5.5: `ST_AsMVT`, `ST_AsMVTGeom`, `ST_TileEnvelope`, `ST_Transform`, RTREE indexes,
+and every function in the `05-geoprocessing.md` §7 catalog. The one capability it has no
+answer for is row-level security, and `adr/0001` removed the requirement for it.
+
+Running the data plane in-process is also what makes `adr/0004`'s rule — all geometry
+operations belong to `webmap_geo` — structural rather than aspirational. There is no SQL
+path for a geometry operation to escape through.
+
+**Why Postgres and not SQLite** for the control plane, given how small it is: Alembic against
+SQLite needs batch mode for nearly every `ALTER TABLE`. One small container is cheaper than
+that friction against Phase 0's "migrations apply and roll back cleanly" criterion.
+
+**Would change our mind.** Concurrent multi-writer editing becoming a requirement. DuckDB is
+a single-writer engine, and that would reopen `adr/0005` as well.
 
 ### 4.4 arq for job queuing
 
