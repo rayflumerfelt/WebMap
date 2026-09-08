@@ -498,9 +498,9 @@ export function SessionRoute() {
 }
 ```
 
-`SessionError` must handle the permission case specifically — a geologist following a shared
-link to data they cannot access should see who to ask, matching the message from
-`03-auth-security.md` §3.2.
+`SessionError` handles the cases that remain: a short code that does not resolve, a session
+whose datasets have been deleted, and a session that has expired. There is no permission
+case — see `adr/0001-single-user-deployment.md`.
 
 ---
 

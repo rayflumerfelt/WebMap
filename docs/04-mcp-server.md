@@ -12,9 +12,8 @@ Framework: FastMCP (Python SDK).
 server will run alongside others; generic names collide and confuse tool selection.
 
 **The MCP layer is a presentation layer.** It calls the same service functions as the REST
-API. It never contains business logic, never talks to the database directly, never
-re-implements a permission check. If you find yourself writing domain logic in a tool handler,
-it belongs in `webmap_core.services`.
+API. It never contains business logic and never talks to the database directly. If you find
+yourself writing domain logic in a tool handler, it belongs in `webmap_core.services`.
 
 **Responses are shaped for a reader with limited context.** List responses are compact and
 paginated. Detail responses are full. Never return a 5 MB GeoJSON blob into a conversation.
@@ -66,7 +65,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from webmap_core import services
-from webmap_core.permissions import Principal
+from webmap_core.actor import Actor, local_actor
 
 mcp = FastMCP(
     name="webmap",
@@ -85,18 +84,18 @@ mcp = FastMCP(
 )
 
 
-def principal_from_context(ctx) -> Principal:
-    """Extract the authenticated user from the validated bearer token.
+def actor_from_context(ctx) -> Actor:
+    """The actor to attribute this call to.
 
-    There is no fallback and no service account. If this raises, the request
-    is rejected. See 03-auth-security.md §5.
+    Single-user deployment: resolves to the one local user, tagged with
+    channel='claude' so audit records distinguish agent-initiated work from
+    work done in the SPA. The bearer token is checked by middleware before
+    this runs; it gates access, it does not carry identity.
+
+    This exists so that reintroducing real identity is a change here rather
+    than at every call site. See adr/0001-single-user-deployment.md.
     """
-    claims = ctx.request_context.auth  # populated by the token middleware
-    return Principal(
-        user_id=UUID(claims["webmap_user_id"]),
-        team_ids=frozenset(UUID(t) for t in claims["webmap_team_ids"]),
-        channel="claude",
-    )
+    return local_actor(channel="claude")
 ```
 
 ---
@@ -113,21 +112,21 @@ async def webmap_list_datasets(
     ctx,
     project_id: Annotated[UUID | None, Field(
         None, description="Restrict to one project. Omit to list across all "
-                          "projects the user can access.")] = None,
+                          "projects.")] = None,
     kind: Annotated[Literal["vector", "grid", "pointset", "fault_network"] | None,
         Field(None, description="Filter by dataset kind.")] = None,
     limit: Annotated[int, Field(25, ge=1, le=100)] = 25,
     offset: Annotated[int, Field(0, ge=0)] = 0,
     response_format: Literal["markdown", "json"] = "markdown",
 ) -> str:
-    """List spatial datasets the user can access.
+    """List registered spatial datasets.
 
     Returns compact summaries. Call webmap_describe_dataset for full detail
     including attribute schema and value ranges.
     """
-    p = principal_from_context(ctx)
+    a = actor_from_context(ctx)
     page = await services.datasets.list_(
-        p, project_id=project_id, kind=kind, limit=limit, offset=offset
+        a, project_id=project_id, kind=kind, limit=limit, offset=offset
     )
     return format_page(page, response_format)
 ```

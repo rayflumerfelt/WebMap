@@ -3,26 +3,14 @@
 ## 1. Service topology
 
 ```
-                        ┌──────────────────────────────┐
-                        │  Corporate OIDC IdP          │
-                        │  (Entra ID / Okta)           │
-                        └──────────────┬───────────────┘
-                                       │ OIDC federation
-                        ┌──────────────▼───────────────┐
-   Claude ──OAuth 2.1──▶│  webmap-auth                 │
-   (claude.ai)          │  Authorization Server        │
-                        │  - Dynamic Client Reg (DCR)  │
-                        │  - Token issuance            │
-                        └──────────────┬───────────────┘
-                                       │ Bearer tokens
-   ┌───────────────┐                   │
-   │  Browser      │───────────────────┤
+   ┌───────────────┐
+   │  Browser      │───────────────────┐
    │  React SPA    │                   │
    └───────────────┘                   │
                         ┌──────────────▼───────────────┐
                         │  webmap-api    (FastAPI)     │
    Claude ──MCP HTTP───▶│  webmap-mcp    (FastMCP)     │
-                        │  Both mount on same ASGI app │
+   (static token)       │  Both mount on same ASGI app │
                         └──┬────────┬────────┬─────────┘
                            │        │        │
               ┌────────────▼──┐  ┌──▼─────┐  └──────────┐
@@ -48,23 +36,23 @@
 
 ### 2.1 `webmap-api` — FastAPI
 
-The control plane. Owns the database, enforces authorization, registers datasets, manages
-styles and sessions, enqueues jobs. Stateless; scale horizontally.
+The control plane. Owns the database, registers datasets, manages styles and sessions,
+enqueues jobs, and proxies tile requests. Stateless.
 
 Does *not* do heavy computation. Any operation that can exceed 2 seconds is enqueued.
 
 ### 2.2 `webmap-mcp` — FastMCP
 
 Mounted on the same ASGI application as `webmap-api`, at `/mcp`. Shares the database session
-factory, authorization layer, and service modules. It is a *presentation layer over the same
-services the REST API uses* — never a parallel implementation.
+factory and service modules. It is a *presentation layer over the same services the REST API
+uses* — never a parallel implementation.
 
 Transport: Streamable HTTP, stateless JSON. Not stdio (this is a remote server), not SSE
 (deprecated).
 
 Rationale for co-locating rather than a separate deployable: the MCP server needs the same
-identity context, the same permission checks, and the same domain services. Splitting them
-means duplicating authorization logic, which is the single most dangerous thing to duplicate.
+domain services, the same validation, and the same error vocabulary. Splitting them means
+maintaining two implementations of every operation and guaranteeing they drift.
 
 ### 2.3 `webmap-worker` — arq
 
@@ -112,7 +100,7 @@ webmap/
 ├── python/                        # Reusable Python
 │   ├── webmap_geo/                # Interpolation, contouring, aggregation
 │   ├── webmap_io/                 # Format readers/writers, connectors
-│   └── webmap_core/               # Models, auth, permissions, shared services
+│   └── webmap_core/               # Models, services, style compilation
 ├── infra/
 │   ├── docker/
 │   ├── migrations/                # Alembic
@@ -228,10 +216,10 @@ fast path for the common case.
 
 Detail in `05-geoprocessing.md`.
 
-### 4.6 Ownership + grants, not tenant partitioning
+### 4.6 Single owner, no authorization model
 
-**Decision.** Every object has an owner, a visibility scope (`private` / `team` / `org`), and
-optional explicit grants. There is no `tenant_id` partition.
+**Decision.** Every object carries one `owner_user_id`. There is no visibility scope, no
+grant model, no team, and no row-level security.
 
 **Rationale.** Tenants here are business units inside one company. Cross-BU sharing is a
 legitimate and frequent need — one asset team's fault interpretation is exactly what another

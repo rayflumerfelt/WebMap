@@ -66,20 +66,21 @@ class JobRecord:
         return self.state in (JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED)
 ```
 
-### 2.1 Identity travels with the job
+### 2.1 Attribution travels with the job
 
-Restated from `03-auth-security.md` §5.1 because it is the easiest thing to get wrong here.
-The request is gone by the time the job runs; the identity must be in the payload.
+The request is gone by the time the job runs, so the actor has to be in the payload — not
+to authorize anything, but so the lineage record the job writes can name who asked for it.
 
 ```python
 @dataclass(frozen=True)
 class JobContext:
     job_id: UUID
-    requested_by: UUID
-    team_ids: frozenset[UUID]
+    requested_by: UUID          # resolves to the single local user
+    channel: str                # 'web' | 'claude' — carried into the audit record
 ```
 
-> A job that resolves datasets without a `JobContext` is a security bug. Reject in review.
+> A job that registers a derived dataset without writing a lineage record naming its
+> actor is a provenance hole. See `CLAUDE.md` §3.2.
 
 ---
 
@@ -225,20 +226,20 @@ For the SPA only. Falls back to polling on failure. Not used by MCP — Claude p
 Small aggregations should not force a poll cycle. Estimate first.
 
 ```python
-async def aggregate(principal, request) -> AggregateResponse:
+async def aggregate(actor, request) -> AggregateResponse:
     """Run inline when cheap, enqueue when not.
 
     The threshold is deliberately conservative. Blocking an API worker for
     5 seconds is acceptable; blocking it for 30 is not, because it starves
     other requests on the same process.
     """
-    estimate = await estimate_cost(principal, request)
+    estimate = await estimate_cost(actor, request)
 
     if estimate.seconds < 5.0:
-        result = await run_aggregation(principal, request)
+        result = await run_aggregation(actor, request)
         return AggregateResponse(mode="inline", dataset_id=result.dataset_id)
 
-    job_id = await enqueue("aggregate_task", principal, request)
+    job_id = await enqueue("aggregate_task", actor, request)
     return AggregateResponse(
         mode="job", job_id=job_id,
         estimated_seconds=estimate.seconds,
@@ -249,35 +250,34 @@ The MCP tool response states which happened, so Claude knows whether to poll.
 
 ---
 
-## 7. Quotas
+## 7. Resource limits
 
-Business units share infrastructure. One geologist kriging 500k points should not starve
-another team.
+Not quotas — there is nobody to be fair to. These exist so a mistyped cell size cannot
+exhaust local memory and take the machine down with it.
 
 ```python
-# python/webmap_core/quota.py
+# python/webmap_core/limits.py
 
 @dataclass(frozen=True)
-class QuotaPolicy:
-    max_concurrent_jobs_per_user: int = 3
-    max_concurrent_jobs_per_team: int = 8
-    max_queued_jobs_per_user: int = 20
+class ResourceLimits:
+    max_concurrent_jobs: int = 1          # matches WorkerSettings.max_jobs
+    max_queued_jobs: int = 20
     max_grid_cells: int = 16_000_000
     max_interpolation_points: int = 2_000_000
-    daily_compute_seconds_per_user: int = 14_400   # 4 hours
 
 
-async def check_quota(db, principal: Principal, kind: str, params: dict) -> None:
-    """Raise QuotaExceeded with a message naming the limit and when it resets.
+async def check_limits(db, kind: str, params: dict) -> None:
+    """Raise LimitExceeded with a message naming the limit and the offending value.
 
-    'Quota exceeded' alone is useless. 'You have 3 jobs running (limit 3);
-    the oldest started 2 minutes ago' lets someone decide whether to wait or
-    cancel.
+    'Too large' alone is useless. 'Requested 40,000,000 cells (limit 16,000,000)
+    — a 500 ft cell size over this extent gives 9,800,000' tells the caller
+    what to change and to what.
     """
 ```
 
-Quota errors are surfaced to Claude with the same actionable-message discipline as everything
-else.
+A grid-cell cap is worth keeping even alone: a 2000x2000 grid is 4M cells and fine, and a
+typo turning 250 ft cells into 2.5 ft cells is 40M and is not. Limit errors are surfaced
+to Claude with the same actionable-message discipline as everything else.
 
 ---
 
@@ -309,7 +309,7 @@ and state the consequence of the fallback.
 ## 9. Cancellation
 
 ```python
-async def cancel_job(db, redis, principal: Principal, job_id: UUID) -> None:
+async def cancel_job(db, redis, job_id: UUID) -> None:
     """Cancel a queued or running job.
 
     Queued: aborted before it starts.
@@ -341,7 +341,7 @@ gridding jobs.
 
 ```python
 async def enqueue_idempotent(
-    db, redis, principal: Principal, kind: str, params: dict
+    db, redis, actor: Actor, kind: str, params: dict
 ) -> tuple[UUID, bool]:
     """Returns (job_id, was_created).
 
@@ -351,7 +351,7 @@ async def enqueue_idempotent(
     """
     key = hashlib.sha256(
         json.dumps(
-            {"kind": kind, "user": str(principal.user_id), "params": params},
+            {"kind": kind, "params": params},
             sort_keys=True, separators=(",", ":"),
         ).encode()
     ).hexdigest()
@@ -360,7 +360,7 @@ async def enqueue_idempotent(
     if existing:
         return UUID(existing.decode()), False
 
-    job_id = await _create_and_enqueue(db, redis, principal, kind, params)
+    job_id = await _create_and_enqueue(db, redis, actor, kind, params)
     await redis.set(f"idem:{key}", str(job_id), ex=3600)
     return job_id, True
 ```

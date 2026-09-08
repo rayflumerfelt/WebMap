@@ -78,8 +78,8 @@ class BrowserPool:
     """One Chromium process, many contexts.
 
     Contexts are cheap (tens of ms) and fully isolated — no cookie, cache, or
-    storage bleed between users. That isolation matters here: two renders in
-    flight may belong to different geologists with different data access.
+    storage bleed between renders. Isolation still matters: a style that
+    manages to poison one context must not affect the next render.
     """
 
     def __init__(self, max_concurrent: int = 3, recycle_after: int = 300):
@@ -231,7 +231,7 @@ class RenderSpec:
 
 
 async def render(pool: BrowserPool, spec: RenderSpec) -> RenderOutput:
-    validate_style(spec.style)          # 03-auth-security.md §7.1
+    validate_style(spec.style)          # 03-auth-security.md §3.1
     w, h, scale = SIZE_PRESETS[spec.size_preset]
 
     async with pool.context(w, h, scale) as ctx:
@@ -282,13 +282,13 @@ may be incomplete.
 ## 6. Style assembly
 
 Styles are **always assembled server-side** from validated layer references. Client-supplied
-symbology is accepted; client-supplied source URLs are not (`03-auth-security.md` §7.3).
+symbology is accepted; client-supplied source URLs are not (`03-auth-security.md` §3.3).
 
 ```python
 # apps/api/services/style_builder.py
 
 async def build_style(
-    principal: Principal,
+    actor: Actor,
     layers: list[LayerRef],
     user_prefs: UserPreferences,
     bounds: Bbox,
@@ -312,8 +312,7 @@ async def build_style(
         "layers": [],
     }
     for ref in resolve_layer_order(user_prefs, layers):
-        dataset = await services.datasets.get(principal, ref.dataset_id)
-        await require(principal, dataset, Permission.VIEWER)
+        dataset = await services.datasets.get(actor, ref.dataset_id)
         add_source_and_layers(style, dataset, ref)
     return style
 ```

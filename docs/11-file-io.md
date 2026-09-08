@@ -91,8 +91,8 @@ class FileShareConnector(Connector):
       1. Service account is READ-ONLY. No write path to any share, ever.
       2. Shares are explicitly mapped to teams in configuration. A share
          not in the map is not reachable.
-      3. Dataset registration from a share sets owner_team_id from that
-         mapping, so normal object permissions apply from ingest onward.
+      3. Shares are an explicit allowlist in configuration. A share not in
+         the map is unreachable, which is the whole access control.
       4. Path traversal is blocked — resolved paths must remain within the
          configured share root.
 
@@ -417,7 +417,7 @@ async def export_dataset(
     """Export to a downloadable file.
 
     Always writes to a NEW object. Never modifies a source file, even when
-    the dataset came from a writable location. See 03-auth-security.md §8.
+    the dataset came from a writable location. See 03-auth-security.md §4.
 
     Shapefile exports are always zipped — a bare .shp is useless without its
     sidecars and users forward exactly what we give them.

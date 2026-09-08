@@ -32,36 +32,33 @@ Scaffolding. Boring, and skipping it costs triple later.
 
 ---
 
-## Phase 1 — Identity and data plane (4–6 weeks)
+## Phase 1 — Data plane (~1 week)
 
-**Auth starts here, not later.** It gates everything and it is the highest-variance work in
-the project.
+Previously "Identity and data plane," at 4–6 weeks. The identity half is gone — see
+`adr/0001-single-user-deployment.md`. What remains is getting real data into the system,
+which was always the part Phase 2 actually needed.
 
 **Deliverables**
 
-- OIDC login against the corporate IdP; team sync from group claims
-- `webmap-auth` authorization server with DCR, federating upstream
-- Permission model, RLS policies on all ownable tables, startup assertion
 - Dataset registry with the upload connector
 - Vector read for shapefile, GeoJSON, GeoPackage, CSV/XYZ
 - Ingest pipeline with validation, normalization, and warnings
-- REST CRUD for projects, datasets, grants
-- Audit logging
+- REST CRUD for projects and datasets
+- Static bearer token on the API and MCP endpoints
+- Audit and lineage records written on ingest
 
 **Acceptance**
 
-- [ ] A geologist logs in via SSO and lands with the correct team memberships
 - [ ] Uploading a shapefile with a `.prj` registers a dataset with correct CRS and bbox
 - [ ] Uploading a shapefile *without* a `.prj` fails with the message from `11-file-io.md` §3
-- [ ] User A cannot read User B's private dataset — verified at both application and RLS layer
-- [ ] The app DB role lacks `BYPASSRLS`; the assertion fires when it is granted
-- [ ] Claude completes the OAuth flow end to end and calls an authenticated tool
-- [ ] MCP calls execute as the requesting user (verify: two users, different results)
 - [ ] All hostile fixtures from `11-file-io.md` §8 fail with actionable messages
+- [ ] An ingested dataset carries a lineage record naming its source and actor
+- [ ] A request without the bearer token is rejected on both the REST and MCP surfaces
+- [ ] Claude calls an authenticated tool end to end
 
-**Risk.** MCP OAuth against the corporate IdP. If DCR brokering is blocked by security policy,
-escalate in week 1 — do not discover it in week 5. Have a fallback: pre-provisioned confidential
-clients per environment, accepting the manual registration step.
+**Risk.** Low, now. The previous risk here — DCR brokering blocked by corporate security
+policy — was the largest in the project and no longer exists. The remaining variance is in
+file I/O breadth, which `11-file-io.md` §8 makes testable up front.
 
 ---
 

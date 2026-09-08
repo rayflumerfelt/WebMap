@@ -61,15 +61,19 @@ control access.
 
 ## 4. Deployment context
 
-Single company, multiple business units. Approximately 50–200 users.
+**Single operator.** One geologist, one machine or one internal host. Not a shared service.
 
-- **Tenancy:** Business units are *not* isolated tenants. Cross-BU sharing is a first-class
-  feature. Authorization is per-object ownership plus visibility scope plus explicit grants —
-  never a partition key. See `02-data-model.md`.
-- **Identity:** One corporate OIDC provider. Group claims map to teams.
-- **No Esri footprint.** PostGIS is the spatial database. Shapefile is an interchange format
-  only.
+- **Identity:** none. No identity provider, no login flow, no permission model. See
+  `adr/0001-single-user-deployment.md` for what was removed and what it would cost to
+  bring back.
+- **Sharing** happens by exporting a file or sending a render, not by granting access.
+- **No Esri footprint.** Shapefile is an interchange format only.
 - **Data sources are mixed:** ad-hoc uploads, SMB file shares, existing PostGIS databases.
+- **Not reachable from the public internet.** This is load-bearing for §7 and for how
+  renders reach Claude — see `04-mcp-server.md` §6.1.
+
+The security posture that follows from this is in `03-auth-security.md`: the threat is
+hostile *data*, not hostile users.
 
 ## 5. Scale targets
 
@@ -150,8 +154,8 @@ Claude, and every map in it carries provenance sufficient to reproduce it a year
 |---|---|
 | `00-overview.md` | This file |
 | `01-architecture.md` | Services, topology, technology decisions with rationale |
-| `02-data-model.md` | PostGIS DDL, Pydantic models, CRS model, permissions |
-| `03-auth-security.md` | OIDC, MCP OAuth + DCR, identity propagation, SSRF controls |
+| `02-data-model.md` | Schema DDL, Pydantic models, CRS model, ownership |
+| `03-auth-security.md` | Threat model, SSRF controls, untrusted data, destructive-op safety |
 | `04-mcp-server.md` | Complete tool surface with schemas |
 | `05-geoprocessing.md` | Interpolation, fault handling, contouring, aggregation |
 | `06-rendering.md` | Playwright render service, style pipeline, tiles |
