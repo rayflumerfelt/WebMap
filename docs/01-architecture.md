@@ -9,7 +9,7 @@
                         └──────────────┬───────────────┘
                                        │ OIDC federation
                         ┌──────────────▼───────────────┐
-   Claude ──OAuth 2.1──▶│  strata-auth                 │
+   Claude ──OAuth 2.1──▶│  webmap-auth                 │
    (claude.ai)          │  Authorization Server        │
                         │  - Dynamic Client Reg (DCR)  │
                         │  - Token issuance            │
@@ -20,8 +20,8 @@
    │  React SPA    │                   │
    └───────────────┘                   │
                         ┌──────────────▼───────────────┐
-                        │  strata-api    (FastAPI)     │
-   Claude ──MCP HTTP───▶│  strata-mcp    (FastMCP)     │
+                        │  webmap-api    (FastAPI)     │
+   Claude ──MCP HTTP───▶│  webmap-mcp    (FastMCP)     │
                         │  Both mount on same ASGI app │
                         └──┬────────┬────────┬─────────┘
                            │        │        │
@@ -33,7 +33,7 @@
         ┌─────────────┼─────────────┼───────────────────┼──────────┐
         │             │             │                   │          │
    ┌────▼─────┐  ┌────▼──────┐ ┌────▼──────┐    ┌───────▼──────┐  │
-   │ Martin   │  │ TiTiler   │ │ strata-   │    │ strata-      │  │
+   │ Martin   │  │ TiTiler   │ │ webmap-   │    │ webmap-      │  │
    │ (MVT)    │  │ (COG)     │ │ worker    │    │ render       │  │
    │          │  │           │ │ (arq)     │    │ (Playwright) │  │
    └──────────┘  └────┬──────┘ └────┬──────┘    └──────────────┘  │
@@ -46,16 +46,16 @@
 
 ## 2. Services
 
-### 2.1 `strata-api` — FastAPI
+### 2.1 `webmap-api` — FastAPI
 
 The control plane. Owns the database, enforces authorization, registers datasets, manages
 styles and sessions, enqueues jobs. Stateless; scale horizontally.
 
 Does *not* do heavy computation. Any operation that can exceed 2 seconds is enqueued.
 
-### 2.2 `strata-mcp` — FastMCP
+### 2.2 `webmap-mcp` — FastMCP
 
-Mounted on the same ASGI application as `strata-api`, at `/mcp`. Shares the database session
+Mounted on the same ASGI application as `webmap-api`, at `/mcp`. Shares the database session
 factory, authorization layer, and service modules. It is a *presentation layer over the same
 services the REST API uses* — never a parallel implementation.
 
@@ -66,14 +66,14 @@ Rationale for co-locating rather than a separate deployable: the MCP server need
 identity context, the same permission checks, and the same domain services. Splitting them
 means duplicating authorization logic, which is the single most dangerous thing to duplicate.
 
-### 2.3 `strata-worker` — arq
+### 2.3 `webmap-worker` — arq
 
 Geoprocessing. Gridding, kriging, contouring, aggregation, dataset ingestion and sync.
 CPU-bound, memory-hungry. Scale independently of the API.
 
-Depends on `strata-geo`, the pure-computation package (see §3.2).
+Depends on `webmap-geo`, the pure-computation package (see §3.2).
 
-### 2.4 `strata-render` — Playwright
+### 2.4 `webmap-render` — Playwright
 
 Headless Chromium running real MapLibre GL JS. Produces PNGs from Style JSON.
 
@@ -85,7 +85,7 @@ anything else. See `06-rendering.md`.
 Off-the-shelf. Serves MVT directly from PostGIS via `ST_AsMVT`. Dynamic, no tile build step,
 which matters because layers are edited.
 
-Runs behind `strata-api`'s auth proxy — never exposed directly.
+Runs behind `webmap-api`'s auth proxy — never exposed directly.
 
 ### 2.6 `titiler` — raster tiles
 
@@ -97,7 +97,7 @@ parameter change, not a regrid. Also behind the auth proxy.
 Monorepo. pnpm workspaces + Turborepo for JS, uv workspaces for Python.
 
 ```
-strata/
+webmap/
 ├── CLAUDE.md
 ├── docs/                          # These specification files
 ├── apps/
@@ -106,13 +106,13 @@ strata/
 │   ├── worker/                    # arq worker
 │   └── render/                    # Playwright render service
 ├── packages/                      # Reusable JS
-│   ├── map/                       # @strata/map — the map component
-│   ├── ui/                        # @strata/ui — ramp editor, style editor
-│   └── style-model/               # @strata/style-model — TS types + compilers
+│   ├── map/                       # @webmap/map — the map component
+│   ├── ui/                        # @webmap/ui — ramp editor, style editor
+│   └── style-model/               # @webmap/style-model — TS types + compilers
 ├── python/                        # Reusable Python
-│   ├── strata_geo/                # Interpolation, contouring, aggregation
-│   ├── strata_io/                 # Format readers/writers, connectors
-│   └── strata_core/               # Models, auth, permissions, shared services
+│   ├── webmap_geo/                # Interpolation, contouring, aggregation
+│   ├── webmap_io/                 # Format readers/writers, connectors
+│   └── webmap_core/               # Models, auth, permissions, shared services
 ├── infra/
 │   ├── docker/
 │   ├── migrations/                # Alembic
@@ -128,13 +128,13 @@ These are enforced, not advisory. See `CLAUDE.md` for the lint configuration.
 
 - `packages/map` **must not** import from `apps/web`. If it needs something from the app, the
   app passes it in as a prop. Violating this is how reusability dies.
-- `python/strata_geo` **must not** import from `strata_core` or any web framework. It takes
+- `python/webmap_geo` **must not** import from `webmap_core` or any web framework. It takes
   NumPy arrays and Shapely geometries in, returns NumPy arrays and Shapely geometries out. No
   database, no HTTP, no logging config. This is what makes it testable and separately
   versionable.
 - `apps/api` **must not** contain geoprocessing algorithms. It orchestrates.
 
-### 3.2 Why `strata_geo` is isolated
+### 3.2 Why `webmap_geo` is isolated
 
 It is the highest-value and highest-risk code in the project. Isolating it means:
 
@@ -253,7 +253,7 @@ support.
 ### 5.1 Claude renders a map
 
 ```
-Claude          strata-mcp        strata-api      arq/worker      render        storage
+Claude          webmap-mcp        webmap-api      arq/worker      render        storage
   │                 │                 │               │              │             │
   ├─render_map()───▶│                 │               │              │             │
   │                 ├─authorize──────▶│               │              │             │
@@ -272,8 +272,8 @@ map on several slides; re-rendering a kriged surface is not free.
 ### 5.2 Claude opens an editing session
 
 ```
-Claude ──strata_open_session()──▶ strata-mcp ──create session──▶ DB
-       ◀──── https://strata.corp/s/{id} ────────────────────────┘
+Claude ──webmap_open_session()──▶ webmap-mcp ──create session──▶ DB
+       ◀──── https://webmap.corp/s/{id} ────────────────────────┘
 ```
 
 The user clicks, authenticates via SSO in the browser, and the SPA loads the session's

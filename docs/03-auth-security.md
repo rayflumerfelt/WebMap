@@ -38,7 +38,7 @@ Browser ──▶ /auth/login ──▶ IdP ──▶ /auth/callback ──▶ s
 # apps/api/auth/oidc.py
 
 from authlib.integrations.starlette_client import OAuth
-from strata_core.settings import settings
+from webmap_core.settings import settings
 
 oauth = OAuth()
 oauth.register(
@@ -84,7 +84,7 @@ the one query someone forgets.
 ### 3.2 Permission resolution
 
 ```python
-# python/strata_core/permissions.py
+# python/webmap_core/permissions.py
 
 from enum import IntEnum
 from uuid import UUID
@@ -163,11 +163,11 @@ async def principal_session(engine, principal: Principal):
     """
     async with engine.begin() as conn:
         await conn.execute(
-            text("SELECT set_config('strata.user_id', :uid, true)"),
+            text("SELECT set_config('webmap.user_id', :uid, true)"),
             {"uid": str(principal.user_id)},
         )
         await conn.execute(
-            text("SELECT set_config('strata.team_ids', :tids, true)"),
+            text("SELECT set_config('webmap.team_ids', :tids, true)"),
             {"tids": "{" + ",".join(str(t) for t in principal.team_ids) + "}"},
         )
         yield conn
@@ -205,15 +205,15 @@ and enabling it is frequently blocked by security policy.
 
 ### 4.2 The resolution
 
-Stand up `strata-auth`, our own authorization server, which:
+Stand up `webmap-auth`, our own authorization server, which:
 
 - **Supports DCR.** Claude registers as a client against us.
 - **Federates upstream** to the corporate IdP via standard OIDC for actual user
   authentication. We never handle credentials.
-- **Issues our own access tokens** scoped to Strata resources, carrying the user's identity.
+- **Issues our own access tokens** scoped to WebMap resources, carrying the user's identity.
 
 ```
-Claude                strata-auth              Corporate IdP
+Claude                webmap-auth              Corporate IdP
   │                        │                        │
   ├─GET /.well-known/──────▶                        │
   │  oauth-authorization-server                     │
@@ -226,7 +226,7 @@ Claude                strata-auth              Corporate IdP
   │◀──authorization code───┤                        │
   ├─POST /token───────────▶│                        │
   │◀──access + refresh─────┤                        │
-  ├─MCP calls w/ Bearer───▶ strata-mcp              │
+  ├─MCP calls w/ Bearer───▶ webmap-mcp              │
 ```
 
 Use a maintained OAuth server implementation. Do not write token issuance from scratch.
@@ -246,7 +246,7 @@ broker. Keycloak-as-broker is the lowest-code path if you already run it.
 
 ### 4.4 Token requirements
 
-- **Audience-bound.** Access tokens must carry `aud` naming the Strata MCP resource. Reject
+- **Audience-bound.** Access tokens must carry `aud` naming the WebMap MCP resource. Reject
   tokens issued for anything else — this prevents a token stolen from another service being
   replayed here.
 - **Short-lived.** 30 minutes for access tokens; refresh handles continuity.
@@ -266,13 +266,13 @@ audiences, not just distinct URLs.
 
 **The single most important control in this document.**
 
-When Claude calls `strata_list_datasets`, the query must execute as the requesting geologist.
+When Claude calls `webmap_list_datasets`, the query must execute as the requesting geologist.
 If any part of the chain uses a service account, you have built a system where any user can
 ask Claude for data they are not cleared to see, and the audit log will show a service
 principal instead of a person.
 
 ```
-Claude → [Bearer: user token] → strata-mcp
+Claude → [Bearer: user token] → webmap-mcp
        → Principal(user_id, team_ids, channel='claude')
        → principal_session(engine, principal)   # RLS context set
        → service function with explicit permission check
@@ -322,7 +322,7 @@ open for performance is exactly how data leaks.
 **Approach: short-TTL signed URLs, minted by the API after a permission check.**
 
 ```python
-# python/strata_core/signing.py
+# python/webmap_core/signing.py
 
 import hmac, hashlib, time, base64
 from uuid import UUID
@@ -356,10 +356,10 @@ def verify_tile_token(token: str, dataset_id: UUID, secret: bytes) -> UUID:
     return UUID(uid)
 ```
 
-Martin and TiTiler sit behind an auth proxy in `strata-api` that verifies the token before
+Martin and TiTiler sit behind an auth proxy in `webmap-api` that verifies the token before
 forwarding. Neither is exposed directly.
 
-**Exception for the render service.** Because `strata-render` runs inside the trust boundary,
+**Exception for the render service.** Because `webmap-render` runs inside the trust boundary,
 it can be issued a short-lived internal token and skip signed URLs — but it must still carry
 the *user's* identity so that a render cannot access layers the requester cannot.
 
@@ -381,9 +381,9 @@ endpoint or a cloud metadata service and the response appears in the rendered im
 from urllib.parse import urlparse
 
 ALLOWED_HOSTS = frozenset({
-    "tiles.strata.internal",
-    "titiler.strata.internal",
-    "static.strata.internal",
+    "tiles.webmap.internal",
+    "titiler.webmap.internal",
+    "static.webmap.internal",
 })
 
 BLOCKED_NETWORKS = [
@@ -415,7 +415,7 @@ def validate_style(style: dict) -> None:
         host = urlparse(url).hostname
         if host not in ALLOWED_HOSTS:
             raise StyleRejected(
-                f"Style references disallowed host '{host}'. Only Strata-served "
+                f"Style references disallowed host '{host}'. Only WebMap-served "
                 f"tile, sprite, and glyph endpoints may be rendered."
             )
 ```

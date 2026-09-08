@@ -40,7 +40,7 @@ the project.
 **Deliverables**
 
 - OIDC login against the corporate IdP; team sync from group claims
-- `strata-auth` authorization server with DCR, federating upstream
+- `webmap-auth` authorization server with DCR, federating upstream
 - Permission model, RLS policies on all ownable tables, startup assertion
 - Dataset registry with the upload connector
 - Vector read for shapefile, GeoJSON, GeoPackage, CSV/XYZ
@@ -71,14 +71,14 @@ First phase with something a geologist recognizes.
 
 **Deliverables**
 
-- `@strata/map` component with the API in `07-frontend.md` §2
+- `@webmap/map` component with the API in `07-frontend.md` §2
 - Martin MVT function-sources; automatic GeoJSON/MVT switching
 - TiTiler COG serving with dynamic colormaps
 - Auth proxy for tile endpoints with scoped signed tokens
 - Style compilation in both TypeScript and Python, sharing test vectors
 - Layer tree, basic symbology (single symbol, categorized)
 - Session create, load, autosave
-- `@strata/ui` legend, scale bar, north arrow
+- `@webmap/ui` legend, scale bar, north arrow
 - Desktop application shell: docked resizable panels, toolbar, status bar, keyboard
   shortcuts, context menus (`07-frontend.md` §5)
 
@@ -106,7 +106,7 @@ The point of the project.
 
 **Deliverables**
 
-- `strata-render` service: Playwright, browser pool, SwiftShader, request allowlist
+- `webmap-render` service: Playwright, browser pool, SwiftShader, request allowlist
 - Server-side style assembly with SSRF validation
 - Render persistence with metadata and captions
 - Visual regression harness with goldens
@@ -121,7 +121,7 @@ The point of the project.
 - [ ] A hostile style referencing an internal host is rejected before dispatch
 - [ ] `page.route` blocks a redirect to a non-allowlisted host (test with a fixture)
 - [ ] Render workers cannot reach the database or the internet (verify by attempting egress)
-- [ ] `strata_open_session` produces a link that loads correctly for the same user, and shows a
+- [ ] `webmap_open_session` produces a link that loads correctly for the same user, and shows a
       helpful permission error for a different user
 - [ ] All 10 evaluations pass
 - [ ] Legends appear correctly in rendered output, matching the interactive legend
@@ -137,7 +137,7 @@ The longest phase and the differentiator. Do not compress it.
 
 **Deliverables**
 
-- `strata_geo` package, isolated per `01-architecture.md` §3.2
+- `webmap_geo` package, isolated per `01-architecture.md` §3.2
 - Variogram estimation with subsampling and declustering; automatic and interactive fitting
 - Minimum curvature (Briggs) with fault-aware stencils
 - Constrained Delaunay triangulation and fault network validation/cleaning
@@ -219,7 +219,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - Full spatial aggregation catalog
 - File share and PostGIS connectors with scheduled sync
 - Export with loss reporting
-- `strata_suggest_maps`
+- `webmap_suggest_maps`
 - User preferences: basemaps, default palettes, units
 - Performance tuning against the targets in `05` §9 and `06` §11
 - Accessibility audit
@@ -231,7 +231,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - [ ] Share-sourced datasets sync on schedule and show `synced_at` in the UI
 - [ ] Path traversal via a crafted share URI is blocked
 - [ ] Shapefile export reports truncation and collision before writing
-- [ ] `strata_suggest_maps` proposes sensible products for the seed dataset
+- [ ] `webmap_suggest_maps` proposes sensible products for the seed dataset
 - [ ] All performance targets met
 - [ ] Keyboard navigation reaches every control; focus is always visible
 - [ ] Security checklist in `03-auth-security.md` §11 fully green

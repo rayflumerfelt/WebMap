@@ -149,7 +149,7 @@ A minimal local page. Never fetched from the network.
     <div id="overlay"></div>   <!-- legend, scale bar, north arrow, title -->
   </div>
   <script src="./maplibre-gl.js"></script>
-  <script src="./overlay.js"></script>   <!-- built from @strata/ui -->
+  <script src="./overlay.js"></script>   <!-- built from @webmap/ui -->
   <script src="./render.js"></script>
 </body>
 </html>
@@ -184,7 +184,7 @@ window.renderMap = async function (spec) {
   // Overlays are the app's own React components, mounted into #overlay.
   // Same code path as the interactive map's legend.
   if (spec.overlay) {
-    window.StrataOverlay.mount(document.getElementById('overlay'), spec.overlay);
+    window.WebMapOverlay.mount(document.getElementById('overlay'), spec.overlay);
   }
 
   // 'idle' fires once tiles, glyphs, and sprites have all landed and no
@@ -305,7 +305,7 @@ async def build_style(
     """
     style = {
         "version": 8,
-        "name": "strata-render",
+        "name": "webmap-render",
         "glyphs": f"{settings.internal_static}/glyphs/{{fontstack}}/{{range}}.pbf",
         "sprite": f"{settings.internal_static}/sprite",
         "sources": {},
@@ -503,5 +503,5 @@ revisit the engine decision.
 | Screenshot + encode | < 200 ms |
 | **Total, warm browser** | **< 2 s p50, < 5 s p95** |
 
-Comfortably inside MCP tool timeouts, so `strata_render_map` returns synchronously. Only
+Comfortably inside MCP tool timeouts, so `webmap_render_map` returns synchronously. Only
 gridding uses the job-handle pattern.

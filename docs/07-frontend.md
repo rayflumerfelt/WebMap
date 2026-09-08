@@ -8,11 +8,11 @@ React 19 + TypeScript + Vite. Mantine 7 for UI primitives. MapLibre GL JS for ma
 
 ```
 packages/
-├── style-model/          @strata/style-model   (no React, no MapLibre)
+├── style-model/          @webmap/style-model   (no React, no MapLibre)
 │   └── Symbology types + compilers to MapLibre Style JSON
-├── ui/                   @strata/ui            (React + Mantine, no MapLibre)
+├── ui/                   @webmap/ui            (React + Mantine, no MapLibre)
 │   └── Ramp editor, style property editor, legend, scale bar
-└── map/                  @strata/map           (React + MapLibre + @strata/*)
+└── map/                  @webmap/map           (React + MapLibre + @webmap/*)
     └── The map component
 apps/
 └── web/                                        (consumes all of the above)
@@ -22,12 +22,12 @@ apps/
 
 Enforced by `eslint-plugin-boundaries`, not by convention.
 
-- `@strata/map` **must not** import from `apps/web`. If it needs something from the app, the
+- `@webmap/map` **must not** import from `apps/web`. If it needs something from the app, the
   app passes it as a prop. The moment the map package imports app code, reuse is already
   broken — and reuse is an explicit requirement of this project.
-- `@strata/ui` **must not** import MapLibre. The legend and ramp editor must render in the
+- `@webmap/ui` **must not** import MapLibre. The legend and ramp editor must render in the
   headless render shell, which has no map instance in scope for overlays.
-- `@strata/style-model` **must not** import React or MapLibre. It is pure data
+- `@webmap/style-model` **must not** import React or MapLibre. It is pure data
   transformation, shared with tooling and testable in Node.
 
 ```javascript
@@ -54,9 +54,9 @@ The public API is the contract. Design it as if it will be consumed by three oth
 applications, because that is the stated goal.
 
 ```typescript
-// packages/map/src/StrataMap.tsx
+// packages/map/src/WebMap.tsx
 
-export interface StrataMapProps {
+export interface WebMapProps {
   /** MapLibre Style JSON. The single source of truth for appearance.
    *  Assembled server-side — never constructed ad hoc in the browser. */
   style: StyleSpecification;
@@ -123,7 +123,7 @@ component receives a style and metadata. Where those came from is the app's prob
 Some operations do not fit declarative props.
 
 ```typescript
-export interface StrataMapHandle {
+export interface WebMapHandle {
   fitBounds(bounds: LngLatBoundsLike, options?: FitBoundsOptions): void;
   capture(): Promise<Blob>;         // see 06-rendering.md §8
   queryFeatures(point: PointLike, layerIds?: string[]): MapGeoJSONFeature[];
@@ -139,7 +139,7 @@ is a signal that the public API is missing something. Track them.
 The commonest MapLibre-in-React bug is recreating the map on every render.
 
 ```typescript
-export const StrataMap = forwardRef<StrataMapHandle, StrataMapProps>((props, ref) => {
+export const WebMap = forwardRef<WebMapHandle, WebMapProps>((props, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
@@ -229,7 +229,7 @@ const style = useMemo(
 );
 ```
 
-`compileStyle` lives in `@strata/style-model` and is the *same function* the backend runs (via
+`compileStyle` lives in `@webmap/style-model` and is the *same function* the backend runs (via
 a shared JSON schema and a Python port with a shared test-vector suite). If the two ever
 disagree, the visual regression tests catch it.
 
@@ -250,7 +250,7 @@ ramps, which span the full spectrum.
 
 ```typescript
 // packages/ui/src/theme.ts
-export const strataTheme = createTheme({
+export const webmapTheme = createTheme({
   colors: {
     // Chrome greys with a slight blue cast — reads as "instrument", and
     // critically does not tint perception of adjacent map colours.
@@ -293,7 +293,7 @@ CSS.** Base styles describe the desktop layout; the only breakpoints scale *upwa
 
 | Width | Behaviour |
 |---|---|
-| < 1280 px | Notice: "Strata requires a window at least 1280 px wide." No degraded layout. |
+| < 1280 px | Notice: "WebMap requires a window at least 1280 px wide." No degraded layout. |
 | 1280–1439 | Functional. Two panels max open simultaneously. |
 | 1440–1919 | Baseline. Design and review at this size. |
 | ≥ 1920 | Optimal. Three panels plus the attribute table without occluding the map. |
@@ -515,7 +515,7 @@ link to data they cannot access should see who to ask, matching the message from
   and most sessions are read-only.
 
 ```typescript
-const EditingTools = lazy(() => import('@strata/map/editing'));
+const EditingTools = lazy(() => import('@webmap/map/editing'));
 ```
 
 ---
@@ -549,8 +549,8 @@ so the clickable area exceeds the painted area. Precision at 26 px rows depends 
 
 | Layer | Tool | Scope |
 |---|---|---|
-| Style compilation | Vitest | `@strata/style-model`, shared test vectors with Python |
-| Components | Vitest + Testing Library | `@strata/ui` in isolation |
+| Style compilation | Vitest | `@webmap/style-model`, shared test vectors with Python |
+| Components | Vitest + Testing Library | `@webmap/ui` in isolation |
 | Map component | Vitest + mocked MapLibre | Prop → instance-call assertions |
 | Integration | Playwright | Session load, layer add, symbology edit, export |
 | Visual | Playwright screenshots | `06-rendering.md` §10 |

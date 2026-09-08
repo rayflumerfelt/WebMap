@@ -1,6 +1,6 @@
 # 00 — Overview
 
-**Project codename:** Strata
+**Project name:** WebMap
 **Status:** Specification, pre-implementation
 **Audience:** Engineers and AI coding agents implementing the system
 
@@ -34,7 +34,7 @@ The target interaction is:
 > **Geologist:** Show me a color-filled contour map of Wolfcamp A porosity for the Midland
 > Basin acreage.
 >
-> **Claude:** *[calls `strata_list_datasets`, `strata_create_grid`, `strata_render_map`]*
+> **Claude:** *[calls `webmap_list_datasets`, `webmap_create_grid`, `webmap_render_map`]*
 > Here it is — kriged with an exponential variogram, 250 ft grid spacing, faults honored.
 > Porosity ranges 4.1–21.8%. *[displays PNG]*
 >
@@ -43,7 +43,7 @@ The target interaction is:
 > **Claude:** *[returns session link]* Open it here.
 
 Claude assembles PowerPoint decks from these renders using its own file-creation capability.
-Strata does not generate PPTX. It returns images plus enough structured metadata that Claude
+WebMap does not generate PPTX. It returns images plus enough structured metadata that Claude
 can write a technically accurate caption.
 
 ## 3. Users
@@ -97,10 +97,10 @@ to Claude over Streamable HTTP with OAuth 2.1.
 
 Explicitly out of scope. Do not build these; do not let them creep in.
 
-- **PowerPoint generation.** Claude does this. Strata returns images and metadata.
+- **PowerPoint generation.** Claude does this. WebMap returns images and metadata.
 - **3D visualization.** No horizons in 3D, no well trajectories in space, no volume rendering.
 - **Seismic data.** No SEG-Y, no seismic attribute display.
-- **Petrophysics.** No log curve display, no log calculations. Strata consumes tops and
+- **Petrophysics.** No log curve display, no log calculations. WebMap consumes tops and
   computed values as point attributes.
 - **Reservoir simulation.** Grids are for mapping, not for flow simulation.
 - **Esri format lock-in.** No SDE, no `.lyr`, no ArcPy, no geodatabase writing.

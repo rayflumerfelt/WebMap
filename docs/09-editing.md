@@ -170,7 +170,7 @@ tool.
 Runs on every geometry change, before save. Errors block; warnings do not.
 
 ```python
-# python/strata_geo/validate.py
+# python/webmap_geo/validate.py
 
 from dataclasses import dataclass
 from enum import StrEnum

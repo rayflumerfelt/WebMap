@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Conventions and guardrails for developing Strata. Read this before writing code.
+Conventions and guardrails for developing WebMap. Read this before writing code.
 
 This file lives at the repository root. Claude Code reads it automatically; add
 `packages/*/CLAUDE.md` for package-specific rules as they accumulate.
@@ -36,8 +36,8 @@ make eval             # Run MCP evaluations
 Single test:
 
 ```bash
-uv run pytest python/strata_geo/tests/test_kriging.py::test_recovers_synthetic_field -x
-pnpm --filter @strata/style-model test -- compile.test.ts
+uv run pytest python/webmap_geo/tests/test_kriging.py::test_recovers_synthetic_field -x
+pnpm --filter @webmap/style-model test -- compile.test.ts
 ```
 
 **Always run `make check` before declaring work complete.** Not "it should pass" — run it.
@@ -54,7 +54,7 @@ Violating these produces bugs that are invisible in review and expensive in prod
   Variogram ranges in degrees are meaningless.
 - **Never** infer a CRS. If a file has no CRS, fail with a message asking for one.
 - All geoprocessing takes an explicit `CrsContext`. Direct `pyproj` use outside
-  `strata_core.crs` is a lint error.
+  `webmap_core.crs` is a lint error.
 - Reprojection happens at defined boundaries only, never mid-algorithm.
 
 ### 3.2 Identity
@@ -71,7 +71,7 @@ Violating these produces bugs that are invisible in review and expensive in prod
   module-level seeding.
 - Iterative solvers record tolerance and iteration count. A job that hit the iteration cap is
   flagged, not silently returned.
-- Every derived dataset gets a lineage record with `strata_geo.__version__`.
+- Every derived dataset gets a lineage record with `webmap_geo.__version__`.
 
 ### 3.4 Destructive operations
 
@@ -81,7 +81,7 @@ Violating these produces bugs that are invisible in review and expensive in prod
 
 ### 3.5 Package boundaries
 
-- `python/strata_geo` imports no web framework, no database, no `strata_core`. NumPy and
+- `python/webmap_geo` imports no web framework, no database, no `webmap_core`. NumPy and
   Shapely in, NumPy and Shapely out.
 - `packages/map` imports nothing from `apps/web`.
 - `packages/ui` imports no MapLibre.
@@ -219,7 +219,7 @@ This application targets workstations (`00-overview.md` §7.1). Write desktop as
 
 | Code | Requirement |
 |---|---|
-| `strata_geo` algorithms | Reference comparison + property tests. Highest bar in the repo. |
+| `webmap_geo` algorithms | Reference comparison + property tests. Highest bar in the repo. |
 | Permission logic | Exhaustive: every visibility × grant × role combination |
 | Style compilation | Shared TS/Python vectors, both must pass |
 | File readers | Every `hostile/` fixture, asserting on the error message |
@@ -282,7 +282,7 @@ Notes for both human and AI contributors.
 - One logical change per commit.
 - Do not refactor adjacent code while implementing a feature. Propose it separately.
 - Do not add dependencies without saying why in the PR description. Every dependency in
-  `strata_geo` is load-bearing and reviewed.
+  `webmap_geo` is load-bearing and reviewed.
 - Do not "improve" specifications while implementing them. Flag the disagreement.
 
 ### 7.3 When blocked
@@ -355,7 +355,7 @@ Conventional Commits, scoped by package:
 feat(geo): fault-aware neighbourhood search for ordinary kriging
 fix(render): wait for document.fonts.ready before screenshot
 perf(io): bulk COPY instead of INSERT for feature loading
-docs(mcp): clarify polling guidance in strata_get_job description
+docs(mcp): clarify polling guidance in webmap_get_job description
 ```
 
 Branches: `feat/fault-aware-kriging`, `fix/render-font-race`.
@@ -441,7 +441,7 @@ repos:
         entry: 'engine\.(connect|begin)\('
         language: pygrep
         files: ^(apps|python)/.*\.py$
-        exclude: ^(python/strata_core/db/session\.py|tests/)
+        exclude: ^(python/webmap_core/db/session\.py|tests/)
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
@@ -497,8 +497,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pnpm --filter @strata/style-model test
-      - run: uv run pytest python/strata_core/tests/test_style_vectors.py
+      - run: pnpm --filter @webmap/style-model test
+      - run: uv run pytest python/webmap_core/tests/test_style_vectors.py
 
   visual:
     runs-on: ubuntu-latest
@@ -551,12 +551,12 @@ Terms that appear throughout and are not general software vocabulary.
 | Need | Location |
 |---|---|
 | Entity model, DDL | `docs/02-data-model.md` |
-| Permission logic | `python/strata_core/permissions.py` |
-| CRS handling | `python/strata_core/crs.py` |
-| Interpolation | `python/strata_geo/interpolate/` |
-| Style compilation | `packages/style-model/` and `python/strata_core/style/` |
+| Permission logic | `python/webmap_core/permissions.py` |
+| CRS handling | `python/webmap_core/crs.py` |
+| Interpolation | `python/webmap_geo/interpolate/` |
+| Style compilation | `packages/style-model/` and `python/webmap_core/style/` |
 | MCP tools | `apps/api/mcp/server.py` |
 | Render service | `apps/render/service.py` |
-| Map component | `packages/map/src/StrataMap.tsx` |
+| Map component | `packages/map/src/WebMap.tsx` |
 | Test fixtures | `tests/fixtures/` |
 | Visual goldens | `tests/visual/golden/` |

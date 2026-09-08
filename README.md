@@ -1,4 +1,4 @@
-# Strata
+# WebMap
 
 Web-based geospatial mapping for subsurface geologists, with an MCP server that lets Claude
 drive it conversationally.

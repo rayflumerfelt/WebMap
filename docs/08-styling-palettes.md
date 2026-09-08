@@ -196,7 +196,7 @@ packages/style-model/test-vectors/
 └── ...
 ```
 
-Both `packages/style-model` (Vitest) and `python/strata_core/style` (pytest) run the same
+Both `packages/style-model` (Vitest) and `python/webmap_core/style` (pytest) run the same
 vectors. A divergence fails CI in both languages.
 
 **Why two implementations rather than one?** The frontend needs synchronous compilation for
@@ -208,7 +208,7 @@ without a JS runtime. The shared vectors are the cost of that.
 ## 4. Classification
 
 ```python
-# python/strata_core/style/classify.py
+# python/webmap_core/style/classify.py
 
 import numpy as np
 
@@ -311,10 +311,10 @@ hand-built ramps guarantees the tool is rejected.
 | Surfer color spec | `.clr` | Golden Software Surfer |
 | GMT color palette | `.cpt` | GMT, cpt-city |
 | QGIS color ramp | `.xml` | QGIS style exports |
-| Strata native | `.json` | Round-trip |
+| WebMap native | `.json` | Round-trip |
 
 ```python
-# python/strata_core/style/palette_io.py
+# python/webmap_core/style/palette_io.py
 
 def read_clr(text: str) -> Palette:
     """Surfer .clr format.
@@ -472,7 +472,7 @@ export function deriveLegend(
 }
 ```
 
-Rendered by `@strata/ui`, mounted in both the SPA and the render shell. One implementation —
+Rendered by `@webmap/ui`, mounted in both the SPA and the render shell. One implementation —
 which is the reason the render service screenshots the page rather than the canvas.
 
 ---

@@ -1,6 +1,6 @@
 # 05 — Geoprocessing
 
-Package: `python/strata_geo`. Pure computation. **No database, no HTTP, no framework
+Package: `python/webmap_geo`. Pure computation. **No database, no HTTP, no framework
 imports.** Takes NumPy arrays and Shapely geometries, returns NumPy arrays and Shapely
 geometries. This isolation is what makes it testable against Surfer reference outputs and
 separately versionable.
@@ -11,7 +11,7 @@ separately versionable.
 
 ```toml
 [project]
-name = "strata-geo"
+name = "webmap-geo"
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.0",
@@ -93,7 +93,7 @@ Raw fault polylines from a geologist's interpretation are almost never triangula
 Cleaning is a required step with clear diagnostics, not a silent fix-up.
 
 ```python
-# python/strata_geo/faults.py
+# python/webmap_geo/faults.py
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -184,7 +184,7 @@ def clean_network(
 ## 4. Constrained triangulation
 
 ```python
-# python/strata_geo/mesh.py
+# python/webmap_geo/mesh.py
 
 import numpy as np
 import triangle as tr
@@ -245,7 +245,7 @@ Briggs (1974). What Surfer produces by default, and what geologists expect for s
 Implemented directly because no library does it with fault awareness.
 
 ```python
-# python/strata_geo/interpolate/minimum_curvature.py
+# python/webmap_geo/interpolate/minimum_curvature.py
 
 import numpy as np
 import scipy.sparse as sp
@@ -303,7 +303,7 @@ def _assemble_biharmonic(grid, points, values, constraints, tension):
 Two hard requirements at this scale: local neighborhoods, and fault-aware distance.
 
 ```python
-# python/strata_geo/interpolate/kriging.py
+# python/webmap_geo/interpolate/kriging.py
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -384,7 +384,7 @@ Kriging without variogram analysis is kriging with made-up parameters. Both an a
 (for Claude) and an interactive path (for the geologist) are required.
 
 ```python
-# python/strata_geo/variogram.py
+# python/webmap_geo/variogram.py
 
 import numpy as np
 from dataclasses import dataclass
@@ -460,7 +460,7 @@ def fit(
 ### 5.5 Method dispatch
 
 ```python
-# python/strata_geo/interpolate/__init__.py
+# python/webmap_geo/interpolate/__init__.py
 
 def interpolate(request: InterpolationSpec) -> InterpolationResult:
     """Single entry point. Validates, dispatches, returns grid + diagnostics.
@@ -481,7 +481,7 @@ def interpolate(request: InterpolationSpec) -> InterpolationResult:
 ## 6. Contouring
 
 ```python
-# python/strata_geo/contour.py
+# python/webmap_geo/contour.py
 
 import contourpy
 import numpy as np
@@ -562,7 +562,7 @@ Non-negotiable, because these outputs go into partner decks and get revisited a 
   no bare `np.random.*`. The seed is recorded in the lineage record.
 - **Iterative solvers record their convergence tolerance and iteration count.** A grid that hit
   the iteration cap without converging is flagged, not silently returned.
-- **`strata_geo.__version__` is written into every lineage record.** A change to the
+- **`webmap_geo.__version__` is written into every lineage record.** A change to the
   neighborhood search is a version bump, so old outputs remain explicable.
 - **Reference fixtures.** `tests/fixtures/reference/` holds known inputs with Surfer and
   ArcGIS reference outputs where available. Regression tests assert agreement within a stated

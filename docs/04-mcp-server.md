@@ -1,27 +1,27 @@
 # 04 — MCP Server
 
-Server name: `strata_mcp` (Python convention `{service}_mcp`).
-Transport: **Streamable HTTP, stateless JSON**, mounted at `/mcp` on the `strata-api` ASGI app.
+Server name: `webmap_mcp` (Python convention `{service}_mcp`).
+Transport: **Streamable HTTP, stateless JSON**, mounted at `/mcp` on the `webmap-api` ASGI app.
 Framework: FastMCP (Python SDK).
 
 ---
 
 ## 1. Design principles
 
-**Tool names carry the service prefix.** `strata_list_datasets`, not `list_datasets`. This
+**Tool names carry the service prefix.** `webmap_list_datasets`, not `list_datasets`. This
 server will run alongside others; generic names collide and confuse tool selection.
 
 **The MCP layer is a presentation layer.** It calls the same service functions as the REST
 API. It never contains business logic, never talks to the database directly, never
 re-implements a permission check. If you find yourself writing domain logic in a tool handler,
-it belongs in `strata_core.services`.
+it belongs in `webmap_core.services`.
 
 **Responses are shaped for a reader with limited context.** List responses are compact and
 paginated. Detail responses are full. Never return a 5 MB GeoJSON blob into a conversation.
 
 **Errors instruct.** An error tells Claude what went wrong *and what to do next*. "Dataset not
 found" is a dead end. "No dataset named 'wolfcamp porosity'; the closest matches are X, Y, Z —
-use `strata_search_datasets` to look more broadly" lets the conversation continue.
+use `webmap_search_datasets` to look more broadly" lets the conversation continue.
 
 **Metadata over pixels.** Claude cannot write a defensible slide caption from a PNG. Every
 render returns the interpolation method, its parameters, value range, units, CRS, and vintage.
@@ -34,23 +34,23 @@ Twenty tools in six groups.
 
 | Group | Tools |
 |---|---|
-| Discovery | `strata_list_projects`, `strata_list_datasets`, `strata_search_datasets`, `strata_describe_dataset` |
-| Analysis | `strata_interpolate`, `strata_contour`, `strata_aggregate`, `strata_fit_variogram` |
-| Rendering | `strata_render_map`, `strata_get_render`, `strata_suggest_maps` |
-| Sessions | `strata_open_session`, `strata_get_session`, `strata_update_session` |
-| Styling | `strata_list_palettes`, `strata_list_style_templates` |
-| Jobs & admin | `strata_get_job`, `strata_cancel_job`, `strata_export_dataset`, `strata_delete_dataset` |
+| Discovery | `webmap_list_projects`, `webmap_list_datasets`, `webmap_search_datasets`, `webmap_describe_dataset` |
+| Analysis | `webmap_interpolate`, `webmap_contour`, `webmap_aggregate`, `webmap_fit_variogram` |
+| Rendering | `webmap_render_map`, `webmap_get_render`, `webmap_suggest_maps` |
+| Sessions | `webmap_open_session`, `webmap_get_session`, `webmap_update_session` |
+| Styling | `webmap_list_palettes`, `webmap_list_style_templates` |
+| Jobs & admin | `webmap_get_job`, `webmap_cancel_job`, `webmap_export_dataset`, `webmap_delete_dataset` |
 
 ### 2.1 Annotations
 
 | Tool | readOnly | destructive | idempotent | openWorld |
 |---|---|---|---|---|
-| `strata_list_*`, `strata_search_*`, `strata_describe_*`, `strata_get_*` | ✓ | ✗ | ✓ | ✗ |
-| `strata_suggest_maps`, `strata_fit_variogram` | ✓ | ✗ | ✓ | ✗ |
-| `strata_interpolate`, `strata_contour`, `strata_aggregate` | ✗ | ✗ | ✗ | ✗ |
-| `strata_render_map`, `strata_open_session` | ✗ | ✗ | ✗ | ✗ |
-| `strata_update_session`, `strata_export_dataset` | ✗ | ✗ | ✓ | ✗ |
-| `strata_delete_dataset` | ✗ | **✓** | ✓ | ✗ |
+| `webmap_list_*`, `webmap_search_*`, `webmap_describe_*`, `webmap_get_*` | ✓ | ✗ | ✓ | ✗ |
+| `webmap_suggest_maps`, `webmap_fit_variogram` | ✓ | ✗ | ✓ | ✗ |
+| `webmap_interpolate`, `webmap_contour`, `webmap_aggregate` | ✗ | ✗ | ✗ | ✗ |
+| `webmap_render_map`, `webmap_open_session` | ✗ | ✗ | ✗ | ✗ |
+| `webmap_update_session`, `webmap_export_dataset` | ✗ | ✗ | ✓ | ✗ |
+| `webmap_delete_dataset` | ✗ | **✓** | ✓ | ✗ |
 
 ---
 
@@ -65,22 +65,22 @@ from uuid import UUID
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from strata_core import services
-from strata_core.permissions import Principal
+from webmap_core import services
+from webmap_core.permissions import Principal
 
 mcp = FastMCP(
-    name="strata",
+    name="webmap",
     instructions=(
-        "Strata is a geospatial mapping system for subsurface geology. Use it to "
+        "WebMap is a geospatial mapping system for subsurface geology. Use it to "
         "find spatial datasets, interpolate scattered point data into gridded "
         "surfaces (honoring geological faults), derive contours, and render maps "
         "for presentations.\n\n"
-        "Typical flow: find a dataset with strata_search_datasets, inspect it with "
-        "strata_describe_dataset, grid it with strata_interpolate, then render with "
-        "strata_render_map. Renders return structured metadata — use it to write "
+        "Typical flow: find a dataset with webmap_search_datasets, inspect it with "
+        "webmap_describe_dataset, grid it with webmap_interpolate, then render with "
+        "webmap_render_map. Renders return structured metadata — use it to write "
         "accurate figure captions rather than describing the image.\n\n"
         "When the user wants to edit data rather than view it, use "
-        "strata_open_session and give them the link."
+        "webmap_open_session and give them the link."
     ),
 )
 
@@ -93,8 +93,8 @@ def principal_from_context(ctx) -> Principal:
     """
     claims = ctx.request_context.auth  # populated by the token middleware
     return Principal(
-        user_id=UUID(claims["strata_user_id"]),
-        team_ids=frozenset(UUID(t) for t in claims["strata_team_ids"]),
+        user_id=UUID(claims["webmap_user_id"]),
+        team_ids=frozenset(UUID(t) for t in claims["webmap_team_ids"]),
         channel="claude",
     )
 ```
@@ -103,13 +103,13 @@ def principal_from_context(ctx) -> Principal:
 
 ## 4. Discovery tools
 
-### 4.1 `strata_list_datasets`
+### 4.1 `webmap_list_datasets`
 
 ```python
 @mcp.tool(
     annotations={"readOnlyHint": True, "idempotentHint": True},
 )
-async def strata_list_datasets(
+async def webmap_list_datasets(
     ctx,
     project_id: Annotated[UUID | None, Field(
         None, description="Restrict to one project. Omit to list across all "
@@ -122,7 +122,7 @@ async def strata_list_datasets(
 ) -> str:
     """List spatial datasets the user can access.
 
-    Returns compact summaries. Call strata_describe_dataset for full detail
+    Returns compact summaries. Call webmap_describe_dataset for full detail
     including attribute schema and value ranges.
     """
     p = principal_from_context(ctx)
@@ -153,11 +153,11 @@ JSON response follows the pagination contract:
 }
 ```
 
-### 4.2 `strata_search_datasets`
+### 4.2 `webmap_search_datasets`
 
 ```python
 @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
-async def strata_search_datasets(
+async def webmap_search_datasets(
     ctx,
     query: Annotated[str, Field(
         description="Free text matched against dataset name and description. "
@@ -179,11 +179,11 @@ async def strata_search_datasets(
 This is the tool that resolves "*this* data" into an ID. It is the most-called tool in the
 server; make it fast and make it forgiving.
 
-### 4.3 `strata_describe_dataset`
+### 4.3 `webmap_describe_dataset`
 
 ```python
 @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
-async def strata_describe_dataset(
+async def webmap_describe_dataset(
     ctx,
     dataset_id: UUID,
     include_sample: Annotated[bool, Field(
@@ -206,19 +206,19 @@ made?" without a second call.
 
 ## 5. Analysis tools
 
-### 5.1 `strata_interpolate`
+### 5.1 `webmap_interpolate`
 
 The core operation. Long-running, so it returns a job handle.
 
 ```python
 @mcp.tool()
-async def strata_interpolate(
+async def webmap_interpolate(
     ctx,
     dataset_id: Annotated[UUID, Field(
         description="Point dataset containing the values to interpolate.")],
     value_field: Annotated[str, Field(
         description="Attribute field holding the value to grid. Must be "
-                    "numeric. Check strata_describe_dataset for field names.")],
+                    "numeric. Check webmap_describe_dataset for field names.")],
     output_name: Annotated[str, Field(
         description="Name for the resulting grid dataset, e.g. "
                     "'Wolfcamp A Porosity — Kriged'.")],
@@ -244,7 +244,7 @@ async def strata_interpolate(
     cell_size: Annotated[float | None, Field(
         None, gt=0, description=(
             "Grid cell size in project analysis-CRS units (usually feet or "
-            "metres — check strata_list_projects). Omit to derive from data "
+            "metres — check webmap_list_projects). Omit to derive from data "
             "density."))] = None,
     variogram_model: Annotated[
         Literal["spherical", "exponential", "gaussian", "matern", "linear"] | None,
@@ -261,10 +261,10 @@ async def strata_interpolate(
     """Interpolate scattered point data into a gridded surface.
 
     Returns a job handle immediately — gridding takes seconds to minutes
-    depending on point count and method. Poll with strata_get_job.
+    depending on point count and method. Poll with webmap_get_job.
 
     On completion the job result contains the new grid's dataset_id, which
-    can be passed to strata_render_map or strata_contour.
+    can be passed to webmap_render_map or webmap_contour.
     """
 ```
 
@@ -279,18 +279,18 @@ Gridding job queued.
 - **Faults**: Midland Basin Faults (23 features) — will be honored
 - **Estimated**: ~40 s
 
-Poll with `strata_get_job`. Do not call again for the same input.
+Poll with `webmap_get_job`. Do not call again for the same input.
 ```
 
 The last line matters. Without it, an agent that polls and sees `queued` may re-submit.
 
-### 5.2 `strata_fit_variogram`
+### 5.2 `webmap_fit_variogram`
 
 Read-only, fast, and the thing that makes kriging defensible.
 
 ```python
 @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
-async def strata_fit_variogram(
+async def webmap_fit_variogram(
     ctx,
     dataset_id: UUID,
     value_field: str,
@@ -315,11 +315,11 @@ Returns nugget, sill, range, anisotropy ratio and azimuth, plus a plain-language
 "Strong spatial correlation out to ~4,200 ft with marked NE–SW anisotropy (1.8:1). Nugget is
 9% of sill, suggesting modest measurement noise."
 
-### 5.3 `strata_contour`
+### 5.3 `webmap_contour`
 
 ```python
 @mcp.tool()
-async def strata_contour(
+async def webmap_contour(
     ctx,
     dataset_id: Annotated[UUID, Field(description="Grid dataset to contour.")],
     output_name: str,
@@ -346,11 +346,11 @@ async def strata_contour(
     """
 ```
 
-### 5.4 `strata_aggregate`
+### 5.4 `webmap_aggregate`
 
 ```python
 @mcp.tool()
-async def strata_aggregate(
+async def webmap_aggregate(
     ctx,
     operation: Annotated[
         Literal["buffer", "dissolve", "clip", "intersect", "union", "difference",
@@ -386,13 +386,13 @@ async def strata_aggregate(
 
 ## 6. Rendering tools
 
-### 6.1 `strata_render_map`
+### 6.1 `webmap_render_map`
 
 The tool that produces the image Claude displays.
 
 ```python
 @mcp.tool()
-async def strata_render_map(
+async def webmap_render_map(
     ctx,
     layers: Annotated[list[dict], Field(description=(
         "Ordered list, bottom to top. Each entry: "
@@ -437,7 +437,7 @@ async def strata_render_map(
 Response — image content block plus structured text:
 
 ```markdown
-![Wolfcamp A Porosity](strata://render/3f9c...)
+![Wolfcamp A Porosity](webmap://render/3f9c...)
 
 **Render** `3f9c…a71e` · 2560×1440
 
@@ -454,18 +454,18 @@ Response — image content block plus structured text:
 Ordinary kriging of 1,847 well control points with fault constraints;
 250 ft grid. Values 4.1–21.8%.
 
-Open interactively: https://strata.corp/s/k3n8fq
+Open interactively: https://webmap.corp/s/k3n8fq
 ```
 
 Every render carries a session link. Review without blocking.
 
-### 6.2 `strata_suggest_maps`
+### 6.2 `webmap_suggest_maps`
 
 Domain knowledge the app has and Claude does not.
 
 ```python
 @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
-async def strata_suggest_maps(
+async def webmap_suggest_maps(
     ctx,
     dataset_id: Annotated[UUID | None, Field(None)] = None,
     project_id: Annotated[UUID | None, Field(None)] = None,
@@ -486,11 +486,11 @@ This is the difference between Claude assembling a deck and Claude assembling a 
 
 ## 7. Session tools
 
-### 7.1 `strata_open_session`
+### 7.1 `webmap_open_session`
 
 ```python
 @mcp.tool()
-async def strata_open_session(
+async def webmap_open_session(
     ctx,
     layers: Annotated[list[dict], Field(description="Same shape as render_map.")],
     name: Annotated[str | None, Field(None)] = None,
@@ -510,7 +510,7 @@ async def strata_open_session(
 Returns:
 
 ```markdown
-Session ready: **https://strata.corp/s/k3n8fq**
+Session ready: **https://webmap.corp/s/k3n8fq**
 
 Loaded: Wolfcamp A Structure (grid), Midland Basin Faults (editable),
 Well Control. Editing enabled on the fault layer.
@@ -519,7 +519,7 @@ Changes save automatically. Ask me to re-render when you're done and
 I'll pick up the current state.
 ```
 
-### 7.2 `strata_get_session`
+### 7.2 `webmap_get_session`
 
 Read back session state so Claude can pick up after the user has edited. This closes the loop
 — session ID is the shared vocabulary between conversation and application.
@@ -528,11 +528,11 @@ Read back session state so Claude can pick up after the user has edited. This cl
 
 ## 8. Job tools
 
-### 8.1 `strata_get_job`
+### 8.1 `webmap_get_job`
 
 ```python
 @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
-async def strata_get_job(ctx, job_id: UUID) -> str:
+async def webmap_get_job(ctx, job_id: UUID) -> str:
     """Check the status of a long-running operation.
 
     States: queued, running, succeeded, failed, cancelled. When running,
@@ -564,7 +564,7 @@ shared node, which prevents triangulation.
 - 'Unnamed F-12' × 'Unnamed F-14' near (-102.19, 31.94)
 - 'Gardendale Fault' has a dangling end 340 ft from 'Big Lake Fault'
 
-Fix in the map editor: https://strata.corp/s/m4p2xz?tool=fault-cleanup
+Fix in the map editor: https://webmap.corp/s/m4p2xz?tool=fault-cleanup
 Or re-run without fault constraints by omitting fault_dataset_id — note
 this will interpolate across the faults and may produce a geologically
 incorrect surface.
@@ -579,7 +579,7 @@ Both paths forward are named, and the consequence of the easy one is stated.
 ```python
 # apps/api/mcp/errors.py
 
-class StrataToolError(Exception):
+class WebMapToolError(Exception):
     """Base for errors surfaced to Claude. The message IS the interface —
     write it for a reader deciding what to do next."""
 
@@ -594,14 +594,14 @@ class StrataToolError(Exception):
         return out
 
 
-class DatasetNotFound(StrataToolError):
+class DatasetNotFound(WebMapToolError):
     def __init__(self, ref: str, near_matches: list[tuple[str, str]]):
         msg = f"No dataset matching '{ref}'."
         sugg = []
         if near_matches:
             msg += " Closest matches:"
             sugg = [f"`{did}` — {name}" for name, did in near_matches[:5]]
-        sugg.append("Use `strata_search_datasets` with a broader query.")
+        sugg.append("Use `webmap_search_datasets` with a broader query.")
         super().__init__(msg, sugg)
 ```
 
@@ -645,11 +645,11 @@ selection is invisible without them.
 ## 11. Implementation checklist
 
 - [ ] Streamable HTTP transport, stateless JSON
-- [ ] All tools prefixed `strata_`
+- [ ] All tools prefixed `webmap_`
 - [ ] All tools annotated (readOnly / destructive / idempotent / openWorld)
 - [ ] Every list tool paginates and returns `has_more` / `next_offset` / `total`
 - [ ] Every tool supports `response_format` where it returns data
-- [ ] No business logic in tool handlers — all delegate to `strata_core.services`
+- [ ] No business logic in tool handlers — all delegate to `webmap_core.services`
 - [ ] `principal_from_context` used in every handler; no service-account path
 - [ ] Destructive tools require `confirm: true`
 - [ ] Error messages name a next action

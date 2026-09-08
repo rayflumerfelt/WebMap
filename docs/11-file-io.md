@@ -1,6 +1,6 @@
 # 11 — File I/O and Connectors
 
-Package: `python/strata_io`.
+Package: `python/webmap_io`.
 
 ---
 
@@ -30,7 +30,7 @@ layers, returns arrays rather than per-feature dicts.
 Data lives in three places. Build one abstraction rather than special-casing each.
 
 ```python
-# python/strata_io/connectors/base.py
+# python/webmap_io/connectors/base.py
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -166,7 +166,7 @@ stale data as current.
 ## 3. Reading
 
 ```python
-# python/strata_io/read.py
+# python/webmap_io/read.py
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -311,7 +311,7 @@ applies.
 ## 5. Grid I/O
 
 ```python
-# python/strata_io/raster.py
+# python/webmap_io/raster.py
 
 import numpy as np
 import rasterio
@@ -388,7 +388,7 @@ async def ingest(ctx: JobContext, source_uri: str, options: IngestOptions) -> UU
    11. audit           emit ingest event
 
     Steps 5-6 produce warnings attached to the dataset, visible in the UI and
-    in strata_describe_dataset. A layer with 40 dropped null geometries
+    in webmap_describe_dataset. A layer with 40 dropped null geometries
     should say so rather than silently having 40 fewer features than the
     source file.
     """

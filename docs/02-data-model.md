@@ -30,7 +30,7 @@ system. Every function that touches coordinates must be explicit about which it 
    meters-horizontal. See `dataset.vertical_unit`.
 
 ```python
-# python/strata_core/crs.py
+# python/webmap_core/crs.py
 
 from dataclasses import dataclass
 from pyproj import CRS, Transformer
@@ -489,7 +489,7 @@ CREATE TABLE lineage (
     -- Full parameter set, sufficient to re-run identically
     parameters      JSONB NOT NULL,
     input_dataset_ids UUID[] NOT NULL,
-    strata_geo_version TEXT NOT NULL,          -- pinned algorithm package version
+    webmap_geo_version TEXT NOT NULL,          -- pinned algorithm package version
     job_id          UUID,
     created_by      UUID NOT NULL REFERENCES app_user(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -549,37 +549,37 @@ CREATE INDEX ON audit_event (object_type, object_id, created_at DESC);
 ALTER TABLE dataset ENABLE ROW LEVEL SECURITY;
 
 -- The app sets these per request/session; see 03-auth-security.md
---   SET LOCAL strata.user_id = '<uuid>';
---   SET LOCAL strata.team_ids = '{<uuid>,<uuid>}';
+--   SET LOCAL webmap.user_id = '<uuid>';
+--   SET LOCAL webmap.team_ids = '{<uuid>,<uuid>}';
 
 CREATE POLICY dataset_read ON dataset FOR SELECT
 USING (
-    owner_user_id = current_setting('strata.user_id')::uuid
+    owner_user_id = current_setting('webmap.user_id')::uuid
     OR visibility = 'org'
     OR (visibility = 'team'
-        AND owner_team_id = ANY(current_setting('strata.team_ids')::uuid[]))
+        AND owner_team_id = ANY(current_setting('webmap.team_ids')::uuid[]))
     OR EXISTS (
         SELECT 1 FROM access_grant g
         WHERE g.object_type = 'dataset' AND g.object_id = dataset.id
-          AND (g.grantee_user_id = current_setting('strata.user_id')::uuid
-               OR g.grantee_team_id = ANY(current_setting('strata.team_ids')::uuid[]))
+          AND (g.grantee_user_id = current_setting('webmap.user_id')::uuid
+               OR g.grantee_team_id = ANY(current_setting('webmap.team_ids')::uuid[]))
     )
 );
 
 CREATE POLICY dataset_write ON dataset FOR UPDATE
 USING (
-    owner_user_id = current_setting('strata.user_id')::uuid
+    owner_user_id = current_setting('webmap.user_id')::uuid
     OR EXISTS (
         SELECT 1 FROM access_grant g
         WHERE g.object_type = 'dataset' AND g.object_id = dataset.id
           AND g.role = 'editor'
-          AND (g.grantee_user_id = current_setting('strata.user_id')::uuid
-               OR g.grantee_team_id = ANY(current_setting('strata.team_ids')::uuid[]))
+          AND (g.grantee_user_id = current_setting('webmap.user_id')::uuid
+               OR g.grantee_team_id = ANY(current_setting('webmap.team_ids')::uuid[]))
     )
 );
 
 CREATE POLICY dataset_delete ON dataset FOR DELETE
-USING (owner_user_id = current_setting('strata.user_id')::uuid);
+USING (owner_user_id = current_setting('webmap.user_id')::uuid);
 ```
 
 Repeat for `project`, `style_template`, `palette`, `map_session`, `render`.
@@ -591,7 +591,7 @@ Repeat for `project`, `style_template`, `palette`, `map_session`, `render`.
 
 ## 5. Pydantic models
 
-`python/strata_core/models.py`. These are the API and MCP contract.
+`python/webmap_core/models.py`. These are the API and MCP contract.
 
 ```python
 from __future__ import annotations
@@ -642,7 +642,7 @@ Bbox = Annotated[list[float], Field(min_length=4, max_length=4)]
 """[west, south, east, north] in EPSG:4326."""
 
 
-class StrataModel(BaseModel):
+class WebMapModel(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",          # Catch typos in Claude-supplied params loudly
@@ -651,14 +651,14 @@ class StrataModel(BaseModel):
     )
 
 
-class AttributeField(StrataModel):
+class AttributeField(WebMapModel):
     name: str
     type: Literal["string", "integer", "number", "boolean", "date", "datetime"]
     nullable: bool = True
     description: str | None = None
 
 
-class DatasetSummary(StrataModel):
+class DatasetSummary(WebMapModel):
     """Compact form returned by list/search. Keep small — Claude reads many."""
     id: UUID
     name: str
@@ -692,11 +692,11 @@ class DatasetDetail(DatasetSummary):
     lineage: LineageRecord | None = None
 
 
-class LineageRecord(StrataModel):
+class LineageRecord(WebMapModel):
     operation: str
     parameters: dict[str, Any]
     input_dataset_ids: list[UUID]
-    strata_geo_version: str
+    webmap_geo_version: str
     created_at: datetime
 
 
@@ -710,7 +710,7 @@ class VariogramModel(StrEnum):
     LINEAR = "linear"
 
 
-class VariogramSpec(StrataModel):
+class VariogramSpec(WebMapModel):
     model: VariogramModel = VariogramModel.EXPONENTIAL
     range: float | None = Field(
         None, gt=0,
@@ -728,7 +728,7 @@ class VariogramSpec(StrataModel):
     )
 
 
-class GridSpec(StrataModel):
+class GridSpec(WebMapModel):
     cell_size: float | None = Field(
         None, gt=0,
         description="Cell size in analysis-CRS units. None = derived from "
@@ -755,7 +755,7 @@ class InterpolationMethod(StrEnum):
     NEAREST = "nearest"
 
 
-class InterpolationRequest(StrataModel):
+class InterpolationRequest(WebMapModel):
     dataset_id: UUID
     value_field: str
     method: InterpolationMethod = InterpolationMethod.ORDINARY_KRIGING
@@ -787,7 +787,7 @@ class SizePreset(StrEnum):
     THUMBNAIL = "thumbnail"         #                   640x360   @1x
 
 
-class RenderMetadata(StrataModel):
+class RenderMetadata(WebMapModel):
     title: str
     value_range: dict[str, Any] | None = None
     method: str | None = None
@@ -799,7 +799,7 @@ class RenderMetadata(StrataModel):
     feature_counts: dict[str, int] = Field(default_factory=dict)
 
 
-class RenderResult(StrataModel):
+class RenderResult(WebMapModel):
     render_id: UUID
     url: str
     width: int
@@ -825,7 +825,7 @@ Rules:
 - Never delete an upgrade path. `v1 → v2 → v3` chains are fine.
 
 ```python
-# python/strata_core/versioning.py
+# python/webmap_core/versioning.py
 
 from typing import Any, Callable
 

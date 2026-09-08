@@ -28,7 +28,7 @@ for nothing.
 ## 2. Job contract
 
 ```python
-# python/strata_core/jobs.py
+# python/webmap_core/jobs.py
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -91,7 +91,7 @@ class JobContext:
 from arq import cron
 from arq.connections import RedisSettings
 
-from strata_core.settings import settings
+from webmap_core.settings import settings
 
 
 async def startup(ctx: dict) -> None:
@@ -208,7 +208,7 @@ GET /api/v1/jobs/{job_id}
 ```
 
 Client backoff is specified in `07-frontend.md` §7. Claude's polling guidance is in the
-`strata_get_job` tool description.
+`webmap_get_job` tool description.
 
 ### 5.2 WebSocket (progressive enhancement)
 
@@ -255,7 +255,7 @@ Business units share infrastructure. One geologist kriging 500k points should no
 another team.
 
 ```python
-# python/strata_core/quota.py
+# python/webmap_core/quota.py
 
 @dataclass(frozen=True)
 class QuotaPolicy:
@@ -375,11 +375,11 @@ Metrics to alert on:
 
 | Metric | Alert threshold |
 |---|---|
-| `strata_job_queue_depth` | > 50 for 5 min |
-| `strata_job_duration_seconds{kind}` p95 | > 2× the target in `05-geoprocessing.md` §9 |
-| `strata_job_failures_total{error_kind="internal"}` | any |
-| `strata_worker_oom_total` | any |
-| `strata_render_pool_saturation` | > 0.9 for 5 min |
+| `webmap_job_queue_depth` | > 50 for 5 min |
+| `webmap_job_duration_seconds{kind}` p95 | > 2× the target in `05-geoprocessing.md` §9 |
+| `webmap_job_failures_total{error_kind="internal"}` | any |
+| `webmap_worker_oom_total` | any |
+| `webmap_render_pool_saturation` | > 0.9 for 5 min |
 
 Every job log line carries `job_id`, `kind`, and `requested_by`. The OpenTelemetry trace spans
 MCP call → API → worker, which is the only way to debug "the map Claude gave me is wrong"
