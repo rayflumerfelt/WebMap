@@ -253,18 +253,22 @@ support.
 ### 5.1 Claude renders a map
 
 ```
-Claude          webmap-mcp        webmap-api      arq/worker      render        storage
-  │                 │                 │               │              │             │
-  ├─render_map()───▶│                 │               │              │             │
-  │                 ├─authorize──────▶│               │              │             │
-  │                 ├─build style────▶│               │              │             │
-  │                 ├─enqueue render──────────────────────────────▶ │             │
-  │                 │                 │               │              ├─fetch tiles │
-  │                 │                 │               │              ├─screenshot  │
-  │                 │                 │               │              ├─put PNG────▶│
-  │                 │◀────────────────────────────── render_id ──────┤             │
-  │◀─PNG + metadata─┤                 │               │              │             │
+Claude          webmap-mcp        webmap-api        render          storage
+  │                 │                 │                │               │
+  ├─render_map()───▶│                 │                │               │
+  │                 ├─build style────▶│                │               │
+  │                 ├─render (sync, direct call)──────▶│               │
+  │                 │                 │                ├─fetch tiles   │
+  │                 │                 │                ├─screenshot    │
+  │                 │                 │                ├─put PNG──────▶│
+  │                 │◀── render_id + image ────────────┤               │
+  │◀─image + metadata┤                 │                │               │
 ```
+
+**Rendering is synchronous.** At 1–2 s with a warm browser it fits inside an MCP tool
+timeout, and making Claude poll for an image it will display immediately adds a turn for
+nothing. The job queue is for gridding, not rendering — see `10-jobs-async.md` §1 and
+`06-rendering.md` §11.
 
 Renders are *persisted artifacts with IDs*, not transient bytes. Claude may reference the same
 map on several slides; re-rendering a kriged surface is not free.

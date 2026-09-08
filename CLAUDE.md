@@ -428,7 +428,9 @@ repos:
         entry: 'np\.random\.(seed|rand|randn|choice|permutation)\('
         language: pygrep
         files: \.py$
-        exclude: ^tests/
+        # Tests live at python/<pkg>/tests/, not at the repo root — an
+        # anchored ^tests/ never matches and the exclude silently does nothing.
+        exclude: (^|/)tests/
 
       - id: no-max-width-query
         name: no max-width media queries (desktop-first)
@@ -441,7 +443,9 @@ repos:
         entry: 'engine\.(connect|begin)\('
         language: pygrep
         files: ^(apps|python)/.*\.py$
-        exclude: ^(python/webmap_core/db/session\.py|tests/)
+        # The session helper is the one file that legitimately calls
+        # engine.begin(). It lives in apps/api/db/, not python/webmap_core/db/.
+        exclude: (^apps/api/db/session\.py$|(^|/)tests/)
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2

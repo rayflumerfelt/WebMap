@@ -21,8 +21,8 @@ system. Every function that touches coordinates must be explicit about which it 
    run **only** in the analysis CRS. Never in geographic coordinates. A variogram range in
    decimal degrees is meaningless and anisotropy in degrees is worse.
 2. `project.analysis_srid` is **required and explicit**. Never inferred, never defaulted to
-   3857. A geologist working Midland Basin gets EPSG:32013 (NAD83 Texas Central) because
-   that's what their data is in, not because we guessed.
+   3857. A geologist working Midland Basin gets EPSG:2277 (NAD83 / Texas Central, ftUS)
+   because that's what their data is in, not because we guessed.
 3. Reprojection happens at defined boundaries only: on ingest (storage → nothing, we keep it),
    before analysis (storage → analysis), before tiling (storage → 4326 → 3857). Never
    ad-hoc mid-algorithm.
@@ -470,7 +470,7 @@ CREATE INDEX ON render (session_id, created_at DESC);
     "neighbors": 48, "faults_honored": true
   },
   "grid": {"cell_size": 250, "nx": 812, "ny": 640, "unit": "ft"},
-  "crs": {"analysis_srid": 32038, "display_srid": 3857},
+  "crs": {"analysis_srid": 2277, "display_srid": 3857},
   "extent": [-102.9, 31.6, -101.4, 32.5],
   "data_vintage": "2026-07-31",
   "feature_counts": {"control_points": 1847, "faults": 23}

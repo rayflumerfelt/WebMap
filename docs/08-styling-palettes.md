@@ -458,19 +458,31 @@ export function deriveLegend(
         // Ticks at pretty values, not at even fractions of the range.
         ticks: prettyTicks(...),
       };
-    case 'graduated':
+    case 'graduated': {
+      // Iterate classCount, NOT breaks. classify() returns n-1 interior breaks
+      // for n classes and compileGraduated emits n colours; mapping over breaks
+      // renders a 5-class map with a 4-entry legend. A legend that disagrees
+      // with the map is the exact failure §3 avoids by compiling to `step`.
+      const swatches = sampleRamp(palettes[symbology.paletteId], symbology.classCount);
       return {
         kind: 'classes',
         title: `${meta.name} (${meta.valueRange?.unit ?? ''})`,
-        entries: symbology.breaks.map((_, i) => ({
-          swatch: sampleRamp(palettes[symbology.paletteId], symbology.classCount)[i],
+        entries: Array.from({ length: symbology.classCount }, (_, i) => ({
+          swatch: swatches[i],
           label: formatClassLabel(symbology.breaks, i, meta.valueRange?.unit),
         })),
       };
+    }
     // ...
   }
 }
 ```
+
+The class count is the single source of truth for how many entries exist, in both the
+compiler and the legend. A shared test vector should assert that
+`compileSymbology(...).length` and `deriveLegend(...).entries.length` agree for every
+graduated vector — this is exactly the kind of drift §3.1's cross-language suite exists
+to catch.
 
 Rendered by `@webmap/ui`, mounted in both the SPA and the render shell. One implementation —
 which is the reason the render service screenshots the page rather than the canvas.

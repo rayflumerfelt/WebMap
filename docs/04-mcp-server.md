@@ -446,7 +446,7 @@ Response — image content block plus structured text:
 - **Method**: ordinary kriging, exponential variogram (range 4,200 ft,
   nugget 1.1, sill 12.4), anisotropy 1.8:1 at 035°, faults honored
 - **Grid**: 250 ft cells, 812 × 640
-- **CRS**: NAD83 / Texas Central (EPSG:32038)
+- **CRS**: NAD83 / Texas Central, ftUS (EPSG:2277)
 - **Vintage**: 2026-07-31
 - **Control**: 1,847 points, 23 faults
 
