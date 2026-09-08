@@ -305,18 +305,20 @@ GET /api/v1/jobs/{id} ◀── poll (or WS) ────────┤
 
 | Env | Purpose | Data |
 |---|---|---|
-| `local` | Docker Compose, all services | Seeded synthetic + small fixtures |
-| `dev` | Shared, auto-deploy from `main` | Synthetic |
-| `staging` | Pre-production, prod-like | Anonymized subset |
-| `prod` | Production | Real |
+| `local` | Docker Compose, all services | Seeded synthetic + `tests/fixtures/` |
+| `work` | The one running instance | Real |
 
-MCP registration against `dev` and `staging` uses separate OAuth clients. Never point a Claude
-connector at `prod` from a development context.
+Two, not four. A shared `dev` and a `staging` existed to coordinate a team and to rehearse
+deploys; there is no team and the deploy is `docker compose up`.
+
+Use **separate MCP bearer tokens** per environment anyway, and never point a Claude connector
+at `work` while developing. The reason is unchanged even without multi-tenancy: a tool call
+that deletes a dataset does not care which environment it landed in.
 
 ## 7. Observability
 
 - **Structured logging.** `structlog`, JSON to stdout. Every log line carries `request_id`,
-  `user_id`, and where applicable `job_id` / `dataset_id`.
+  `channel` (`web` / `claude`), and where applicable `job_id` / `dataset_id`.
 - **Tracing.** OpenTelemetry. The critical trace is MCP tool call → API → worker → render,
   which crosses three services and is otherwise impossible to debug.
 - **Metrics.** Prometheus. Watch: render p95 latency, job queue depth, job failure rate by

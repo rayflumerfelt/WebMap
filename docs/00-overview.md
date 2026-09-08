@@ -111,11 +111,14 @@ Explicitly out of scope. Do not build these; do not let them creep in.
   computed values as point attributes.
 - **Reservoir simulation.** Grids are for mapping, not for flow simulation.
 - **Esri format lock-in.** No SDE, no `.lyr`, no ArcPy, no geodatabase writing.
-- **Real-time collaborative editing.** Multi-user simultaneous editing of the same layer is
-  deferred indefinitely. Optimistic locking with conflict detection only.
+- **Multi-user anything.** No accounts, no permission model, no sharing by grant, and no
+  concurrent editing — one editor per layer. See `adr/0001-single-user-deployment.md` and
+  `adr/0005-single-editor-persistence.md` for the triggers that would reopen these.
 - **Mobile and tablet support.** This is a **desktop-first** application — see §7.1. Small
   viewports are not a supported target and are not tested.
-- **Public internet exposure.** Internal network and VPN only.
+- **Public internet exposure.** Internal network and VPN only. This is load-bearing rather
+  than merely cautious: it is why renders reach Claude as inline image bytes rather than as a
+  URL (`04-mcp-server.md` §6.1).
 
 ### 7.1 Desktop-first, deliberately
 

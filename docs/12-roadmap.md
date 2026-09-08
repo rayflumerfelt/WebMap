@@ -3,8 +3,12 @@
 Six phases. Each has a demoable outcome and explicit acceptance criteria. A phase is not
 complete until every criterion passes.
 
-Estimates assume 2–3 engineers plus AI-assisted development. Treat them as relative weights,
-not commitments.
+Estimates assume a solo build with AI assistance. Treat them as relative weights, not
+commitments — the ordering is the part worth defending.
+
+Phase 1 was "Identity and data plane" at 4–6 weeks. `adr/0001-single-user-deployment.md`
+removed the identity half; what is left is about a week, and the project's largest identified
+schedule risk went with it.
 
 ---
 
@@ -20,15 +24,18 @@ Scaffolding. Boring, and skipping it costs triple later.
 - CI: lint, typecheck, test, build on every PR
 - `CLAUDE.md` in place; pre-commit hooks active
 - Structured logging and OpenTelemetry wiring
-- Seed script generating synthetic Midland Basin data: 2,000 points, 20 faults, one grid
+- Seed script generating synthetic Midland Basin data in EPSG:2277: 2,000 points, 20
+  faults, one grid
 
 **Acceptance**
 
 - [ ] `docker compose up` gives a working stack from a clean clone
 - [ ] `make check` runs lint, typecheck, and tests across both languages
-- [ ] Boundary violations fail CI (verify with a deliberate violation)
+- [ ] `import-linter` and `eslint-plugin-boundaries` contracts fail CI (verify each with a
+      deliberate violation, including a `pyproj` import outside `webmap_geo.crs`)
 - [ ] Migrations apply and roll back cleanly
-- [ ] Seed data loads and is queryable
+- [ ] Seed data loads and is queryable, and its GeoParquet object prunes row groups on a
+      tile-extent predicate (see `11-file-io.md` §6.1 — an unsorted write silently defeats it)
 
 ---
 
@@ -82,7 +89,7 @@ First phase with something a geologist recognizes.
 **Acceptance**
 
 - [ ] A 500k-feature layer pans and zooms at 30+ fps
-- [ ] Tile requests without a valid token return 403
+- [ ] Tile requests without the API token return 403
 - [ ] TypeScript and Python compilers produce identical Style JSON for every test vector
 - [ ] A session saved in the browser reloads with identical appearance
 - [ ] Scale bar is correct at three latitudes spanning the working area
@@ -230,7 +237,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - [ ] `webmap_suggest_maps` proposes sensible products for the seed dataset
 - [ ] All performance targets met
 - [ ] Keyboard navigation reaches every control; focus is always visible
-- [ ] Security checklist in `03-auth-security.md` §11 fully green
+- [ ] Checklist in `03-auth-security.md` §7 fully green
 
 ---
 
@@ -254,10 +261,11 @@ Not scheduled. Revisit only with a stated trigger.
 
 | Item | Trigger to reconsider |
 |---|---|
+| Multi-user access: accounts, permissions, sharing by grant | A second regular user (`adr/0001`) |
+| Concurrent editing of the same layer | A second regular editor — reopens `adr/0002` too, since DuckDB is single-writer (`adr/0005`) |
 | MapLibre Native renderer | Render throughput > 100/min, or container size becomes an operational blocker |
-| Real-time collaborative editing | Sustained demand from more than one team |
 | Full planar topology | Coverage editing becomes a primary workflow |
-| GeoParquet storage backend | A single layer exceeds 10M features |
+| PostGIS for the data plane | An operation DuckDB spatial cannot express, or concurrent writers (`adr/0002`) |
 | Kerberos delegation for shares | Share-sourced data expands beyond well-understood locations |
 | Unattended/batch rendering | A scheduled reporting requirement appears |
 | 3D, seismic, petrophysics | Never — these are explicit non-goals (`00-overview.md` §7) |
@@ -266,14 +274,20 @@ Not scheduled. Revisit only with a stated trigger.
 
 ## Sequencing rationale
 
-Two orderings that might look wrong and are deliberate.
-
-**Auth before display.** Tempting to build a pretty map first and bolt on auth later. Do not.
-Identity propagation touches every service, every query, and every job payload. Retrofitting it
-means rewriting all of them, and the version that ships without it will leak data.
+One ordering that might look wrong and is deliberate.
 
 **Claude integration before gridding.** Phase 3 renders existing data; it does not need
 kriging. Getting Claude end-to-end early validates the riskiest architectural assumption in the
 project — that the conversational interface is actually good — while there is still time to
 change course. Building six months of geoprocessing first and discovering the interaction model
 is wrong would be the expensive failure.
+
+This was previously one of two arguments; "auth before display" is gone with the auth. That
+makes this one carry more weight, not less — there is now nothing else forcing the order, so
+the temptation to start on kriging because it is the interesting part is unopposed by anything
+except this paragraph.
+
+**A note on Phase 4.** It is untouched by the single-user revisions and remains the longest
+phase and the differentiator. Nothing in `adr/0001` through `adr/0006` makes fault-constrained
+interpolation easier or shorter. Do not let the newly cheap Phase 1 create the impression that
+the whole plan compressed.

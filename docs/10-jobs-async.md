@@ -114,6 +114,9 @@ class WorkerSettings:
         cron(reconcile_stale_datasets, hour=2, minute=0),
         cron(purge_expired_sessions,   hour=3, minute=0),
         cron(hard_delete_soft_deleted, hour=4, minute=0),
+        # Copy-on-write grows storage with edit count. Every version for
+        # 30 days, then thinned to daily. See adr/0005 and 09 §5.3.
+        cron(thin_feature_versions,    hour=5, minute=0),
     ]
     on_startup = startup
     on_shutdown = shutdown
