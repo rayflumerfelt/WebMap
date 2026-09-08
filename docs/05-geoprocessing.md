@@ -32,11 +32,87 @@ we need the mesh anyway).
 
 ---
 
-## 2. The fault constraint problem
+## 2. Coordinate reference systems
+
+`webmap_geo.crs` owns `pyproj`. It is the only module in the repository permitted to import
+it, and `webmap_core.crs.CrsContext` is a thin wrapper over this one rather than a parallel
+implementation. See `adr/0003-geoprocessing-owns-crs.md` for why the dependency points this
+way round.
+
+### 2.1 `AnalysisFrame`
+
+Every public entry point takes one. It **declares** the planar frame the caller's arrays are
+already in — it does not cause a transformation.
+
+```python
+# python/webmap_geo/frame.py
+
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class AnalysisFrame:
+    """The planar frame the caller's coordinates are already expressed in.
+
+    Metadata, not an instruction. Nothing in webmap_geo reads this to decide
+    whether to reproject — arrays arrive in the analysis CRS or the caller has
+    a bug. It is carried into diagnostics and lineage so a stored grid can say
+    what frame produced it, and it appears in error messages so "range 4200"
+    is never ambiguous about its units.
+
+    Validation that the srid is projected rather than geographic happens in
+    webmap_core.crs.CrsContext, at the boundary that prepares the arrays.
+    """
+    srid: int
+    units: Literal["m", "ft", "usft"]
+```
+
+### 2.2 Where transformation is allowed
+
+Owning `pyproj` does not license calling it mid-algorithm. `CLAUDE.md` §3.1 rule 3 is
+unchanged: reprojection happens at defined boundaries only. Inside this package there are
+exactly two legitimate callers, and both run before any solver:
+
+1. **Reconciling constraint and control-point datasets** that arrive in different storage
+   CRSs. Faults from one source and picks from another must be in one frame before the mesh
+   is built.
+2. **Converting `GridSpec.bbox`** — documented in EPSG:4326 (`02-data-model.md` §4) — into
+   analysis-CRS grid bounds, since `cell_size` is in analysis-CRS units.
+
+Anything else is a bug. A transformer call inside `minimum_curvature`, a kriging neighbourhood
+search, or a contour walk means coordinates were not in the frame they claimed to be.
+
+### 2.3 Enforcement
+
+`import-linter`, not a pygrep hook — the rule is about module graphs, which grep cannot see.
+
+```toml
+[[tool.importlinter.contracts]]
+name = "webmap_geo is a leaf"
+type = "forbidden"
+source_modules = ["webmap_geo"]
+forbidden_modules = ["webmap_core", "webmap_io", "fastapi", "sqlalchemy", "pydantic"]
+
+[[tool.importlinter.contracts]]
+name = "pyproj is confined to webmap_geo.crs"
+type = "forbidden"
+source_modules = ["webmap_geo.interpolate", "webmap_geo.mesh", "webmap_geo.faults",
+                  "webmap_geo.variogram", "webmap_geo.contour", "webmap_geo.aggregate",
+                  "webmap_core", "webmap_io"]
+forbidden_modules = ["pyproj"]
+```
+
+`pyproj` is deliberately absent from the first contract. It is a legitimate `webmap_geo`
+dependency now; the second contract is what keeps it in one module.
+
+---
+
+## 3. The fault constraint problem
 
 This is the differentiator. No Python library supports it.
 
-### 2.1 Two constraint types, different physics
+### 3.1 Two constraint types, different physics
 
 | Type | Value across it | Gradient across it | Carries Z? | Example |
 |---|---|---|---|---|
@@ -47,7 +123,7 @@ Surfer uses the same distinction. Getting it wrong is not subtle: treating a fau
 breakline smears throw across it; treating a breakline as a fault tears a surface that should
 be continuous.
 
-### 2.2 Why naive approaches fail
+### 3.2 Why naive approaches fail
 
 **Masking after interpolation** — grid normally, then blank cells near faults. Wrong: the
 interpolation already used points from the far side, so values near the fault are contaminated
@@ -62,7 +138,7 @@ up as artifacts.
 sides of a sealing fault are not 500 ft apart for interpolation purposes; they are
 disconnected, or connected only by a path around the fault tip.
 
-### 2.3 Architecture: constrained mesh as the substrate
+### 3.3 Architecture: constrained mesh as the substrate
 
 Build a constrained Delaunay triangulation once, with fault segments as constrained edges.
 Everything else runs on that mesh.
@@ -88,7 +164,7 @@ adjacency inherits the constraint without special-casing.
 
 ---
 
-## 3. Fault network preprocessing
+## 4. Fault network preprocessing
 
 Raw fault polylines from a geologist's interpretation are almost never triangulation-ready.
 Cleaning is a required step with clear diagnostics, not a silent fix-up.
@@ -182,7 +258,7 @@ def clean_network(
 
 ---
 
-## 4. Constrained triangulation
+## 5. Constrained triangulation
 
 ```python
 # python/webmap_geo/mesh.py
@@ -238,9 +314,9 @@ bottleneck.
 
 ---
 
-## 5. Interpolation methods
+## 6. Interpolation methods
 
-### 5.1 Minimum curvature — the fast path
+### 6.1 Minimum curvature — the fast path
 
 Briggs (1974). What Surfer produces by default, and what geologists expect for structure maps.
 Implemented directly because no library does it with fault awareness.
@@ -299,7 +375,7 @@ def _assemble_biharmonic(grid, points, values, constraints, tension):
     ...
 ```
 
-### 5.2 Ordinary and universal kriging
+### 6.2 Ordinary and universal kriging
 
 Two hard requirements at this scale: local neighborhoods, and fault-aware distance.
 
@@ -379,7 +455,7 @@ def _neighbors_with_barriers(
 ordinary kriging of the residuals. Use when the data has regional dip — common for structure
 maps across a basin margin.
 
-### 5.3 Variogram fitting
+### 6.3 Variogram fitting
 
 Kriging without variogram analysis is kriging with made-up parameters. Both an automatic path
 (for Claude) and an interactive path (for the geologist) are required.
@@ -449,7 +525,7 @@ def fit(
     """
 ```
 
-### 5.4 Cubic spline and the rest
+### 6.4 Cubic spline and the rest
 
 - **Cubic spline** — `scipy.interpolate.RBFInterpolator` with a thin-plate or cubic kernel on
   the constrained mesh vertices, then mesh sampling. Fast, smooth, can overshoot; warn when
@@ -458,7 +534,7 @@ def fit(
   Produces bull's-eyes; offer it, do not default to it.
 - **Nearest** — diagnostic only. Useful for checking data coverage.
 
-### 5.5 Method dispatch
+### 6.5 Method dispatch
 
 ```python
 # python/webmap_geo/interpolate/__init__.py
@@ -479,7 +555,7 @@ def interpolate(request: InterpolationSpec) -> InterpolationResult:
 
 ---
 
-## 6. Contouring
+## 7. Contouring
 
 ```python
 # python/webmap_geo/contour.py
@@ -531,7 +607,7 @@ Contour output carries attributes: `value`, `is_index` (every Nth for heavier st
 
 ---
 
-## 7. Spatial aggregation
+## 8. Spatial aggregation
 
 Thin wrappers over PostGIS and Shapely. Not the hard part, but breadth matters for adoption.
 
@@ -555,7 +631,7 @@ distances in degrees, which vary with latitude and are never what anyone wanted.
 
 ---
 
-## 8. Determinism and reproducibility
+## 9. Determinism and reproducibility
 
 Non-negotiable, because these outputs go into partner decks and get revisited a year later.
 
@@ -588,7 +664,7 @@ def test_matches_surfer_reference():
 
 ---
 
-## 9. Performance targets
+## 10. Performance targets
 
 Measured on 8 vCPU, 32 GB.
 
@@ -603,4 +679,4 @@ Measured on 8 vCPU, 32 GB.
 | Contouring | 2000×2000, 20 levels | < 5 s | |
 
 Exceeding these is a bug, not a fact of life. Profile before optimizing; the fault-aware
-neighbor search is the expected hotspot and the caching strategy in §5.2 is the first lever.
+neighbor search is the expected hotspot and the caching strategy in §6.2 is the first lever.

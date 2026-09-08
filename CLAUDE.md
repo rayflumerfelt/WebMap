@@ -53,9 +53,14 @@ Violating these produces bugs that are invisible in review and expensive in prod
 - **Never** run interpolation, distance, area, or buffer operations in a geographic CRS.
   Variogram ranges in degrees are meaningless.
 - **Never** infer a CRS. If a file has no CRS, fail with a message asking for one.
-- All geoprocessing takes an explicit `CrsContext`. Direct `pyproj` use outside
-  `webmap_core.crs` is a lint error.
-- Reprojection happens at defined boundaries only, never mid-algorithm.
+- **Orchestration** takes an explicit `CrsContext` (`webmap_core.crs`). **`webmap_geo` entry
+  points take an `AnalysisFrame`** — it declares the frame the arrays are already in and never
+  causes a transformation. See `docs/adr/0003-geoprocessing-owns-crs.md`.
+- `pyproj` is confined to `webmap_geo.crs`. `CrsContext` wraps it; it is not a second
+  implementation. Importing `pyproj` anywhere else fails `import-linter`.
+- Reprojection happens at defined boundaries only, never mid-algorithm. Owning the capability
+  is not licence to call it inside a solver — `05-geoprocessing.md` §2.2 names the only two
+  legitimate callers.
 
 ### 3.2 Provenance
 
@@ -88,13 +93,19 @@ or what produced a thing.
 
 ### 3.5 Package boundaries
 
-- `python/webmap_geo` imports no web framework, no database, no `webmap_core`. NumPy and
-  Shapely in, NumPy and Shapely out.
+- `python/webmap_geo` imports no web framework, no database, no `webmap_core`. NumPy,
+  Shapely, and DuckDB in; NumPy, Shapely, and Arrow out.
 - `packages/map` imports nothing from `apps/web`.
 - `packages/ui` imports no MapLibre.
 - `packages/style-model` imports no React and no MapLibre.
 
-Enforced by lint. If you need to violate one, the design is wrong.
+**The dividing line for geoprocessing:** if an operation reads or writes **geometry**, it
+belongs to `webmap_geo`. If it reads or writes **appearance** — colours, class breaks, palette
+stops — it does not, and stays in `style-model`. See
+`docs/adr/0004-geoprocessing-owns-geometry.md`.
+
+Enforced by `import-linter` for Python and `eslint-plugin-boundaries` for TypeScript. If you
+need to violate one, the design is wrong.
 
 ---
 

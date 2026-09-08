@@ -218,7 +218,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - Export with loss reporting
 - `webmap_suggest_maps`
 - User preferences: basemaps, default palettes, units
-- Performance tuning against the targets in `05` §9 and `06` §11
+- Performance tuning against the targets in `05` §10 and `06` §11
 - Accessibility audit
 - Documentation and onboarding
 
