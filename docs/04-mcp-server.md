@@ -668,7 +668,8 @@ class DatasetNotFound(WebMapToolError):
 - Never return a bare stack trace or a database error string.
 - Always name at least one next action.
 - Validation errors quote the offending value and the constraint.
-- Permission errors name the owner to ask (see `03-auth-security.md` §3.2).
+- Resource-limit errors name the limit, the offending value, and a value that would work
+  (see `10-jobs-async.md` §7).
 
 ---
 

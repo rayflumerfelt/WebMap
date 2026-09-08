@@ -48,16 +48,17 @@ can write a technically accurate caption.
 
 ## 3. Users
 
-**Primary: subsurface geologists.** Domain-expert, not GIS-expert. Fluent in Surfer and
-Petrel conventions. Care about variograms, fault sealing, depth conventions, and whether the
-map is defensible in front of a partner. Not interested in coordinate reference system
-mechanics but severely affected when they are wrong.
+**One subsurface geologist**, wearing every hat: registering datasets, running the workflows,
+and producing the deck figures.
 
-**Secondary: geotechs and analysts.** Prepare data, run standard workflows, produce deck
-figures.
+Domain-expert, not GIS-expert. Fluent in Surfer and Petrel conventions. Cares about variograms,
+fault sealing, depth conventions, and whether the map is defensible in front of a partner. Not
+interested in coordinate reference system mechanics but severely affected when they are wrong.
 
-**Tertiary: data managers.** Register datasets, manage shared basemaps and style templates,
-control access.
+That last sentence is the design constraint that survives having no other users: the system
+must refuse to guess a CRS, refuse to interpolate across a sealing fault, and record enough
+provenance to explain a map a year later — because there is no reviewer to catch it if it
+does not.
 
 ## 4. Deployment context
 
@@ -147,9 +148,9 @@ no bug filed against a small viewport will be prioritized.
 
 ## 8. Definition of success
 
-Phase 1 is successful when a geologist can ask Claude for a contour map of a registered
-dataset and receive a correct, legible, correctly-projected image in under thirty seconds
-without touching another application.
+The first real milestone — Phase 3 in `12-roadmap.md` — is reached when a geologist can ask
+Claude for a contour map of a registered dataset and receive a correct, legible,
+correctly-projected image in under thirty seconds without touching another application.
 
 Full success is when a geologist assembles a partner deck entirely through conversation with
 Claude, and every map in it carries provenance sufficient to reproduce it a year later.

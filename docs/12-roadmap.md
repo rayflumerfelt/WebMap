@@ -78,7 +78,7 @@ First phase with something a geologist recognizes.
 - `@webmap/map` component with the API in `07-frontend.md` §2
 - In-process MVT generation from GeoParquet via DuckDB; automatic GeoJSON/MVT switching
 - TiTiler COG serving with dynamic colormaps
-- Auth proxy for tile endpoints with scoped signed tokens
+- Auth proxy for tile endpoints; tile cache keyed on (dataset_id, version, z, x, y)
 - Style compilation in both TypeScript and Python, sharing test vectors
 - Layer tree, basic symbology (single symbol, categorized)
 - Session create, load, autosave
@@ -96,7 +96,7 @@ First phase with something a geologist recognizes.
 - [ ] Layer reorder, visibility, and opacity persist across reload
 - [ ] At 1920×1080, layer tree + symbology + attribute table are all usable without
       occluding the map
-- [ ] Panel widths and collapsed state persist per user across sessions
+- [ ] Panel widths and collapsed state persist across sessions
 - [ ] Below 1280 px the app shows the minimum-width notice rather than reflowing
 - [ ] Status bar shows analysis CRS, live cursor coordinates in that CRS, and map scale
 - [ ] Every documented keyboard shortcut works; every context menu is reachable via
@@ -126,8 +126,8 @@ The point of the project.
 - [ ] A hostile style referencing an internal host is rejected before dispatch
 - [ ] `page.route` blocks a redirect to a non-allowlisted host (test with a fixture)
 - [ ] Render workers cannot reach the database or the internet (verify by attempting egress)
-- [ ] `webmap_open_session` produces a link that loads correctly for the same user, and shows a
-      helpful permission error for a different user
+- [ ] `webmap_open_session` produces a link that loads the session, and a link to a deleted
+      or expired session fails with a message naming what happened
 - [ ] All 10 evaluations pass
 - [ ] Legends appear correctly in rendered output, matching the interactive legend
 

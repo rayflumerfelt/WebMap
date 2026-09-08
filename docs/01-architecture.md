@@ -239,12 +239,21 @@ Detail in `05-geoprocessing.md`.
 **Decision.** Every object carries one `owner_user_id`. There is no visibility scope, no
 grant model, no team, and no row-level security.
 
-**Rationale.** Tenants here are business units inside one company. Cross-BU sharing is a
-legitimate and frequent need — one asset team's fault interpretation is exactly what another
-team wants. Hard partitioning would mean fighting our own data model within months.
+**Rationale.** There is one user. An authorization model exists to answer "may this principal
+see this object," and that question has no interesting answer here. Building it anyway would
+have cost most of Phase 1 and carried the project's largest schedule risk — a federated OAuth
+server with Dynamic Client Registration — to protect data from a population of one. See
+`adr/0001-single-user-deployment.md`.
 
-RLS is retained, but the policy is written against the grant model rather than a partition
-column.
+`owner_user_id` survives the removal because it answers a different question that stays
+interesting: *who or what produced this*. Lineage records name the actor that made a grid, and
+audit records carry `actor_channel` so "did I make this map, or did Claude make it for me" is
+answerable. Dropping the column would lose that, and provenance is what makes a map defensible
+a year later.
+
+**Would change our mind.** A second regular user. That is a real project — schema, policies,
+and an authorization server — not a flag, which is why the ADR states the cost rather than
+pretending the door is ajar.
 
 ### 4.7 Terra Draw for editing
 
