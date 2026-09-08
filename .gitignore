@@ -1,0 +1,48 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Node -------------------------------------------------------------------
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.vite/
+
+# --- Secrets and local config -----------------------------------------------
+# CLAUDE.md §7.5: never commit secrets, .env files, or real data.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Data and artifacts -----------------------------------------------------
+# tests/fixtures/ is synthetic and IS committed. These are not.
+/data/
+*.gpkg-shm
+*.gpkg-wal
+
+# Visual regression output. Goldens under tests/visual/golden/ ARE committed;
+# regenerate them deliberately with `make update-goldens` (CLAUDE.md §7.5).
+tests/visual/output/
+
+# Playwright
+playwright-report/
+test-results/
+
+# --- OS and editor ----------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
