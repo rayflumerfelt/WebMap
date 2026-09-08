@@ -48,28 +48,33 @@ can write a technically accurate caption.
 
 ## 3. Users
 
-**Primary: subsurface geologists.** Domain-expert, not GIS-expert. Fluent in Surfer and
-Petrel conventions. Care about variograms, fault sealing, depth conventions, and whether the
-map is defensible in front of a partner. Not interested in coordinate reference system
-mechanics but severely affected when they are wrong.
+**One subsurface geologist**, wearing every hat: registering datasets, running the workflows,
+and producing the deck figures.
 
-**Secondary: geotechs and analysts.** Prepare data, run standard workflows, produce deck
-figures.
+Domain-expert, not GIS-expert. Fluent in Surfer and Petrel conventions. Cares about variograms,
+fault sealing, depth conventions, and whether the map is defensible in front of a partner. Not
+interested in coordinate reference system mechanics but severely affected when they are wrong.
 
-**Tertiary: data managers.** Register datasets, manage shared basemaps and style templates,
-control access.
+That last sentence is the design constraint that survives having no other users: the system
+must refuse to guess a CRS, refuse to interpolate across a sealing fault, and record enough
+provenance to explain a map a year later — because there is no reviewer to catch it if it
+does not.
 
 ## 4. Deployment context
 
-Single company, multiple business units. Approximately 50–200 users.
+**Single operator.** One geologist, one machine or one internal host. Not a shared service.
 
-- **Tenancy:** Business units are *not* isolated tenants. Cross-BU sharing is a first-class
-  feature. Authorization is per-object ownership plus visibility scope plus explicit grants —
-  never a partition key. See `02-data-model.md`.
-- **Identity:** One corporate OIDC provider. Group claims map to teams.
-- **No Esri footprint.** PostGIS is the spatial database. Shapefile is an interchange format
-  only.
+- **Identity:** none. No identity provider, no login flow, no permission model. See
+  `adr/0001-single-user-deployment.md` for what was removed and what it would cost to
+  bring back.
+- **Sharing** happens by exporting a file or sending a render, not by granting access.
+- **No Esri footprint.** Shapefile is an interchange format only.
 - **Data sources are mixed:** ad-hoc uploads, SMB file shares, existing PostGIS databases.
+- **Not reachable from the public internet.** This is load-bearing for §7 and for how
+  renders reach Claude — see `04-mcp-server.md` §6.1.
+
+The security posture that follows from this is in `03-auth-security.md`: the threat is
+hostile *data*, not hostile users.
 
 ## 5. Scale targets
 
@@ -77,8 +82,8 @@ Single company, multiple business units. Approximately 50–200 users.
 |---|---|---|
 | Interpolation input | 10k–500k points | Local-neighborhood kriging mandatory; global solve impossible |
 | Output grid | up to 2000×2000 cells | Sparse solve, ~seconds with multigrid |
-| Vector layer display | up to 5M features | Dynamic MVT from PostGIS, not GeoJSON |
-| Concurrent users | ~30 peak | Modest; horizontal scaling on render and job workers |
+| Vector layer display | up to 5M features | MVT from GeoParquet via DuckDB, not GeoJSON |
+| Concurrent users | 1 | Single operator; no contention to design around |
 | Render latency | < 5 s p95 | Warm browser pool |
 | Grid job latency | < 3 min p95 | Async job queue with progress |
 
@@ -86,12 +91,15 @@ Single company, multiple business units. Approximately 50–200 users.
 
 Detail in `01-architecture.md`. In one paragraph:
 
-React/Mantine frontend with MapLibre GL JS. FastAPI backend on PostGIS. Separate worker pools
-for geoprocessing (`arq`) and rendering (Playwright + headless Chromium running real MapLibre
-GL JS). Rasters as Cloud-Optimized GeoTIFF served through TiTiler; vectors as dynamic MVT.
-MapLibre Style JSON is the single source of truth for appearance — the interactive map and the
-headless renderer consume byte-identical style documents. An MCP server exposes the whole thing
-to Claude over Streamable HTTP with OAuth 2.1.
+React/Mantine frontend with MapLibre GL JS. FastAPI backend on PostgreSQL for the control
+plane — registry, sessions, jobs, lineage. Feature geometry and gridded values live in the
+data plane: GeoParquet and Cloud-Optimized GeoTIFF on object storage, queried in-process by
+DuckDB inside the geoprocessing module. Separate workers for geoprocessing (`arq`) and
+rendering (Playwright + headless Chromium running real MapLibre GL JS). Rasters served
+through TiTiler for dynamic colormaps; vectors as MVT generated in-process. MapLibre Style
+JSON is the single source of truth for appearance — the interactive map and the headless
+renderer consume byte-identical style documents. An MCP server exposes the whole thing to
+Claude over Streamable HTTP.
 
 ## 7. Non-goals
 
@@ -104,11 +112,14 @@ Explicitly out of scope. Do not build these; do not let them creep in.
   computed values as point attributes.
 - **Reservoir simulation.** Grids are for mapping, not for flow simulation.
 - **Esri format lock-in.** No SDE, no `.lyr`, no ArcPy, no geodatabase writing.
-- **Real-time collaborative editing.** Multi-user simultaneous editing of the same layer is
-  deferred indefinitely. Optimistic locking with conflict detection only.
+- **Multi-user anything.** No accounts, no permission model, no sharing by grant, and no
+  concurrent editing — one editor per layer. See `adr/0001-single-user-deployment.md` and
+  `adr/0005-single-editor-persistence.md` for the triggers that would reopen these.
 - **Mobile and tablet support.** This is a **desktop-first** application — see §7.1. Small
   viewports are not a supported target and are not tested.
-- **Public internet exposure.** Internal network and VPN only.
+- **Public internet exposure.** Internal network and VPN only. This is load-bearing rather
+  than merely cautious: it is why renders reach Claude as inline image bytes rather than as a
+  URL (`04-mcp-server.md` §6.1).
 
 ### 7.1 Desktop-first, deliberately
 
@@ -137,9 +148,9 @@ no bug filed against a small viewport will be prioritized.
 
 ## 8. Definition of success
 
-Phase 1 is successful when a geologist can ask Claude for a contour map of a registered
-dataset and receive a correct, legible, correctly-projected image in under thirty seconds
-without touching another application.
+The first real milestone — Phase 3 in `12-roadmap.md` — is reached when a geologist can ask
+Claude for a contour map of a registered dataset and receive a correct, legible,
+correctly-projected image in under thirty seconds without touching another application.
 
 Full success is when a geologist assembles a partner deck entirely through conversation with
 Claude, and every map in it carries provenance sufficient to reproduce it a year later.
@@ -150,8 +161,8 @@ Claude, and every map in it carries provenance sufficient to reproduce it a year
 |---|---|
 | `00-overview.md` | This file |
 | `01-architecture.md` | Services, topology, technology decisions with rationale |
-| `02-data-model.md` | PostGIS DDL, Pydantic models, CRS model, permissions |
-| `03-auth-security.md` | OIDC, MCP OAuth + DCR, identity propagation, SSRF controls |
+| `02-data-model.md` | Schema DDL, Pydantic models, CRS model, ownership |
+| `03-auth-security.md` | Threat model, SSRF controls, untrusted data, destructive-op safety |
 | `04-mcp-server.md` | Complete tool surface with schemas |
 | `05-geoprocessing.md` | Interpolation, fault handling, contouring, aggregation |
 | `06-rendering.md` | Playwright render service, style pipeline, tiles |

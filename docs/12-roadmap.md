@@ -3,8 +3,12 @@
 Six phases. Each has a demoable outcome and explicit acceptance criteria. A phase is not
 complete until every criterion passes.
 
-Estimates assume 2–3 engineers plus AI-assisted development. Treat them as relative weights,
-not commitments.
+Estimates assume a solo build with AI assistance. Treat them as relative weights, not
+commitments — the ordering is the part worth defending.
+
+Phase 1 was "Identity and data plane" at 4–6 weeks. `adr/0001-single-user-deployment.md`
+removed the identity half; what is left is about a week, and the project's largest identified
+schedule risk went with it.
 
 ---
 
@@ -15,53 +19,53 @@ Scaffolding. Boring, and skipping it costs triple later.
 **Deliverables**
 
 - Monorepo: pnpm + Turborepo, uv workspaces, package boundary lint rules enforced
-- Docker Compose: Postgres+PostGIS, Redis, MinIO, Martin, TiTiler
+- Docker Compose: Postgres, Redis, MinIO, TiTiler
 - Alembic migrations for the full schema in `02-data-model.md`
 - CI: lint, typecheck, test, build on every PR
 - `CLAUDE.md` in place; pre-commit hooks active
 - Structured logging and OpenTelemetry wiring
-- Seed script generating synthetic Midland Basin data: 2,000 points, 20 faults, one grid
+- Seed script generating synthetic Midland Basin data in EPSG:2277: 2,000 points, 20
+  faults, one grid
 
 **Acceptance**
 
 - [ ] `docker compose up` gives a working stack from a clean clone
 - [ ] `make check` runs lint, typecheck, and tests across both languages
-- [ ] Boundary violations fail CI (verify with a deliberate violation)
+- [ ] `import-linter` and `eslint-plugin-boundaries` contracts fail CI (verify each with a
+      deliberate violation, including a `pyproj` import outside `webmap_geo.crs`)
 - [ ] Migrations apply and roll back cleanly
-- [ ] Seed data loads and is queryable
+- [ ] Seed data loads and is queryable, and its GeoParquet object prunes row groups on a
+      tile-extent predicate (see `11-file-io.md` §6.1 — an unsorted write silently defeats it)
 
 ---
 
-## Phase 1 — Identity and data plane (4–6 weeks)
+## Phase 1 — Data plane (~1 week)
 
-**Auth starts here, not later.** It gates everything and it is the highest-variance work in
-the project.
+Previously "Identity and data plane," at 4–6 weeks. The identity half is gone — see
+`adr/0001-single-user-deployment.md`. What remains is getting real data into the system,
+which was always the part Phase 2 actually needed.
 
 **Deliverables**
 
-- OIDC login against the corporate IdP; team sync from group claims
-- `webmap-auth` authorization server with DCR, federating upstream
-- Permission model, RLS policies on all ownable tables, startup assertion
 - Dataset registry with the upload connector
 - Vector read for shapefile, GeoJSON, GeoPackage, CSV/XYZ
 - Ingest pipeline with validation, normalization, and warnings
-- REST CRUD for projects, datasets, grants
-- Audit logging
+- REST CRUD for projects and datasets
+- Static bearer token on the API and MCP endpoints
+- Audit and lineage records written on ingest
 
 **Acceptance**
 
-- [ ] A geologist logs in via SSO and lands with the correct team memberships
 - [ ] Uploading a shapefile with a `.prj` registers a dataset with correct CRS and bbox
 - [ ] Uploading a shapefile *without* a `.prj` fails with the message from `11-file-io.md` §3
-- [ ] User A cannot read User B's private dataset — verified at both application and RLS layer
-- [ ] The app DB role lacks `BYPASSRLS`; the assertion fires when it is granted
-- [ ] Claude completes the OAuth flow end to end and calls an authenticated tool
-- [ ] MCP calls execute as the requesting user (verify: two users, different results)
 - [ ] All hostile fixtures from `11-file-io.md` §8 fail with actionable messages
+- [ ] An ingested dataset carries a lineage record naming its source and actor
+- [ ] A request without the bearer token is rejected on both the REST and MCP surfaces
+- [ ] Claude calls an authenticated tool end to end
 
-**Risk.** MCP OAuth against the corporate IdP. If DCR brokering is blocked by security policy,
-escalate in week 1 — do not discover it in week 5. Have a fallback: pre-provisioned confidential
-clients per environment, accepting the manual registration step.
+**Risk.** Low, now. The previous risk here — DCR brokering blocked by corporate security
+policy — was the largest in the project and no longer exists. The remaining variance is in
+file I/O breadth, which `11-file-io.md` §8 makes testable up front.
 
 ---
 
@@ -72,9 +76,9 @@ First phase with something a geologist recognizes.
 **Deliverables**
 
 - `@webmap/map` component with the API in `07-frontend.md` §2
-- Martin MVT function-sources; automatic GeoJSON/MVT switching
+- In-process MVT generation from GeoParquet via DuckDB; automatic GeoJSON/MVT switching
 - TiTiler COG serving with dynamic colormaps
-- Auth proxy for tile endpoints with scoped signed tokens
+- Auth proxy for tile endpoints; tile cache keyed on (dataset_id, version, z, x, y)
 - Style compilation in both TypeScript and Python, sharing test vectors
 - Layer tree, basic symbology (single symbol, categorized)
 - Session create, load, autosave
@@ -85,14 +89,14 @@ First phase with something a geologist recognizes.
 **Acceptance**
 
 - [ ] A 500k-feature layer pans and zooms at 30+ fps
-- [ ] Tile requests without a valid token return 403
+- [ ] Tile requests without the API token return 403
 - [ ] TypeScript and Python compilers produce identical Style JSON for every test vector
 - [ ] A session saved in the browser reloads with identical appearance
 - [ ] Scale bar is correct at three latitudes spanning the working area
 - [ ] Layer reorder, visibility, and opacity persist across reload
 - [ ] At 1920×1080, layer tree + symbology + attribute table are all usable without
       occluding the map
-- [ ] Panel widths and collapsed state persist per user across sessions
+- [ ] Panel widths and collapsed state persist across sessions
 - [ ] Below 1280 px the app shows the minimum-width notice rather than reflowing
 - [ ] Status bar shows analysis CRS, live cursor coordinates in that CRS, and map scale
 - [ ] Every documented keyboard shortcut works; every context menu is reachable via
@@ -115,14 +119,15 @@ The point of the project.
 
 **Acceptance**
 
-- [ ] Claude renders a map of a registered dataset in under 5 s p95
+- [ ] Claude renders a map of a registered dataset in under 5 s p95, and the image
+      actually displays — an image content block, not a markdown URI
 - [ ] The rendered image is pixel-comparable to the same view in the browser
 - [ ] Render metadata contains value range, units, CRS, and vintage — verified against the source
 - [ ] A hostile style referencing an internal host is rejected before dispatch
 - [ ] `page.route` blocks a redirect to a non-allowlisted host (test with a fixture)
 - [ ] Render workers cannot reach the database or the internet (verify by attempting egress)
-- [ ] `webmap_open_session` produces a link that loads correctly for the same user, and shows a
-      helpful permission error for a different user
+- [ ] `webmap_open_session` produces a link that loads the session, and a link to a deleted
+      or expired session fails with a message naming what happened
 - [ ] All 10 evaluations pass
 - [ ] Legends appear correctly in rendered output, matching the interactive legend
 
@@ -192,7 +197,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - Terra Draw integration, vertex editing
 - Snapping with spatial index
 - Geometry validation, blocking on errors
-- Optimistic locking, conflict UI
+- Copy-on-write version commit; version history browser
 - Undo/redo
 - Attribute editing
 
@@ -204,8 +209,6 @@ the first lever; reducing default `n_neighbors` is the second.
 - [ ] Snapping lands within tolerance on vertices, edges, and intersections, with visual
       feedback
 - [ ] Snap index query completes in under 2 ms with 50k features in view
-- [ ] Concurrent edits from two sessions produce a 409 with a usable diff, never a silent
-      overwrite
 - [ ] A polygon digitized against an existing boundary with snapping on produces no sliver
 - [ ] Editing a fault and re-gridding produces a surface reflecting the new geometry
 - [ ] Undo restores exact prior state across 20 random operation sequences
@@ -221,7 +224,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - Export with loss reporting
 - `webmap_suggest_maps`
 - User preferences: basemaps, default palettes, units
-- Performance tuning against the targets in `05` §9 and `06` §11
+- Performance tuning against the targets in `05` §10 and `06` §11
 - Accessibility audit
 - Documentation and onboarding
 
@@ -234,7 +237,7 @@ the first lever; reducing default `n_neighbors` is the second.
 - [ ] `webmap_suggest_maps` proposes sensible products for the seed dataset
 - [ ] All performance targets met
 - [ ] Keyboard navigation reaches every control; focus is always visible
-- [ ] Security checklist in `03-auth-security.md` §11 fully green
+- [ ] Checklist in `03-auth-security.md` §7 fully green
 
 ---
 
@@ -258,10 +261,11 @@ Not scheduled. Revisit only with a stated trigger.
 
 | Item | Trigger to reconsider |
 |---|---|
+| Multi-user access: accounts, permissions, sharing by grant | A second regular user (`adr/0001`) |
+| Concurrent editing of the same layer | A second regular editor — reopens `adr/0002` too, since DuckDB is single-writer (`adr/0005`) |
 | MapLibre Native renderer | Render throughput > 100/min, or container size becomes an operational blocker |
-| Real-time collaborative editing | Sustained demand from more than one team |
 | Full planar topology | Coverage editing becomes a primary workflow |
-| GeoParquet storage backend | A single layer exceeds 10M features |
+| PostGIS for the data plane | An operation DuckDB spatial cannot express, or concurrent writers (`adr/0002`) |
 | Kerberos delegation for shares | Share-sourced data expands beyond well-understood locations |
 | Unattended/batch rendering | A scheduled reporting requirement appears |
 | 3D, seismic, petrophysics | Never — these are explicit non-goals (`00-overview.md` §7) |
@@ -270,14 +274,20 @@ Not scheduled. Revisit only with a stated trigger.
 
 ## Sequencing rationale
 
-Two orderings that might look wrong and are deliberate.
-
-**Auth before display.** Tempting to build a pretty map first and bolt on auth later. Do not.
-Identity propagation touches every service, every query, and every job payload. Retrofitting it
-means rewriting all of them, and the version that ships without it will leak data.
+One ordering that might look wrong and is deliberate.
 
 **Claude integration before gridding.** Phase 3 renders existing data; it does not need
 kriging. Getting Claude end-to-end early validates the riskiest architectural assumption in the
 project — that the conversational interface is actually good — while there is still time to
 change course. Building six months of geoprocessing first and discovering the interaction model
 is wrong would be the expensive failure.
+
+This was previously one of two arguments; "auth before display" is gone with the auth. That
+makes this one carry more weight, not less — there is now nothing else forcing the order, so
+the temptation to start on kriging because it is the interesting part is unopposed by anything
+except this paragraph.
+
+**A note on Phase 4.** It is untouched by the single-user revisions and remains the longest
+phase and the differentiator. Nothing in `adr/0001` through `adr/0006` makes fault-constrained
+interpolation easier or shorter. Do not let the newly cheap Phase 1 create the impression that
+the whole plan compressed.

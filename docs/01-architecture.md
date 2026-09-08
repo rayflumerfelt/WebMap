@@ -3,68 +3,61 @@
 ## 1. Service topology
 
 ```
-                        ┌──────────────────────────────┐
-                        │  Corporate OIDC IdP          │
-                        │  (Entra ID / Okta)           │
-                        └──────────────┬───────────────┘
-                                       │ OIDC federation
-                        ┌──────────────▼───────────────┐
-   Claude ──OAuth 2.1──▶│  webmap-auth                 │
-   (claude.ai)          │  Authorization Server        │
-                        │  - Dynamic Client Reg (DCR)  │
-                        │  - Token issuance            │
-                        └──────────────┬───────────────┘
-                                       │ Bearer tokens
-   ┌───────────────┐                   │
-   │  Browser      │───────────────────┤
+   ┌───────────────┐
+   │  Browser      │───────────────────┐
    │  React SPA    │                   │
    └───────────────┘                   │
                         ┌──────────────▼───────────────┐
                         │  webmap-api    (FastAPI)     │
    Claude ──MCP HTTP───▶│  webmap-mcp    (FastMCP)     │
-                        │  Both mount on same ASGI app │
+   (static token)       │  Both mount on same ASGI app │
                         └──┬────────┬────────┬─────────┘
                            │        │        │
               ┌────────────▼──┐  ┌──▼─────┐  └──────────┐
               │  PostgreSQL   │  │ Redis  │             │
-              │  + PostGIS    │  │ (arq)  │             │
-              └───────┬───────┘  └──┬─────┘             │
-                      │             │                   │
-        ┌─────────────┼─────────────┼───────────────────┼──────────┐
-        │             │             │                   │          │
-   ┌────▼─────┐  ┌────▼──────┐ ┌────▼──────┐    ┌───────▼──────┐  │
-   │ Martin   │  │ TiTiler   │ │ webmap-   │    │ webmap-      │  │
-   │ (MVT)    │  │ (COG)     │ │ worker    │    │ render       │  │
-   │          │  │           │ │ (arq)     │    │ (Playwright) │  │
-   └──────────┘  └────┬──────┘ └────┬──────┘    └──────────────┘  │
-                      │             │                              │
-                 ┌────▼─────────────▼──────────────────────────────▼┐
-                 │  Object storage (S3-compatible / MinIO)          │
-                 │  COGs, renders, uploads, exports                 │
-                 └──────────────────────────────────────────────────┘
+              │  (control     │  │ (arq)  │             │
+              │   plane only) │  │        │             │
+              └───────────────┘  └──┬─────┘             │
+                                    │                   │
+              ┌─────────────────────┼───────────────────┼──────────┐
+              │                     │                   │          │
+        ┌─────▼─────┐        ┌──────▼────┐      ┌───────▼──────┐   │
+        │ TiTiler   │        │ webmap-   │      │ webmap-      │   │
+        │ (COG)     │        │ worker    │      │ render       │   │
+        │           │        │ (arq)     │      │ (Playwright) │   │
+        └─────┬─────┘        └─────┬─────┘      └──────────────┘   │
+              │            DuckDB in-process                       │
+              │            (webmap_geo)                            │
+              │                    │                               │
+         ┌────▼────────────────────▼───────────────────────────────▼┐
+         │  Object storage (S3-compatible / MinIO)                  │
+         │  GeoParquet features, COG grids, renders, uploads        │
+         └──────────────────────────────────────────────────────────┘
+
+MVT is generated in-process from DuckDB, by the API. There is no tile service.
 ```
 
 ## 2. Services
 
 ### 2.1 `webmap-api` — FastAPI
 
-The control plane. Owns the database, enforces authorization, registers datasets, manages
-styles and sessions, enqueues jobs. Stateless; scale horizontally.
+The control plane. Owns the database, registers datasets, manages styles and sessions,
+enqueues jobs, and proxies tile requests. Stateless.
 
 Does *not* do heavy computation. Any operation that can exceed 2 seconds is enqueued.
 
 ### 2.2 `webmap-mcp` — FastMCP
 
 Mounted on the same ASGI application as `webmap-api`, at `/mcp`. Shares the database session
-factory, authorization layer, and service modules. It is a *presentation layer over the same
-services the REST API uses* — never a parallel implementation.
+factory and service modules. It is a *presentation layer over the same services the REST API
+uses* — never a parallel implementation.
 
 Transport: Streamable HTTP, stateless JSON. Not stdio (this is a remote server), not SSE
 (deprecated).
 
 Rationale for co-locating rather than a separate deployable: the MCP server needs the same
-identity context, the same permission checks, and the same domain services. Splitting them
-means duplicating authorization logic, which is the single most dangerous thing to duplicate.
+domain services, the same validation, and the same error vocabulary. Splitting them means
+maintaining two implementations of every operation and guaranteeing they drift.
 
 ### 2.3 `webmap-worker` — arq
 
@@ -80,17 +73,15 @@ Headless Chromium running real MapLibre GL JS. Produces PNGs from Style JSON.
 Kept as a separate service because the container is ~2 GB and its scaling profile is unlike
 anything else. See `06-rendering.md`.
 
-### 2.5 `martin` — vector tiles
-
-Off-the-shelf. Serves MVT directly from PostGIS via `ST_AsMVT`. Dynamic, no tile build step,
-which matters because layers are edited.
-
-Runs behind `webmap-api`'s auth proxy — never exposed directly.
-
-### 2.6 `titiler` — raster tiles
+### 2.5 `titiler` — raster tiles
 
 Off-the-shelf. Serves COGs with dynamic colormap application. Changing a color ramp is a URL
-parameter change, not a regrid. Also behind the auth proxy.
+parameter change, not a regrid — that is what makes palette editing feel instant. Behind the
+API's auth proxy, never exposed directly.
+
+Vector tiles have no equivalent service. MVT is generated in-process from DuckDB over the
+dataset's GeoParquet object (`06-rendering.md` §7), which keeps the "dynamic, no build step"
+property that matters for edited layers without a second process reading the data plane.
 
 ## 3. Repository layout
 
@@ -110,9 +101,9 @@ webmap/
 │   ├── ui/                        # @webmap/ui — ramp editor, style editor
 │   └── style-model/               # @webmap/style-model — TS types + compilers
 ├── python/                        # Reusable Python
-│   ├── webmap_geo/                # Interpolation, contouring, aggregation
+│   ├── webmap_geo/                # Interpolation, contouring, aggregation, data plane
 │   ├── webmap_io/                 # Format readers/writers, connectors
-│   └── webmap_core/               # Models, auth, permissions, shared services
+│   └── webmap_core/               # Models, services, style compilation
 ├── infra/
 │   ├── docker/
 │   ├── migrations/                # Alembic
@@ -139,8 +130,8 @@ These are enforced, not advisory. See `CLAUDE.md` for the lint configuration.
 It is the highest-value and highest-risk code in the project. Isolating it means:
 
 - It can be tested against reference outputs from Surfer without spinning up a database.
-- Its heavy numeric dependencies (`scipy`, `gstools`, `triangle`, `pyamg`) do not bloat the API
-  container.
+- Its heavy dependencies (`scipy`, `gstools`, `triangle`, `pyamg`, `duckdb`) do not bloat the
+  API container.
 - It can be versioned and pinned independently, so a change to the kriging neighborhood search
   is a deliberate version bump rather than an accidental deploy.
 
@@ -188,17 +179,32 @@ like," and it must be the one the renderer actually consumes.
 **Consequence.** Higher-level style concepts (graduated symbology, classification schemes)
 are *compilers* that emit Style JSON, not parallel representations. See `08-styling-palettes.md`.
 
-### 4.3 PostGIS as the system of record
+### 4.3 Postgres for control, DuckDB and GeoParquet for data
 
-**Decision.** PostgreSQL 16 + PostGIS 3.4. Geometry stored in the dataset's declared storage
-CRS; a generated column holds EPSG:4326 for indexing and tiling.
+**Decision.** Two planes, two engines. See `adr/0002-duckdb-data-plane.md`.
 
-**Rationale.** No Esri footprint means no reason to compromise. PostGIS gives us the spatial
-operations, `ST_AsMVT` for tiling, and row-level security as an authorization backstop.
+- **Control plane — PostgreSQL 16, no PostGIS.** Dataset registry, projects, sessions,
+  palettes, style templates, preferences, jobs, lineage. Small transactional rows. Nothing
+  here is spatial except `dataset.bbox_4326`, which is four floats.
+- **Data plane — DuckDB over GeoParquet and COG on object storage.** Feature geometry,
+  gridded values, tile generation, and the aggregation catalog. DuckDB runs in-process
+  inside `webmap_geo`; it is a library, not a service.
 
-**Alternative considered.** GeoParquet on object storage for very large layers. Deferred —
-add it as a storage backend behind the same dataset abstraction if a layer exceeds ~10M
-features.
+**Rationale.** DuckDB's spatial extension covers what PostGIS was carrying here — verified
+against 1.5.5: `ST_AsMVT`, `ST_AsMVTGeom`, `ST_TileEnvelope`, `ST_Transform`, RTREE indexes,
+and every function in the `05-geoprocessing.md` §7 catalog. The one capability it has no
+answer for is row-level security, and `adr/0001` removed the requirement for it.
+
+Running the data plane in-process is also what makes `adr/0004`'s rule — all geometry
+operations belong to `webmap_geo` — structural rather than aspirational. There is no SQL
+path for a geometry operation to escape through.
+
+**Why Postgres and not SQLite** for the control plane, given how small it is: Alembic against
+SQLite needs batch mode for nearly every `ALTER TABLE`. One small container is cheaper than
+that friction against Phase 0's "migrations apply and roll back cleanly" criterion.
+
+**Would change our mind.** Concurrent multi-writer editing becoming a requirement. DuckDB is
+a single-writer engine, and that would reopen `adr/0005` as well.
 
 ### 4.4 arq for job queuing
 
@@ -228,17 +234,26 @@ fast path for the common case.
 
 Detail in `05-geoprocessing.md`.
 
-### 4.6 Ownership + grants, not tenant partitioning
+### 4.6 Single owner, no authorization model
 
-**Decision.** Every object has an owner, a visibility scope (`private` / `team` / `org`), and
-optional explicit grants. There is no `tenant_id` partition.
+**Decision.** Every object carries one `owner_user_id`. There is no visibility scope, no
+grant model, no team, and no row-level security.
 
-**Rationale.** Tenants here are business units inside one company. Cross-BU sharing is a
-legitimate and frequent need — one asset team's fault interpretation is exactly what another
-team wants. Hard partitioning would mean fighting our own data model within months.
+**Rationale.** There is one user. An authorization model exists to answer "may this principal
+see this object," and that question has no interesting answer here. Building it anyway would
+have cost most of Phase 1 and carried the project's largest schedule risk — a federated OAuth
+server with Dynamic Client Registration — to protect data from a population of one. See
+`adr/0001-single-user-deployment.md`.
 
-RLS is retained, but the policy is written against the grant model rather than a partition
-column.
+`owner_user_id` survives the removal because it answers a different question that stays
+interesting: *who or what produced this*. Lineage records name the actor that made a grid, and
+audit records carry `actor_channel` so "did I make this map, or did Claude make it for me" is
+answerable. Dropping the column would lose that, and provenance is what makes a map defensible
+a year later.
+
+**Would change our mind.** A second regular user. That is a real project — schema, policies,
+and an authorization server — not a flag, which is why the ADR states the cost rather than
+pretending the door is ajar.
 
 ### 4.7 Terra Draw for editing
 
@@ -253,18 +268,22 @@ support.
 ### 5.1 Claude renders a map
 
 ```
-Claude          webmap-mcp        webmap-api      arq/worker      render        storage
-  │                 │                 │               │              │             │
-  ├─render_map()───▶│                 │               │              │             │
-  │                 ├─authorize──────▶│               │              │             │
-  │                 ├─build style────▶│               │              │             │
-  │                 ├─enqueue render──────────────────────────────▶ │             │
-  │                 │                 │               │              ├─fetch tiles │
-  │                 │                 │               │              ├─screenshot  │
-  │                 │                 │               │              ├─put PNG────▶│
-  │                 │◀────────────────────────────── render_id ──────┤             │
-  │◀─PNG + metadata─┤                 │               │              │             │
+Claude          webmap-mcp        webmap-api        render          storage
+  │                 │                 │                │               │
+  ├─render_map()───▶│                 │                │               │
+  │                 ├─build style────▶│                │               │
+  │                 ├─render (sync, direct call)──────▶│               │
+  │                 │                 │                ├─fetch tiles   │
+  │                 │                 │                ├─screenshot    │
+  │                 │                 │                ├─put PNG──────▶│
+  │                 │◀── render_id + image ────────────┤               │
+  │◀─image + metadata┤                 │                │               │
 ```
+
+**Rendering is synchronous.** At 1–2 s with a warm browser it fits inside an MCP tool
+timeout, and making Claude poll for an image it will display immediately adds a turn for
+nothing. The job queue is for gridding, not rendering — see `10-jobs-async.md` §1 and
+`06-rendering.md` §11.
 
 Renders are *persisted artifacts with IDs*, not transient bytes. Claude may reference the same
 map on several slides; re-rendering a kriged surface is not free.
@@ -295,18 +314,20 @@ GET /api/v1/jobs/{id} ◀── poll (or WS) ────────┤
 
 | Env | Purpose | Data |
 |---|---|---|
-| `local` | Docker Compose, all services | Seeded synthetic + small fixtures |
-| `dev` | Shared, auto-deploy from `main` | Synthetic |
-| `staging` | Pre-production, prod-like | Anonymized subset |
-| `prod` | Production | Real |
+| `local` | Docker Compose, all services | Seeded synthetic + `tests/fixtures/` |
+| `work` | The one running instance | Real |
 
-MCP registration against `dev` and `staging` uses separate OAuth clients. Never point a Claude
-connector at `prod` from a development context.
+Two, not four. A shared `dev` and a `staging` existed to coordinate a team and to rehearse
+deploys; there is no team and the deploy is `docker compose up`.
+
+Use **separate MCP bearer tokens** per environment anyway, and never point a Claude connector
+at `work` while developing. The reason is unchanged even without multi-tenancy: a tool call
+that deletes a dataset does not care which environment it landed in.
 
 ## 7. Observability
 
 - **Structured logging.** `structlog`, JSON to stdout. Every log line carries `request_id`,
-  `user_id`, and where applicable `job_id` / `dataset_id`.
+  `channel` (`web` / `claude`), and where applicable `job_id` / `dataset_id`.
 - **Tracing.** OpenTelemetry. The critical trace is MCP tool call → API → worker → render,
   which crosses three services and is otherwise impossible to debug.
 - **Metrics.** Prometheus. Watch: render p95 latency, job queue depth, job failure rate by

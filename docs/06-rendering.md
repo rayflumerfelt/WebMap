@@ -78,8 +78,8 @@ class BrowserPool:
     """One Chromium process, many contexts.
 
     Contexts are cheap (tens of ms) and fully isolated — no cookie, cache, or
-    storage bleed between users. That isolation matters here: two renders in
-    flight may belong to different geologists with different data access.
+    storage bleed between renders. Isolation still matters: a style that
+    manages to poison one context must not affect the next render.
     """
 
     def __init__(self, max_concurrent: int = 3, recycle_after: int = 300):
@@ -226,20 +226,27 @@ class RenderSpec:
     bounds: tuple[float, float, float, float]
     size_preset: str
     overlay: dict | None
-    tile_token: str
     transparent: bool = False
 
+# The auth token is NOT on RenderSpec. It is passed separately to
+# install_guards and lives only in that closure — putting it on the spec
+# would carry it into page JS via page.evaluate below, where the shell has
+# no use for it and any script the style loads could read it.
 
-async def render(pool: BrowserPool, spec: RenderSpec) -> RenderOutput:
-    validate_style(spec.style)          # 03-auth-security.md §7.1
+
+async def render(
+    pool: BrowserPool, spec: RenderSpec, auth_token: str
+) -> RenderOutput:
+    validate_style(spec.style)          # 03-auth-security.md §3.1
     w, h, scale = SIZE_PRESETS[spec.size_preset]
 
     async with pool.context(w, h, scale) as ctx:
         page = await ctx.new_page()
         failed: list[dict] = []
-        await install_guards(page, ALLOWED_HOSTS, spec.tile_token, failed)
+        await install_guards(page, ALLOWED_HOSTS, auth_token, failed)
 
         await page.goto("file:///app/shell/index.html")
+        # asdict(spec) carries no credential — see the note on RenderSpec.
         await page.evaluate("(s) => window.renderMap(s)", asdict(spec))
 
         try:
@@ -260,7 +267,13 @@ async def render(pool: BrowserPool, spec: RenderSpec) -> RenderOutput:
             full_page=False,
         )
 
-    return RenderOutput(image=png, width=w * scale, height=h * scale,
+    # One screenshot, two encodes. The preview is what reaches Claude in the
+    # MCP response; the master is what goes on a slide. See
+    # adr/0006-render-image-delivery.md and 04-mcp-server.md §6.1.
+    preview = downscale_png(png, longest_edge=1600)
+
+    return RenderOutput(image=png, preview=preview,
+                        width=w * scale, height=h * scale,
                         failed_requests=failed)
 ```
 
@@ -282,13 +295,13 @@ may be incomplete.
 ## 6. Style assembly
 
 Styles are **always assembled server-side** from validated layer references. Client-supplied
-symbology is accepted; client-supplied source URLs are not (`03-auth-security.md` §7.3).
+symbology is accepted; client-supplied source URLs are not (`03-auth-security.md` §3.3).
 
 ```python
 # apps/api/services/style_builder.py
 
 async def build_style(
-    principal: Principal,
+    actor: Actor,
     layers: list[LayerRef],
     user_prefs: UserPreferences,
     bounds: Bbox,
@@ -312,8 +325,7 @@ async def build_style(
         "layers": [],
     }
     for ref in resolve_layer_order(user_prefs, layers):
-        dataset = await services.datasets.get(principal, ref.dataset_id)
-        await require(principal, dataset, Permission.VIEWER)
+        dataset = await services.datasets.get(actor, ref.dataset_id)
         add_source_and_layers(style, dataset, ref)
     return style
 ```
@@ -322,7 +334,7 @@ Source construction per dataset kind:
 
 | Kind | Source type | URL |
 |---|---|---|
-| vector, pointset, fault_network | `vector` (MVT) | `{martin}/ds_{hex}/{z}/{x}/{y}` |
+| vector, pointset, fault_network | `vector` (MVT) | `{api}/tiles/{dataset_id}/{z}/{x}/{y}` |
 | grid | `raster` | `{titiler}/cog/tiles/{z}/{x}/{y}?url={cog}&colormap={ramp}&rescale={min},{max}` |
 
 **The COG + TiTiler payoff:** changing a color ramp is a URL parameter change, not a regrid.
@@ -332,35 +344,48 @@ Palette editing feels instant.
 
 ## 7. Vector tiles
 
-Martin serving MVT directly from PostGIS. Dynamic, no build step — which matters because these
-layers are edited.
+MVT is generated **in-process** by the API, from the dataset's current GeoParquet object via
+DuckDB. No tile service, no build step — which still matters, because layers are edited and a
+tile must reflect the current version the moment the version pointer advances.
 
-```sql
--- Function-source per dataset, created on ingest
-CREATE OR REPLACE FUNCTION feat.mvt_ds_TEMPLATE(
-    z integer, x integer, y integer, query_params json
-) RETURNS bytea AS $$
-DECLARE
-    result bytea;
-BEGIN
-    SELECT ST_AsMVT(tile, 'ds_TEMPLATE', 4096, 'geom') INTO result
-    FROM (
-        SELECT
-            id,
-            ST_AsMVTGeom(
-                ST_Transform(geom, 3857),
-                ST_TileEnvelope(z, x, y),
-                4096, 64, true
-            ) AS geom,
-            props
-        FROM feat.ds_TEMPLATE
-        WHERE ST_Transform(geom, 3857) && ST_TileEnvelope(z, x, y)
-    ) AS tile
-    WHERE tile.geom IS NOT NULL;
-    RETURN result;
-END;
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
+```python
+# apps/api/services/tiles.py
+
+TILE_SQL = """
+SELECT ST_AsMVT(t, $layer, 4096, 'geom')
+FROM (
+    SELECT
+        id,
+        ST_AsMVTGeom(
+            ST_Transform(geometry, $storage_srid, 3857),
+            ST_TileEnvelope($z, $x, $y),
+            4096, 64, true
+        ) AS geom,
+        props
+    FROM read_parquet($parquet_key)
+    -- Bbox filter in storage CRS against the back-transformed tile envelope,
+    -- so the Parquet row-group statistics can prune. Filtering on a
+    -- transformed geometry column would read every row group.
+    WHERE bbox.xmin <= $env_xmax AND bbox.xmax >= $env_xmin
+      AND bbox.ymin <= $env_ymax AND bbox.ymax >= $env_ymin
+) AS t
+WHERE t.geom IS NOT NULL
+"""
 ```
+
+Two things carry the performance here, and both were defects in the previous PostGIS design:
+
+- **The filter is on the stored bbox columns, not on a transformed geometry.** GeoParquet
+  writes per-row-group bounding boxes; a predicate over them lets DuckDB skip row groups
+  without decoding them. Wrapping the geometry in `ST_Transform` inside the predicate — which
+  is what the Martin function did — defeats every index and statistic and reads the whole
+  layer per tile.
+- **The tile envelope is transformed once, into storage CRS**, rather than transforming every
+  feature into 3857 before comparing. 3857 → storage is separable and monotonic for the
+  projections in scope, so a corner transform is an exact bound.
+
+Tiles are cached by `(dataset_id, version, z, x, y)`. The version in the key means an edit
+invalidates exactly the layer that changed, and nothing else, with no explicit purge.
 
 ### 7.1 GeoJSON vs MVT
 

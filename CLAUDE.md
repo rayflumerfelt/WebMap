@@ -53,17 +53,29 @@ Violating these produces bugs that are invisible in review and expensive in prod
 - **Never** run interpolation, distance, area, or buffer operations in a geographic CRS.
   Variogram ranges in degrees are meaningless.
 - **Never** infer a CRS. If a file has no CRS, fail with a message asking for one.
-- All geoprocessing takes an explicit `CrsContext`. Direct `pyproj` use outside
-  `webmap_core.crs` is a lint error.
-- Reprojection happens at defined boundaries only, never mid-algorithm.
+- **Orchestration** takes an explicit `CrsContext` (`webmap_core.crs`). **`webmap_geo` entry
+  points take an `AnalysisFrame`** — it declares the frame the arrays are already in and never
+  causes a transformation. See `docs/adr/0003-geoprocessing-owns-crs.md`.
+- `pyproj` is confined to `webmap_geo.crs`. `CrsContext` wraps it; it is not a second
+  implementation. Importing `pyproj` anywhere else fails `import-linter`.
+- Reprojection happens at defined boundaries only, never mid-algorithm. Owning the capability
+  is not licence to call it inside a solver — `05-geoprocessing.md` §2.2 names the only two
+  legitimate callers.
 
-### 3.2 Identity
+### 3.2 Provenance
 
-- **Never** create a database session without a `Principal`. Use `principal_session()`.
-- **Never** write a job payload without a `JobContext`. An anonymous job is a security bug.
-- **Never** add a service-account path from MCP to data.
-- `set_config(..., true)` — transaction-local. Without the `true`, RLS context leaks across
-  pooled connections.
+Single-user deployment — there is no permission model to enforce. See
+`docs/adr/0001-single-user-deployment.md`. What survives is the requirement to know who
+or what produced a thing.
+
+- **Never** write a job payload without an actor. A job whose output cannot be attributed
+  is a provenance hole, and provenance is what makes a map defensible a year later.
+- **Never** drop `actor_channel`. `web` versus `claude` is the difference between a map
+  you made and one an agent made for you.
+- **Never** register a derived dataset without a lineage record. See §3.3.
+- Service functions take an explicit actor argument even though it resolves to one user.
+  Keeping it in the signature is what makes real identity an implementation change later
+  rather than a rewrite of every call site.
 
 ### 3.3 Determinism
 
@@ -81,13 +93,19 @@ Violating these produces bugs that are invisible in review and expensive in prod
 
 ### 3.5 Package boundaries
 
-- `python/webmap_geo` imports no web framework, no database, no `webmap_core`. NumPy and
-  Shapely in, NumPy and Shapely out.
+- `python/webmap_geo` imports no web framework, no database, no `webmap_core`. NumPy,
+  Shapely, and DuckDB in; NumPy, Shapely, and Arrow out.
 - `packages/map` imports nothing from `apps/web`.
 - `packages/ui` imports no MapLibre.
 - `packages/style-model` imports no React and no MapLibre.
 
-Enforced by lint. If you need to violate one, the design is wrong.
+**The dividing line for geoprocessing:** if an operation reads or writes **geometry**, it
+belongs to `webmap_geo`. If it reads or writes **appearance** — colours, class breaks, palette
+stops — it does not, and stays in `style-model`. See
+`docs/adr/0004-geoprocessing-owns-geometry.md`.
+
+Enforced by `import-linter` for Python and `eslint-plugin-boundaries` for TypeScript. If you
+need to violate one, the design is wrong.
 
 ---
 
@@ -220,7 +238,7 @@ This application targets workstations (`00-overview.md` §7.1). Write desktop as
 | Code | Requirement |
 |---|---|
 | `webmap_geo` algorithms | Reference comparison + property tests. Highest bar in the repo. |
-| Permission logic | Exhaustive: every visibility × grant × role combination |
+| Ingest and file readers | Every `hostile/` fixture, asserting on the error message |
 | Style compilation | Shared TS/Python vectors, both must pass |
 | File readers | Every `hostile/` fixture, asserting on the error message |
 | MCP tools | Evaluations, plus schema validation |
@@ -272,8 +290,8 @@ Notes for both human and AI contributors.
 
 1. Read the relevant spec in `docs/`.
 2. Search for existing implementations. This codebase has deliberate abstractions —
-   `Connector`, `CrsContext`, `Principal`, `Symbology`. Use them rather than adding parallel
-   ones.
+   `Connector`, `CrsContext`, `AnalysisFrame`, `Symbology`. Use them rather than adding
+   parallel ones.
 3. Check the package boundary rules. If your change needs a new cross-package import, stop and
    reconsider.
 
@@ -291,7 +309,7 @@ Say so. A wrong guess in geoprocessing produces output that looks plausible and 
 which is worse than no output, because someone will put it in a partner deck.
 
 Specifically escalate rather than guessing on: CRS handling, variogram parameters, fault
-semantics, permission edge cases, anything touching identity propagation.
+semantics, and anything that changes what a stored grid or lineage record means.
 
 ### 7.4 Verification before completion
 
@@ -336,12 +354,13 @@ raise MissingCRS(
 raise ValueError("No CRS")
 ```
 
-For permission errors, name the owner so the conversation can continue:
+For resource limits, name the limit and the offending value so the caller knows what to
+change and to what:
 
 ```python
-raise PermissionDenied(
-    f"You have viewer access to '{obj.name}' but editor is required. "
-    f"Ask {owner_name} to grant edit access."
+raise LimitExceeded(
+    f"Requested {cells:,} grid cells (limit {limit:,}). A {cell_size} ft cell "
+    f"size over this extent gives {cells:,}; {suggested} ft gives {ok:,}."
 )
 ```
 
@@ -428,7 +447,9 @@ repos:
         entry: 'np\.random\.(seed|rand|randn|choice|permutation)\('
         language: pygrep
         files: \.py$
-        exclude: ^tests/
+        # Tests live at python/<pkg>/tests/, not at the repo root — an
+        # anchored ^tests/ never matches and the exclude silently does nothing.
+        exclude: (^|/)tests/
 
       - id: no-max-width-query
         name: no max-width media queries (desktop-first)
@@ -441,7 +462,9 @@ repos:
         entry: 'engine\.(connect|begin)\('
         language: pygrep
         files: ^(apps|python)/.*\.py$
-        exclude: ^(python/webmap_core/db/session\.py|tests/)
+        # The session helper is the one file that legitimately calls
+        # engine.begin(). It lives in apps/api/db/, not python/webmap_core/db/.
+        exclude: (^apps/api/db/session\.py$|(^|/)tests/)
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
@@ -551,7 +574,7 @@ Terms that appear throughout and are not general software vocabulary.
 | Need | Location |
 |---|---|
 | Entity model, DDL | `docs/02-data-model.md` |
-| Permission logic | `python/webmap_core/permissions.py` |
+| Ownership and actor | `python/webmap_core/actor.py` |
 | CRS handling | `python/webmap_core/crs.py` |
 | Interpolation | `python/webmap_geo/interpolate/` |
 | Style compilation | `packages/style-model/` and `python/webmap_core/style/` |

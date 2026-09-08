@@ -21,8 +21,8 @@ system. Every function that touches coordinates must be explicit about which it 
    run **only** in the analysis CRS. Never in geographic coordinates. A variogram range in
    decimal degrees is meaningless and anisotropy in degrees is worse.
 2. `project.analysis_srid` is **required and explicit**. Never inferred, never defaulted to
-   3857. A geologist working Midland Basin gets EPSG:32013 (NAD83 Texas Central) because
-   that's what their data is in, not because we guessed.
+   3857. A geologist working Midland Basin gets EPSG:2277 (NAD83 / Texas Central, ftUS)
+   because that's what their data is in, not because we guessed.
 3. Reprojection happens at defined boundaries only: on ingest (storage → nothing, we keep it),
    before analysis (storage → analysis), before tiling (storage → 4326 → 3857). Never
    ad-hoc mid-algorithm.
@@ -77,32 +77,19 @@ def _transformer(src: int, dst: int) -> Transformer:
 
 ---
 
-## 2. Authorization model
+## 2. Ownership
 
-Objects are owned, scoped, and optionally granted. There is no partition key.
+Every ownable object carries a single `owner_user_id`. That is the whole model.
 
-```
-visibility:
-  private  → owner only (plus explicit grants)
-  team     → members of owner_team_id (plus explicit grants)
-  org      → all authenticated users
-```
+There is no visibility scope, no grant table, no team, and no row-level security — see
+`adr/0001-single-user-deployment.md`. `owner_user_id` is retained not to restrict access
+but to **name an actor**: lineage records answer "who produced this grid," and audit
+records answer "did I do this or did Claude." Both questions stay meaningful with one
+user, and both would be unanswerable if the column were dropped.
 
-Explicit grants layer on top and can name a user or a team, with a role of `viewer` or
-`editor`. Grants can widen access but never narrow it below the visibility scope.
-
-Effective permission for principal `P` on object `O`:
-
-```
-if O.owner_user_id == P:                       → owner  (full control)
-if grant exists (O, P|P.teams) with role R:    → R
-if O.visibility == 'org':                      → viewer
-if O.visibility == 'team' and O.owner_team_id in P.teams: → viewer
-otherwise                                      → none
-```
-
-RLS is enabled as a backstop, with policies written against this model. The application
-connects as a role that **cannot** bypass RLS.
+Service functions take an explicit actor argument that resolves to the single local user.
+Keeping it in the signature is what makes reintroducing real identity an implementation
+change rather than a rewrite of every call site.
 
 ---
 
@@ -111,13 +98,11 @@ connects as a role that **cannot** bypass RLS.
 ### 3.1 Extensions and enums
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS postgis_raster;
+-- No PostGIS. Geometry lives in the data plane (GeoParquet + COG on object
+-- storage, queried by DuckDB in-process). See adr/0002-duckdb-data-plane.md.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;      -- gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS pg_trgm;       -- dataset name search
 
-CREATE TYPE visibility_t     AS ENUM ('private', 'team', 'org');
-CREATE TYPE grant_role_t     AS ENUM ('viewer', 'editor');
 CREATE TYPE dataset_kind_t   AS ENUM ('vector', 'grid', 'pointset', 'fault_network');
 CREATE TYPE geometry_kind_t  AS ENUM ('point', 'linestring', 'polygon', 'mixed');
 CREATE TYPE connector_kind_t AS ENUM ('upload', 'fileshare', 'postgis', 'derived');
@@ -129,63 +114,35 @@ CREATE TYPE length_unit_t    AS ENUM ('m', 'ft', 'usft');
 
 ### 3.2 Identity
 
-Users and teams mirror the corporate directory. Never a source of truth — synced from OIDC
-claims on login.
+One row, created at first run. It exists so `owner_user_id` foreign keys resolve and so
+lineage and audit records name someone.
 
 ```sql
 CREATE TABLE app_user (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    subject         TEXT NOT NULL UNIQUE,      -- OIDC 'sub'
     email           CITEXT NOT NULL UNIQUE,
     display_name    TEXT NOT NULL,
-    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at    TIMESTAMPTZ
 );
-
-CREATE TABLE team (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug            TEXT NOT NULL UNIQUE,      -- 'permian-asset', 'exploration'
-    display_name    TEXT NOT NULL,
-    idp_group_id    TEXT UNIQUE,               -- directory group mapped to this team
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE team_member (
-    team_id         UUID NOT NULL REFERENCES team(id) ON DELETE CASCADE,
-    user_id         UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-    PRIMARY KEY (team_id, user_id)
-);
-CREATE INDEX ON team_member (user_id);
 ```
 
-### 3.3 Ownership mixin
+No `subject` column — there is no OIDC issuer to key against. No `team`, no
+`team_member`, no `access_grant`.
 
-Every ownable table repeats this block. Defined once as a SQL macro in the migration helper.
+### 3.3 Ownership columns
+
+Every ownable table — `project`, `dataset`, `style_template`, `palette`, `map_session`,
+`render` — repeats this block:
 
 ```sql
--- Applied to: project, dataset, style_template, palette, map_session, render
---   owner_user_id  UUID NOT NULL REFERENCES app_user(id)
---   owner_team_id  UUID REFERENCES team(id)
---   visibility     visibility_t NOT NULL DEFAULT 'team'
---   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
---   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-
-CREATE TABLE access_grant (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    object_type     TEXT NOT NULL,             -- 'dataset' | 'project' | ...
-    object_id       UUID NOT NULL,
-    grantee_user_id UUID REFERENCES app_user(id) ON DELETE CASCADE,
-    grantee_team_id UUID REFERENCES team(id) ON DELETE CASCADE,
-    role            grant_role_t NOT NULL,
-    granted_by      UUID NOT NULL REFERENCES app_user(id),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (num_nonnulls(grantee_user_id, grantee_team_id) = 1)
-);
-CREATE INDEX ON access_grant (object_type, object_id);
-CREATE INDEX ON access_grant (grantee_user_id);
-CREATE INDEX ON access_grant (grantee_team_id);
+--  owner_user_id  UUID NOT NULL REFERENCES app_user(id)
+--  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+--  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 ```
+
+That is the entire ownership surface. Deleting a user is not a supported operation; there
+is one, and every row points at it.
 
 ### 3.4 Project
 
@@ -205,11 +162,11 @@ CREATE TABLE project (
     -- Geologists disagree about this constantly; make it explicit per project.
     depth_positive_down BOOLEAN NOT NULL DEFAULT TRUE,
 
-    default_extent  GEOMETRY(Polygon, 4326),
+    -- [west, south, east, north] in EPSG:4326. Four floats, not a geometry —
+    -- the control plane has no PostGIS.
+    default_extent  DOUBLE PRECISION[4],
 
     owner_user_id   UUID NOT NULL REFERENCES app_user(id),
-    owner_team_id   UUID REFERENCES team(id),
-    visibility      visibility_t NOT NULL DEFAULT 'team',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -218,7 +175,7 @@ CREATE TABLE project (
 ### 3.5 Dataset registry
 
 **This is the linchpin.** When a geologist says "show me this data," Claude needs a referent.
-Datasets are named, searchable, permissioned handles. They store *references*, not bytes.
+Datasets are named, searchable handles. They store *references*, not bytes.
 
 ```sql
 CREATE TABLE dataset (
@@ -240,10 +197,12 @@ CREATE TABLE dataset (
 
     -- Spatial
     storage_srid        INTEGER NOT NULL,
-    bbox_4326           GEOMETRY(Polygon, 4326),
+    bbox_4326           DOUBLE PRECISION[4],    -- [w, s, e, n]
 
-    -- Vector payload
-    feature_table       TEXT,                   -- 'feat.ds_<uuid_hex>'
+    -- Vector payload. Features are versioned GeoParquet objects, not rows;
+    -- parquet_key names the CURRENT version. See §3.5.1 and adr/0005.
+    parquet_key         TEXT,                   -- 'features/ds_<hex>/v<N>.parquet'
+    version             INTEGER NOT NULL DEFAULT 1,
     feature_count       BIGINT,
     attribute_schema    JSONB,                  -- [{name, type, nullable, description}]
 
@@ -262,47 +221,65 @@ CREATE TABLE dataset (
     caption             TEXT,                   -- generated one-liner
 
     owner_user_id       UUID NOT NULL REFERENCES app_user(id),
-    owner_team_id       UUID REFERENCES team(id),
-    visibility          visibility_t NOT NULL DEFAULT 'team',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT vector_has_table CHECK (
-        kind NOT IN ('vector','pointset','fault_network') OR feature_table IS NOT NULL),
+    CONSTRAINT vector_has_parquet CHECK (
+        kind NOT IN ('vector','pointset','fault_network') OR parquet_key IS NOT NULL),
     CONSTRAINT grid_has_cog CHECK (
         kind <> 'grid' OR cog_key IS NOT NULL)
 );
 
-CREATE INDEX ON dataset USING GIST (bbox_4326);
 CREATE INDEX ON dataset USING GIN (name gin_trgm_ops);
 CREATE INDEX ON dataset (project_id, kind);
 CREATE INDEX ON dataset (owner_user_id);
 ```
 
-Vector features live in per-dataset tables in the `feat` schema, created dynamically on ingest:
+#### 3.5.1 Feature storage
 
-```sql
-CREATE SCHEMA IF NOT EXISTS feat;
+Vector features are **versioned GeoParquet objects on object storage**, not rows in the
+control plane. `dataset.parquet_key` and `dataset.version` name the current one; advancing
+that pointer is the atomic commit for an edit (`adr/0005-single-editor-persistence.md`).
 
--- Template, instantiated per dataset as feat.ds_<uuid_hex>
-CREATE TABLE feat.ds_TEMPLATE (
-    id          BIGSERIAL PRIMARY KEY,
-    geom        GEOMETRY NOT NULL,             -- typed + SRID-constrained at creation
-    -- 4326 projection for tiling and bbox queries, maintained by PostGIS
-    geom_4326   GEOMETRY GENERATED ALWAYS AS (ST_Transform(geom, 4326)) STORED,
-    props       JSONB NOT NULL DEFAULT '{}'::jsonb,
-    version     INTEGER NOT NULL DEFAULT 1,    -- optimistic locking
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_by  UUID REFERENCES app_user(id)
-);
-CREATE INDEX ON feat.ds_TEMPLATE USING GIST (geom);
-CREATE INDEX ON feat.ds_TEMPLATE USING GIST (geom_4326);
-CREATE INDEX ON feat.ds_TEMPLATE USING GIN (props jsonb_path_ops);
+```
+features/ds_<uuid_hex>/v1.parquet      <- superseded, retained
+features/ds_<uuid_hex>/v2.parquet      <- superseded, retained
+features/ds_<uuid_hex>/v3.parquet      <- dataset.parquet_key, dataset.version = 3
 ```
 
-Rationale for table-per-dataset over one wide features table: independent geometry type and
-SRID constraints, independent indexes and statistics, cheap `DROP TABLE` on delete, and no
-single index hotspot across millions of unrelated features.
+Schema of each object:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INT64` | Stable across versions; the edit identity of a feature |
+| `geometry` | GeoParquet WKB | In the dataset's `storage_srid` |
+| `props` | JSON string | Attribute values |
+| `updated_at` | `TIMESTAMP` | |
+
+GeoParquet metadata carries the CRS, so an object is self-describing — a `.parquet` handed
+to someone else does not need this database to be readable, which is not true of a row in a
+`feat.ds_*` table.
+
+```sql
+CREATE TABLE dataset_version (
+    dataset_id   UUID NOT NULL REFERENCES dataset(id) ON DELETE CASCADE,
+    version      INTEGER NOT NULL,
+    parquet_key  TEXT NOT NULL,
+    feature_count BIGINT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by   UUID REFERENCES app_user(id),
+    PRIMARY KEY (dataset_id, version)
+);
+```
+
+**Retention.** Every version for 30 days, matching the soft-delete window in
+`03-auth-security.md` §4, then thinned to daily. Copy-on-write means storage grows with edit
+count; this is the cost of the model and it needs a scheduled job, not good intentions.
+
+**Why an object per dataset rather than one wide table:** independent geometry type and CRS
+per dataset, cheap delete, no index hotspot across unrelated features — the same reasons the
+previous table-per-dataset design gave — plus DuckDB reads Parquet columnar and predicate-
+pushed, so a tile query touching two columns does not pay for the attribute payload.
 
 ### 3.6 Fault networks
 
@@ -348,8 +325,6 @@ CREATE TABLE palette (
     source_format   TEXT,                      -- 'clr' | 'cpt' | 'native'
 
     owner_user_id   UUID NOT NULL REFERENCES app_user(id),
-    owner_team_id   UUID REFERENCES team(id),
-    visibility      visibility_t NOT NULL DEFAULT 'org',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -367,8 +342,6 @@ CREATE TABLE style_template (
     symbology       JSONB NOT NULL,
 
     owner_user_id   UUID NOT NULL REFERENCES app_user(id),
-    owner_team_id   UUID REFERENCES team(id),
-    visibility      visibility_t NOT NULL DEFAULT 'team',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -409,8 +382,6 @@ CREATE TABLE map_session (
     created_by_claude BOOLEAN NOT NULL DEFAULT FALSE,
 
     owner_user_id   UUID NOT NULL REFERENCES app_user(id),
-    owner_team_id   UUID REFERENCES team(id),
-    visibility      visibility_t NOT NULL DEFAULT 'private',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at      TIMESTAMPTZ                -- NULL = permanent
@@ -438,7 +409,7 @@ CREATE TABLE render (
 
     -- The exact style used. Reproducibility.
     style_json      JSONB NOT NULL,
-    extent_4326     GEOMETRY(Polygon, 4326) NOT NULL,
+    extent_4326     DOUBLE PRECISION[4] NOT NULL,   -- [w, s, e, n]
 
     -- Everything Claude needs to write a caption without inventing anything.
     metadata        JSONB NOT NULL,
@@ -449,8 +420,6 @@ CREATE TABLE render (
     failed_requests JSONB NOT NULL DEFAULT '[]'::jsonb,
 
     owner_user_id   UUID NOT NULL REFERENCES app_user(id),
-    owner_team_id   UUID REFERENCES team(id),
-    visibility      visibility_t NOT NULL DEFAULT 'private',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX ON render (session_id, created_at DESC);
@@ -470,7 +439,7 @@ CREATE INDEX ON render (session_id, created_at DESC);
     "neighbors": 48, "faults_honored": true
   },
   "grid": {"cell_size": 250, "nx": 812, "ny": 640, "unit": "ft"},
-  "crs": {"analysis_srid": 32038, "display_srid": 3857},
+  "crs": {"analysis_srid": 2277, "display_srid": 3857},
   "extent": [-102.9, 31.6, -101.4, 32.5],
   "data_vintage": "2026-07-31",
   "feature_counts": {"control_points": 1847, "faults": 23}
@@ -522,74 +491,36 @@ CREATE INDEX ON job (state) WHERE state IN ('queued', 'running');
 
 ### 3.12 Audit log
 
-Required for enterprise. Distinct from lineage.
+The activity trail. Distinct from lineage, which is the durable provenance artifact
+(§3.10) — lineage says how a dataset was *made*, audit says what *happened*.
 
 ```sql
 CREATE TABLE audit_event (
     id              BIGSERIAL PRIMARY KEY,
     actor_user_id   UUID REFERENCES app_user(id),
-    -- 'claude' when the action came through MCP, 'web' from the SPA
+    -- 'claude' when the action came through MCP, 'web' from the SPA.
+    -- This is the column that earns the table: "did I make this map, or did
+    -- an agent make it for me" is worth answering with one user.
     actor_channel   TEXT NOT NULL,
-    action          TEXT NOT NULL,             -- 'dataset.read' | 'dataset.delete' | ...
+    action          TEXT NOT NULL,             -- 'dataset.create' | 'dataset.delete' | ...
     object_type     TEXT,
     object_id       UUID,
     detail          JSONB,
-    ip_address      INET,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX ON audit_event (actor_user_id, created_at DESC);
 CREATE INDEX ON audit_event (object_type, object_id, created_at DESC);
+CREATE INDEX ON audit_event (created_at DESC);
 ```
+
+Written for dataset create/update/delete, export, job submission and completion, and
+render creation — the list in `03-auth-security.md` §6. Not for reads: there is no
+access-review requirement to satisfy, and read volume would swamp the table.
+
+`ip_address` is dropped. It identified a requester among many; there is one.
 
 ---
 
-## 4. Row-level security
-
-```sql
-ALTER TABLE dataset ENABLE ROW LEVEL SECURITY;
-
--- The app sets these per request/session; see 03-auth-security.md
---   SET LOCAL webmap.user_id = '<uuid>';
---   SET LOCAL webmap.team_ids = '{<uuid>,<uuid>}';
-
-CREATE POLICY dataset_read ON dataset FOR SELECT
-USING (
-    owner_user_id = current_setting('webmap.user_id')::uuid
-    OR visibility = 'org'
-    OR (visibility = 'team'
-        AND owner_team_id = ANY(current_setting('webmap.team_ids')::uuid[]))
-    OR EXISTS (
-        SELECT 1 FROM access_grant g
-        WHERE g.object_type = 'dataset' AND g.object_id = dataset.id
-          AND (g.grantee_user_id = current_setting('webmap.user_id')::uuid
-               OR g.grantee_team_id = ANY(current_setting('webmap.team_ids')::uuid[]))
-    )
-);
-
-CREATE POLICY dataset_write ON dataset FOR UPDATE
-USING (
-    owner_user_id = current_setting('webmap.user_id')::uuid
-    OR EXISTS (
-        SELECT 1 FROM access_grant g
-        WHERE g.object_type = 'dataset' AND g.object_id = dataset.id
-          AND g.role = 'editor'
-          AND (g.grantee_user_id = current_setting('webmap.user_id')::uuid
-               OR g.grantee_team_id = ANY(current_setting('webmap.team_ids')::uuid[]))
-    )
-);
-
-CREATE POLICY dataset_delete ON dataset FOR DELETE
-USING (owner_user_id = current_setting('webmap.user_id')::uuid);
-```
-
-Repeat for `project`, `style_template`, `palette`, `map_session`, `render`.
-
-> **The application database role must not have `BYPASSRLS`.** Verify in a startup assertion
-> and fail loudly. Migrations run as a separate privileged role.
-
----
-
-## 5. Pydantic models
+## 4. Pydantic models
 
 `python/webmap_core/models.py`. These are the API and MCP contract.
 
@@ -602,12 +533,6 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-
-class Visibility(StrEnum):
-    PRIVATE = "private"
-    TEAM = "team"
-    ORG = "org"
 
 
 class DatasetKind(StrEnum):
@@ -686,7 +611,6 @@ class DatasetDetail(DatasetSummary):
     grid_cell_size: float | None = None
     data_vintage: date | None = None
     owner: str                                   # display name
-    visibility: Visibility
     created_at: datetime
     updated_at: datetime
     lineage: LineageRecord | None = None
@@ -812,7 +736,7 @@ class RenderResult(WebMapModel):
 
 ---
 
-## 6. Schema versioning
+## 5. Schema versioning
 
 `user_preferences`, `style_template`, `map_session`, and `palette` all carry
 `schema_version`. Migrating unversioned JSON blobs is miserable; pay the small cost now.

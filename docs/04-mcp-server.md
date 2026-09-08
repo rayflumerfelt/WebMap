@@ -12,9 +12,8 @@ Framework: FastMCP (Python SDK).
 server will run alongside others; generic names collide and confuse tool selection.
 
 **The MCP layer is a presentation layer.** It calls the same service functions as the REST
-API. It never contains business logic, never talks to the database directly, never
-re-implements a permission check. If you find yourself writing domain logic in a tool handler,
-it belongs in `webmap_core.services`.
+API. It never contains business logic and never talks to the database directly. If you find
+yourself writing domain logic in a tool handler, it belongs in `webmap_core.services`.
 
 **Responses are shaped for a reader with limited context.** List responses are compact and
 paginated. Detail responses are full. Never return a 5 MB GeoJSON blob into a conversation.
@@ -66,7 +65,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from webmap_core import services
-from webmap_core.permissions import Principal
+from webmap_core.actor import Actor, local_actor
 
 mcp = FastMCP(
     name="webmap",
@@ -85,18 +84,18 @@ mcp = FastMCP(
 )
 
 
-def principal_from_context(ctx) -> Principal:
-    """Extract the authenticated user from the validated bearer token.
+def actor_from_context(ctx) -> Actor:
+    """The actor to attribute this call to.
 
-    There is no fallback and no service account. If this raises, the request
-    is rejected. See 03-auth-security.md §5.
+    Single-user deployment: resolves to the one local user, tagged with
+    channel='claude' so audit records distinguish agent-initiated work from
+    work done in the SPA. The bearer token is checked by middleware before
+    this runs; it gates access, it does not carry identity.
+
+    This exists so that reintroducing real identity is a change here rather
+    than at every call site. See adr/0001-single-user-deployment.md.
     """
-    claims = ctx.request_context.auth  # populated by the token middleware
-    return Principal(
-        user_id=UUID(claims["webmap_user_id"]),
-        team_ids=frozenset(UUID(t) for t in claims["webmap_team_ids"]),
-        channel="claude",
-    )
+    return local_actor(channel="claude")
 ```
 
 ---
@@ -113,21 +112,21 @@ async def webmap_list_datasets(
     ctx,
     project_id: Annotated[UUID | None, Field(
         None, description="Restrict to one project. Omit to list across all "
-                          "projects the user can access.")] = None,
+                          "projects.")] = None,
     kind: Annotated[Literal["vector", "grid", "pointset", "fault_network"] | None,
         Field(None, description="Filter by dataset kind.")] = None,
     limit: Annotated[int, Field(25, ge=1, le=100)] = 25,
     offset: Annotated[int, Field(0, ge=0)] = 0,
     response_format: Literal["markdown", "json"] = "markdown",
 ) -> str:
-    """List spatial datasets the user can access.
+    """List registered spatial datasets.
 
     Returns compact summaries. Call webmap_describe_dataset for full detail
     including attribute schema and value ranges.
     """
-    p = principal_from_context(ctx)
+    a = actor_from_context(ctx)
     page = await services.datasets.list_(
-        p, project_id=project_id, kind=kind, limit=limit, offset=offset
+        a, project_id=project_id, kind=kind, limit=limit, offset=offset
     )
     return format_page(page, response_format)
 ```
@@ -409,8 +408,12 @@ async def webmap_render_map(
     size: Annotated[
         Literal["slide_full", "slide_half", "slide_quarter", "square", "thumbnail"],
         Field("slide_full", description=(
-            "Output dimensions. slide_full is 16:9 at 2560×1440, sized for a "
-            "full-bleed PowerPoint slide. Use consistent sizes across a deck."))
+            "Dimensions of the STORED master image, not of the preview "
+            "returned inline. slide_full is 16:9 at 2560×1440, sized for a "
+            "full-bleed PowerPoint slide. Use consistent sizes across a deck. "
+            "Choosing a smaller preset does not reduce the response size — "
+            "the inline preview is always ~1600 px — it reduces the quality "
+            "of the artifact you will put on the slide."))
     ] = "slide_full",
     show_legend: Annotated[bool, Field(True, description=(
         "Include a legend. Keep this on for any map going into a "
@@ -424,29 +427,30 @@ async def webmap_render_map(
 ) -> str:
     """Render a map image from one or more datasets.
 
-    Returns the image plus structured metadata: interpolation method and
-    parameters, value range and units, CRS, extent, and data vintage. Use
-    that metadata to write figure captions — do not describe the image from
-    its pixels, and never state a value range you did not receive here.
+    Returns a display-sized preview image plus structured metadata:
+    interpolation method and parameters, value range and units, CRS, extent,
+    and data vintage. Use that metadata to write figure captions — do not
+    describe the image from its pixels, and never state a value range you did
+    not receive here. The preview is downsampled, so do not judge label
+    placement or line weight from it.
 
     Renders are persisted with an ID. To place the same map on several
-    slides, reuse the render_id rather than calling this again.
+    slides, reuse the render_id rather than calling this again. For the
+    full-resolution image, call webmap_get_render with size="master".
     """
 ```
 
-Response — image content block plus structured text:
+Response — an image content block plus a text block:
 
 ```markdown
-![Wolfcamp A Porosity](webmap://render/3f9c...)
-
-**Render** `3f9c…a71e` · 2560×1440
+**Render** `3f9c…a71e` · master 2560×1440 · preview 1600×900
 
 - **Layers**: Wolfcamp A Porosity (grid), Midland Basin Faults, Well Control
 - **Values**: 4.1 – 21.8 % porosity
 - **Method**: ordinary kriging, exponential variogram (range 4,200 ft,
   nugget 1.1, sill 12.4), anisotropy 1.8:1 at 035°, faults honored
 - **Grid**: 250 ft cells, 812 × 640
-- **CRS**: NAD83 / Texas Central (EPSG:32038)
+- **CRS**: NAD83 / Texas Central, ftUS (EPSG:2277)
 - **Vintage**: 2026-07-31
 - **Control**: 1,847 points, 23 faults
 
@@ -457,9 +461,63 @@ Ordinary kriging of 1,847 well control points with fault constraints;
 Open interactively: https://webmap.corp/s/k3n8fq
 ```
 
+**The image is a content block, not markdown.** A `webmap://` URI inside a markdown image is
+inert — it renders as dead text. The tool returns a list: an `ImageContent` block carrying
+base64 PNG, followed by a `TextContent` block carrying the markdown above.
+
+**Why the inline image is downsampled.** `00-overview.md` §7 places this system on an internal
+network, so `claude.ai` cannot fetch `https://webmap.corp/...`. The MCP response body is the
+*only* path by which image bytes reach Claude. A `slide_full` master is 2560×1440 — commonly
+1.5–4 MB of PNG, and base64 adds a third. Inlining that on every render fills a conversation
+with a dozen of them.
+
+So the two artifacts are separated:
+
+| | Size | Where it goes |
+|---|---|---|
+| **Preview** | ~1600 px longest edge | Inline, in the `ImageContent` block |
+| **Master** | The `size` preset, at scale factor | Object storage, addressed by `render_id` |
+
+`size` governs the **stored master**, not the preview — its description says so, because a
+caller asking for `thumbnail` to save tokens would otherwise be degrading the artifact rather
+than the preview. Both are encoded from the same page screenshot, so the preview costs CPU
+rather than a second render.
+
+When Claude needs the full-resolution bytes — assembling the deck itself — it calls
+`webmap_get_render(render_id, size="master")`. An opt-in cost, not one paid every time.
+
 Every render carries a session link. Review without blocking.
 
-### 6.2 `webmap_suggest_maps`
+If `failed_requests` is non-empty, the text block leads with it:
+
+```markdown
+⚠️ 3 tile requests failed during rendering. The northeast portion of this map
+may be incomplete — this is a fetch failure, not sparse data.
+```
+
+### 6.2 `webmap_get_render`
+
+```python
+@mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
+async def webmap_get_render(
+    ctx,
+    render_id: UUID,
+    size: Annotated[Literal["preview", "master"], Field(
+        "preview", description=(
+            "preview: ~1600 px, the same image webmap_render_map returned. "
+            "master: the full-resolution stored image. Use master only when "
+            "you are placing the image into a document you are building — it "
+            "is several megabytes and stays in the conversation."))] = "preview",
+) -> str:
+    """Retrieve a previously created render by ID.
+
+    Use this to place a map you already rendered onto another slide without
+    re-rendering it, or to fetch the full-resolution master for a deck.
+    Returns the image plus the same metadata webmap_render_map returned.
+    """
+```
+
+### 6.3 `webmap_suggest_maps`
 
 Domain knowledge the app has and Claude does not.
 
@@ -610,7 +668,8 @@ class DatasetNotFound(WebMapToolError):
 - Never return a bare stack trace or a database error string.
 - Always name at least one next action.
 - Validation errors quote the offending value and the constraint.
-- Permission errors name the owner to ask (see `03-auth-security.md` §3.2).
+- Resource-limit errors name the limit, the offending value, and a value that would work
+  (see `10-jobs-async.md` §7).
 
 ---
 
