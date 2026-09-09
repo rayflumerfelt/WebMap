@@ -18,7 +18,7 @@ import pytest
 
 from webmap_geo.exceptions import DegenerateInput
 from webmap_geo.frame import AnalysisFrame
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 from webmap_geo.interpolate.kriging import cross_validate, ordinary_kriging
 from webmap_geo.variogram.model import FittedVariogram, anisotropy_transform
 

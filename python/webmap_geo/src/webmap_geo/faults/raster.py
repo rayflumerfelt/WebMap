@@ -23,7 +23,7 @@ from numpy.typing import NDArray
 from shapely.geometry import LineString, Point
 
 from webmap_geo.faults.network import Constraint
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 
 
 def blocked_edges(

@@ -30,7 +30,7 @@ from webmap_geo.faults.raster import (
     control_per_compartment,
 )
 from webmap_geo.frame import AnalysisFrame
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 from webmap_geo.interpolate.minimum_curvature import minimum_curvature
 
 TEXAS = AnalysisFrame(srid=2277, units="usft")

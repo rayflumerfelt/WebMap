@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 from shapely.geometry import LineString
 
 from webmap_geo.exceptions import DegenerateInput
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 
 #: Nice-number mantissas. 2.5 is included because a 25 ft interval on a
 #: structure map reads naturally even though it is not a power of two or ten.

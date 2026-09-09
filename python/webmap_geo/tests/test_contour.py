@@ -20,7 +20,7 @@ from webmap_geo.contour.lines import (
 )
 from webmap_geo.exceptions import DegenerateInput
 from webmap_geo.frame import AnalysisFrame
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 
 TEXAS = AnalysisFrame(srid=2277, units="usft")
 

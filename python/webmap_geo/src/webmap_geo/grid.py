@@ -1,4 +1,11 @@
-"""The grid every interpolator writes into. `05-geoprocessing.md` §6.
+"""The regular grid every part of this package works over.
+
+`05-geoprocessing.md` §6. **At the package root, not under `interpolate`**:
+faults rasterise onto it, contours are extracted from it, and interpolation
+writes into it. Living under one of those three made `faults` import
+`interpolate` and `interpolate` import `faults`, which is a cycle — and the
+cycle was the signal that the grid is a shared value object rather than an
+interpolation concept.
 
 A `GridDefinition` is planar and in the analysis frame — it does not know
 about EPSG:4326, and converting a `GridSpec.bbox` from WGS84 into these bounds

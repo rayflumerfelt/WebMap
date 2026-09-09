@@ -25,7 +25,7 @@ import pytest
 
 from webmap_geo.exceptions import DegenerateInput
 from webmap_geo.frame import AnalysisFrame
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 from webmap_geo.interpolate.minimum_curvature import minimum_curvature
 
 SEED = 20260909

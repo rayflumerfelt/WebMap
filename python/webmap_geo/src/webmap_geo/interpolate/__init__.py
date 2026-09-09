@@ -6,7 +6,16 @@ analysis frame. Nothing here reprojects: arrays arrive in the frame they claim
 means coordinates were not in the frame they said they were.
 """
 
-from webmap_geo.interpolate.grid import SOFT_CELL_LIMIT, GridDefinition
+# Re-exported: the grid lives at the package root (it is shared with
+# faults and contour), and callers reasonably reach for it here.
+from webmap_geo.grid import SOFT_CELL_LIMIT, GridDefinition
+from webmap_geo.interpolate.dispatch import (
+    EXTRAPOLATION_WARNING,
+    OVERSHOOT_WARNING,
+    InterpolationResult,
+    Method,
+    interpolate,
+)
 from webmap_geo.interpolate.kriging import (
     DEFAULT_NEIGHBORS,
     KrigingResult,
@@ -20,11 +29,16 @@ from webmap_geo.interpolate.minimum_curvature import (
 
 __all__ = [
     "DEFAULT_NEIGHBORS",
+    "EXTRAPOLATION_WARNING",
+    "OVERSHOOT_WARNING",
     "SOFT_CELL_LIMIT",
     "GridDefinition",
+    "InterpolationResult",
     "KrigingResult",
+    "Method",
     "MinimumCurvatureResult",
     "cross_validate",
+    "interpolate",
     "minimum_curvature",
     "ordinary_kriging",
 ]

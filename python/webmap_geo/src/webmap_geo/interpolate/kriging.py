@@ -23,7 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from webmap_geo.exceptions import DegenerateInput
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 from webmap_geo.variogram.model import FittedVariogram, anisotropy_transform
 
 #: `05` §6.2. Enough neighbours that the estimate is stable, few enough that

@@ -23,7 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from webmap_geo.exceptions import DegenerateInput
-from webmap_geo.interpolate.grid import GridDefinition
+from webmap_geo.grid import GridDefinition
 
 #: How hard an observation is pinned relative to the smoothness term.
 #:
