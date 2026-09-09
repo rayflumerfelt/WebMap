@@ -20,6 +20,7 @@ from webmap_api.db.session import assert_policies_present, unscoped_session
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
 from webmap_api.routes.projects import router as projects_router
+from webmap_api.routes.sessions import router as sessions_router
 from webmap_api.routes.tiles import router as tiles_router
 from webmap_api.routes.uploads import router as uploads_router
 from webmap_core.exceptions import (
@@ -27,6 +28,7 @@ from webmap_core.exceptions import (
     NotFound,
     PermissionDenied,
     QuotaExceeded,
+    SessionError,
     VersionConflict,
     WebMapError,
 )
@@ -60,6 +62,7 @@ _STATUS_FOR: dict[type[Exception], int] = {
     PermissionDenied: 403,
     NotFound: 404,
     VersionConflict: 409,
+    SessionError: 422,
     QuotaExceeded: 429,
     LimitExceeded: 413,
     # I/O failures are the caller's file, not our fault: 422. These carry the
@@ -179,6 +182,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tiles_router)
     app.include_router(uploads_router)
     app.include_router(datasets_router)
+    app.include_router(sessions_router)
 
     return app
 

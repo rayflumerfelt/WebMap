@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_use_ssl: bool = False
 
+    # --- Public addressing --------------------------------------------------
+    # Where a user's browser reaches the app. Session links are built from this
+    # rather than from a request's Host header: the API sits behind a proxy,
+    # and a Host-derived link hands out an internal hostname that resolves
+    # nowhere useful once it has been pasted into a chat.
+    public_base_url: str = "http://localhost:5173"
+
     # --- Internal services --------------------------------------------------
     titiler_url: str = "http://localhost:8001"
     render_url: str = "http://localhost:8002"

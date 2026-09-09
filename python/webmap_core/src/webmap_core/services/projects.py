@@ -16,7 +16,7 @@ from webmap_core.models import Bbox, LengthUnit
 from webmap_core.permissions import Permission, Principal, Visibility, require_owner
 from webmap_core.services.audit import AuditAction, record
 from webmap_core.services.grants import DbGrantStore
-from webmap_core.services.ownable import load_and_require, load_ownable
+from webmap_core.services.ownable import load_and_require, load_ownable, resolve_owner_team
 
 
 def validate_analysis_srid(srid: int) -> LengthUnit:
@@ -66,6 +66,7 @@ async def create_project(
     the horizontal unit only because that is the common case.
     """
     horizontal_unit = validate_analysis_srid(analysis_srid)
+    owner_team_id = resolve_owner_team(principal, visibility, owner_team_id)
 
     result = await conn.execute(
         text(

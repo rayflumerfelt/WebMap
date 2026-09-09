@@ -37,6 +37,15 @@ class LimitExceeded(WebMapError):
     """A request exceeds a hard resource bound."""
 
 
+class SessionError(WebMapError):
+    """A map session document is malformed. Surfaces as HTTP 422.
+
+    Distinct from `NotFound` (the session is not visible) and `LimitExceeded`
+    (too many layers): this is a session whose layers or view cannot be read
+    as written, which is a caller mistake with a fixable cause.
+    """
+
+
 class VersionConflict(WebMapError):
     """An optimistic commit lost a race. Surfaces as HTTP 409.
 

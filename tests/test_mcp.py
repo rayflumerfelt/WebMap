@@ -220,9 +220,14 @@ async def test_two_users_get_different_results(api_base_url: str) -> None:
     audit log would show a service principal instead of a person.
 
     Ada is on the Permian team, which owns the seeded datasets. Alan is on
-    Exploration and owns nothing. Same tool, same code, two identities, two
-    answers — and Alan's answer must be empty rather than forbidden, because
-    a dataset he cannot see should not be reported as existing.
+    Exploration, and the seed grants his team one of them — so the two views
+    overlap without being equal, which is a sharper test than "one user sees
+    everything and the other sees nothing": it catches a tool that returns the
+    whole registry as well as one that returns none of it.
+
+    A dataset Alan cannot see must be absent rather than forbidden. Reporting
+    it as refused would confirm it exists, which is the disclosure the
+    scoping is there to prevent.
     """
     ada = await _tools_as("ada", api_base_url)
     ada_view = await ada.webmap_list_datasets()
@@ -233,7 +238,7 @@ async def test_two_users_get_different_results(api_base_url: str) -> None:
     assert ada_view != alan_view, "the same tool returned the same thing for both users"
     assert "Wolfcamp" in ada_view, "Ada is on the team that owns the seeded data"
     assert "Wolfcamp" not in alan_view, "Alan is not, and must not see it"
-    assert "not what exists" in alan_view, "absence, explained rather than bare"
+    assert "Fault Network" in alan_view, "the one dataset granted to his team"
 
 
 async def test_search_is_scoped_to_the_caller(api_base_url: str) -> None:
@@ -267,7 +272,10 @@ async def test_describing_an_invisible_dataset_fails_with_a_next_step(
     # The table shows a shortened id; fetch the full one via search instead.
     assert re.search(r"`[0-9a-f]{8}…", listing)
 
-    payload = await ada._get("/api/v1/datasets", {"limit": 1})
+    # Named by kind rather than taken as items[0]: the seed grants Alan's team
+    # the fault network, so "the first dataset Ada can see" is not reliably one
+    # Alan cannot. A test of refusal has to pick something actually refused.
+    payload = await ada._get("/api/v1/datasets", {"kind": "pointset", "limit": 1})
     dataset_id = payload["items"][0]["id"]
 
     alan = await _tools_as("alan", api_base_url)

@@ -24,7 +24,7 @@ from webmap_core.models import DatasetKind, GeometryKind
 from webmap_core.permissions import Permission, Principal, Visibility, require_owner
 from webmap_core.services.audit import AuditAction, record
 from webmap_core.services.grants import DbGrantStore
-from webmap_core.services.ownable import load_and_require, load_ownable
+from webmap_core.services.ownable import load_and_require, load_ownable, resolve_owner_team
 
 #: Cap on a single page. Claude reads many summaries and a 500-row response
 #: crowds out the conversation (`04-mcp-server.md` §1).
@@ -275,6 +275,8 @@ async def create_dataset(
     object is written first. An orphaned object is recoverable; a row pointing
     at a key that was never written is not.
     """
+    owner_team_id = resolve_owner_team(principal, visibility, owner_team_id)
+
     result = await conn.execute(
         text(
             """

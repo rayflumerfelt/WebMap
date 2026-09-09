@@ -526,6 +526,35 @@ def _register(seeded: list[SeededDataset], vmin: float, vmax: float, database_ur
                         (sid("fault_network:midland"), dataset.id),
                     )
 
+            # One dataset shared across the team boundary, granted to the
+            # Exploration *team* rather than to a user: Alan's row does not
+            # exist until he first authenticates, but his dev claims put him in
+            # the exploration group, which directory sync maps to this team.
+            #
+            # It exists so the cross-team cases have something to be about. A
+            # local stack where every dataset is permian-only can only
+            # demonstrate refusal, and the more interesting property — a
+            # session that holds one readable and one unreadable layer, and
+            # returns exactly the first — has no way to run.
+            cur.execute(
+                """
+                INSERT INTO access_grant (
+                    object_type, object_id, grantee_team_id, role, granted_by)
+                SELECT 'dataset', %s, %s, 'viewer', %s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM access_grant
+                    WHERE object_type = 'dataset' AND object_id = %s
+                      AND grantee_team_id = %s)
+                """,
+                (
+                    sid("dataset:midland-fault-network"),
+                    sid("team:exploration"),
+                    owner_id,
+                    sid("dataset:midland-fault-network"),
+                    sid("team:exploration"),
+                ),
+            )
+
             cur.execute(
                 """
                 INSERT INTO audit_event (actor_user_id, actor_channel, action, detail)

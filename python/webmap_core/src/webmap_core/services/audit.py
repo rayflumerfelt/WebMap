@@ -43,6 +43,13 @@ class AuditAction(StrEnum):
     PROJECT_UPDATED = "project.updated"
     PROJECT_DELETED = "project.deleted"
 
+    # Autosave deliberately records nothing: the browser saves every few
+    # seconds while a user pans, and burying §10's events under camera moves
+    # would defeat the point of keeping them.
+    SESSION_CREATED = "session.created"
+    SESSION_UPDATED = "session.updated"
+    SESSION_DELETED = "session.deleted"
+
     GRANT_CREATED = "grant.created"
     GRANT_REVOKED = "grant.revoked"
     OWNERSHIP_TRANSFERRED = "ownership.transferred"
