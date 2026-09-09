@@ -39,6 +39,7 @@ from webmap_core.exceptions import (
 from webmap_core.identity import AuthenticationFailed
 from webmap_core.logging import bind_request, configure_logging, get_logger
 from webmap_core.settings import Environment, Settings, get_settings
+from webmap_geo.dataplane import assert_extensions
 from webmap_geo.exceptions import DegenerateInput, GeoError, NotProjected, UnknownCrs
 from webmap_io.exceptions import (
     MissingCRS,
@@ -103,6 +104,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # `03-auth-security.md` §3.5 and `02-data-model.md` §4.
     await assert_rls_enforced(engine)
     await assert_policies_present(engine)
+
+    # The data plane's own precondition. A container that cannot load the
+    # DuckDB extensions serves a 500 on the first tile request, naming an HTTP
+    # redirect rather than the real cause; failing here says it once, clearly.
+    assert_extensions()
 
     # The arq pool. Created here rather than per request so a submission does
     # not pay a Redis handshake, and connected at startup so a deployment with

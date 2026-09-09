@@ -70,6 +70,9 @@ migrate:  ## Apply Alembic migrations
 migration:  ## Generate a new migration: make migration m="add x"
 	$(UV) run alembic revision -m "$(m)"
 
+duckdb-extensions:  ## Cache DuckDB extensions for a network that blocks the build
+	$(UV) run python scripts/fetch_duckdb_extensions.py
+
 seed:  ## Load synthetic Midland Basin data into the local stack
 	$(UV) run python scripts/seed.py
 

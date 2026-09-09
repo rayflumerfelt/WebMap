@@ -1,0 +1,26 @@
+# Overlay for networks that cannot reach extensions.duckdb.org.
+#
+# DuckDB's `spatial` and `httpfs` extensions are normally baked into the API
+# and worker images at build time. Behind a captive portal or an egress proxy
+# that build step cannot fetch them, and `assert_extensions` then refuses to
+# start the container — deliberately, because a container without them serves
+# a 500 on the first tile request instead.
+#
+# This overlay mounts a host-side cache into the place DuckDB looks, so the
+# images work without any egress at all.
+#
+#     make duckdb-extensions          # populate the cache, once
+#     docker compose -f infra/compose.yaml -f infra/compose.offline.yaml up -d
+#
+# It is a separate file rather than a conditional mount because an empty bind
+# mount would *shadow* the extensions in a correctly built image, turning a
+# working deployment into a broken one. Opting in has to be explicit.
+
+services:
+  api:
+    volumes:
+      - ${WEBMAP_DUCKDB_EXT_DIR:-../.duckdb-extensions}:/root/.duckdb/extensions:ro
+
+  worker:
+    volumes:
+      - ${WEBMAP_DUCKDB_EXT_DIR:-../.duckdb-extensions}:/root/.duckdb/extensions:ro

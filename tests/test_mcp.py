@@ -17,7 +17,12 @@ against the live API, because the property under test is precisely that the
 identity survives the HTTP boundary — mocking the client would test the mock.
 """
 
+import re
+import uuid
+import warnings
+from collections.abc import Iterator
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -157,10 +162,48 @@ def test_detail_escapes_a_hostile_dataset_name() -> None:
 
 # --- identity, against the live stack ---------------------------------------
 
+#: Tags every dataset this module creates so the teardown can find them again.
+MCP_RUN = uuid4().hex[:8]
 
-@pytest.fixture
-def api_base_url() -> str:
-    """Skip unless the API is up. These tests are about the HTTP boundary."""
+
+def purge_mcp_artefacts(base_url: str) -> None:
+    """Soft-delete the datasets this module's jobs produced.
+
+    **These tests write to the shared development stack.** Left behind, their
+    grids and contour layers accumulate run after run until the seeded Wolfcamp
+    layer no longer appears on the first page of a listing — at which point
+    tests that look for it fail on litter rather than on anything real. That
+    happened, and this is the fix.
+    """
+    import httpx
+
+    try:
+        token = httpx.post(
+            f"{base_url}/auth/dev/token", params={"user": "ada"}, timeout=30
+        ).json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        listed = httpx.get(
+            f"{base_url}/api/v1/datasets", params={"limit": 100}, headers=headers, timeout=30
+        ).json()
+        for item in listed.get("items", []):
+            if MCP_RUN in str(item.get("name", "")):
+                httpx.delete(
+                    f"{base_url}/api/v1/datasets/{item['id']}", headers=headers, timeout=30
+                )
+    except Exception as exc:
+        warnings.warn(
+            f"Could not clean up MCP datasets tagged {MCP_RUN}: {type(exc).__name__}: {exc}",
+            stacklevel=2,
+        )
+
+
+@pytest.fixture(scope="module")
+def api_base_url() -> Iterator[str]:
+    """Skip unless the API is up. These tests are about the HTTP boundary.
+
+    Module-scoped so the cleanup runs once, after every test that may have
+    created a dataset.
+    """
     import httpx
 
     url = "http://localhost:8000"
@@ -172,7 +215,8 @@ def api_base_url() -> str:
             f"No WebMap API at {url} ({type(exc).__name__}). Start it with: "
             f"docker compose -f infra/compose.yaml up -d"
         )
-    return url
+    yield url
+    purge_mcp_artefacts(url)
 
 
 async def _tools_as(user: str, base_url: str) -> Any:
@@ -300,6 +344,28 @@ async def test_the_channel_header_marks_calls_as_claude(api_base_url: str) -> No
 # --- analysis, against the live stack ---------------------------------------
 
 
+async def _seeded_pointset(tools: Any) -> "uuid.UUID":
+    """The seeded well-pick layer, found by searching rather than by position.
+
+    Taking the first row of a listing was fragile in a way that mattered: the
+    order is whatever the API sorts by, and every derived dataset a test run
+    leaves behind shifts it. Searching for the layer by name asks for the one
+    thing the test actually depends on.
+    """
+    found = await tools.webmap_search_datasets(query="wolfcamp")
+    ids = re.findall(r"`([0-9a-f-]{36})`", found)
+    if not ids:
+        pytest.skip("No seeded Wolfcamp pointset. Run: uv run python scripts/seed.py")
+
+    # The search matches the picks, the structure grid and the contours; only
+    # a pointset can be interpolated.
+    for candidate in ids:
+        detail = await tools.webmap_describe_dataset(dataset_id=uuid.UUID(candidate))
+        if "**Kind**: pointset" in detail:
+            return uuid.UUID(candidate)
+    pytest.skip("No seeded pointset among the Wolfcamp datasets.")
+
+
 async def test_a_grid_can_be_made_and_polled_entirely_through_the_tools(
     api_base_url: str,
 ) -> None:
@@ -316,11 +382,7 @@ async def test_a_grid_can_be_made_and_polled_entirely_through_the_tools(
 
     ada = await _tools_as("ada", api_base_url)
 
-    listed = await ada.webmap_list_datasets(kind="pointset")
-    ids = re.findall(r"`([0-9a-f-]{36})`", listed)
-    if not ids:
-        pytest.skip("No seeded pointset. Run: uv run python scripts/seed.py")
-    dataset_id = uuid.UUID(ids[0])
+    dataset_id = await _seeded_pointset(ada)
 
     described = await ada.webmap_describe_dataset(dataset_id=dataset_id)
     field = next(
@@ -337,7 +399,7 @@ async def test_a_grid_can_be_made_and_polled_entirely_through_the_tools(
         cell_size=1000,
         # Unique per run: idempotency is keyed on parameters for an hour, so a
         # repeat run would otherwise be handed the previous run's job.
-        output_name=f"MCP end to end {uuid.uuid4().hex[:8]}",
+        output_name=f"MCP end to end {MCP_RUN}",
     )
     assert "Do not call again for the same input" in submitted
 
@@ -385,16 +447,12 @@ async def test_a_job_belonging_to_someone_else_is_not_readable(
     import uuid
 
     ada = await _tools_as("ada", api_base_url)
-    listed = await ada.webmap_list_datasets(kind="pointset")
-    ids = re.findall(r"`([0-9a-f-]{36})`", listed)
-    if not ids:
-        pytest.skip("No seeded pointset. Run: uv run python scripts/seed.py")
 
     submitted = await ada.webmap_interpolate(
-        dataset_id=uuid.UUID(ids[0]),
+        dataset_id=await _seeded_pointset(ada),
         value_field="tvdss_ft",
         cell_size=2000,
-        output_name=f"MCP privacy probe {uuid.uuid4().hex[:8]}",
+        output_name=f"MCP privacy probe {MCP_RUN}",
     )
     job_id = uuid.UUID(re.findall(r"`([0-9a-f-]{36})`", submitted)[0])
 

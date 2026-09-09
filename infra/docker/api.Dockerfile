@@ -54,6 +54,23 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package webmap-api
 
 EXPOSE 8000
+
+# DuckDB downloads `spatial` and `httpfs` on first use, which puts a public
+# internet dependency in the request path — and 00-overview.md §7 puts this
+# system on an internal network where that download cannot succeed. Baked in
+# here so a running container never reaches out.
+#
+# Best-effort on purpose: a build behind a captive portal or an egress proxy
+# cannot fetch them, and failing the build would leave a developer unable to
+# build at all. What stops a container *without* them from serving traffic is
+# `webmap_geo.dataplane.assert_extensions`, called at API and worker startup —
+# so a bad image fails loudly at boot rather than 500ing on the first tile.
+RUN uv run --no-sync python -c "\
+import duckdb; c = duckdb.connect(); \
+[c.execute(f'INSTALL {e}') for e in ('spatial', 'httpfs')]; \
+print('duckdb extensions installed')" \
+    || echo "WARNING: DuckDB extensions not baked in; this image will try to download them at runtime and assert_extensions will refuse to start if it cannot."
+
 # --no-sync: the environment is already built above. Without it `uv run`
 # re-syncs at container start, which reinstates the dev group and makes the
 # running image differ from the built one.

@@ -57,3 +57,7 @@ apps/render/shell/maplibre-gl.js
 apps/render/shell/maplibre-gl.css
 apps/render/shell/overlay.js
 apps/render/shell/overlay.js.map
+
+# Host-side DuckDB extension cache for restricted networks. Binaries, ~100 MB,
+# and version-specific — fetched with `make duckdb-extensions`, never committed.
+.duckdb-extensions/

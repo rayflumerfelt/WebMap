@@ -7,7 +7,7 @@ from arq.connections import RedisSettings
 from webmap_core.db.session import create_engine
 from webmap_core.logging import configure_logging, get_logger
 from webmap_core.settings import Environment, get_settings
-from webmap_geo.dataplane import ObjectStore
+from webmap_geo.dataplane import ObjectStore, assert_extensions
 from webmap_worker.tasks.contour import contour_task
 from webmap_worker.tasks.health import ping
 from webmap_worker.tasks.interpolate import interpolate_task
@@ -44,6 +44,10 @@ async def startup(ctx: dict[str, Any]) -> None:
         )
     )
     ctx["bucket"] = settings.s3_bucket
+    # Checked at startup rather than mid-job: a gridding job that gets this
+    # far has already been accepted, queued and part-solved before the read
+    # that fails.
+    assert_extensions()
     ctx["object_store"] = ObjectStore(
         # DuckDB's httpfs wants a host:port, not a URL scheme.
         endpoint=settings.s3_endpoint.removeprefix("http://").removeprefix("https://"),

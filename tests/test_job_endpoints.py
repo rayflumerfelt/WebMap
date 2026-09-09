@@ -14,6 +14,8 @@ layer.
 from __future__ import annotations
 
 import time
+import warnings
+from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
 
@@ -39,7 +41,20 @@ RUN = uuid4().hex[:8]
 
 
 @pytest.fixture(scope="module")
-def api() -> str:
+def api() -> Iterator[str]:
+    """The live API, with this module's datasets removed afterwards.
+
+    **These tests write to the shared development stack**, unlike the ones on
+    the `engine` fixture, which get a throwaway database. Without the teardown
+    every run leaves its grids and contour layers behind: after a dozen runs
+    the seeded Wolfcamp layer had been pushed off the first page of
+    `webmap_list_datasets`, and tests that look for it began failing on
+    accumulated litter rather than on anything real.
+
+    Soft-delete, through the same endpoint a user would call — `CLAUDE.md`
+    §3.4 keeps deletes recoverable for 30 days, and a test is not a reason to
+    reach past that into the table.
+    """
     try:
         httpx.get(f"{BASE_URL}/health", timeout=3).raise_for_status()
     except Exception as exc:
@@ -47,7 +62,30 @@ def api() -> str:
             f"No WebMap API at {BASE_URL} ({type(exc).__name__}). Start it with: "
             f"docker compose -f infra/compose.yaml up -d"
         )
-    return BASE_URL
+    yield BASE_URL
+    purge_run_artefacts(BASE_URL, RUN)
+
+
+def purge_run_artefacts(api: str, token: str) -> None:
+    """Soft-delete every dataset this run named after itself.
+
+    Best-effort: a teardown that raises would turn a passing run red for
+    housekeeping, and the litter is visible in the next run's listing anyway.
+    """
+    try:
+        headers = bearer(api, "grace")
+        response = httpx.get(
+            f"{api}/api/v1/datasets", params={"limit": 100}, headers=headers, timeout=30
+        )
+        response.raise_for_status()
+        for item in response.json().get("items", []):
+            if token in str(item.get("name", "")):
+                httpx.delete(f"{api}/api/v1/datasets/{item['id']}", headers=headers, timeout=30)
+    except Exception as exc:
+        warnings.warn(
+            f"Could not clean up datasets tagged {token}: {type(exc).__name__}: {exc}",
+            stacklevel=2,
+        )
 
 
 def bearer(api: str, user: str) -> dict[str, str]:

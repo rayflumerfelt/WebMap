@@ -34,6 +34,60 @@ class ObjectStore:
     use_ssl: bool = False
 
 
+#: The extensions the data plane cannot work without. `spatial` reads geometry;
+#: `httpfs` reaches object storage.
+REQUIRED_EXTENSIONS = ("spatial", "httpfs")
+
+
+def _load(conn: duckdb.DuckDBPyConnection, extension: str) -> None:
+    """Load an extension, preferring the copy already in the image.
+
+    `INSTALL` reaches the network when the extension is not present locally,
+    and that is a request-path dependency on the public internet. It is also
+    where this failed in practice: a captive portal returned a 307 to a
+    login splash for `http://extensions.duckdb.org`, and every tile request
+    became a 500 whose message named neither the network nor the extension.
+
+    `LOAD` is tried first so a properly built image never reaches out at all.
+    The `INSTALL` fallback keeps a developer machine working; `assert_extensions`
+    is what stops a container without them from serving traffic.
+    """
+    try:
+        conn.execute(f"LOAD {extension}")
+    except duckdb.Error:
+        conn.execute(f"INSTALL {extension}")
+        conn.execute(f"LOAD {extension}")
+
+
+def assert_extensions() -> None:
+    """Fail at startup if the DuckDB extensions are unavailable.
+
+    The same reasoning as `assert_rls_enforced`: a deployment that cannot do
+    its job should refuse to start, where the failure is obvious and names its
+    cause, rather than serve a 500 on the first tile request that mentions an
+    HTTP redirect. `00-overview.md` §7 puts this system on an internal network,
+    so a container that has to download an extension is already broken — it
+    just has not been asked for geometry yet.
+    """
+    conn = duckdb.connect(database=":memory:")
+    try:
+        for extension in REQUIRED_EXTENSIONS:
+            try:
+                _load(conn, extension)
+            except duckdb.Error as error:
+                raise RuntimeError(
+                    f"DuckDB extension '{extension}' is neither present in this "
+                    f"image nor downloadable ({error}). The data plane cannot "
+                    f"read geometry or object storage without it. Rebuild the "
+                    f"image on a network that can reach extensions.duckdb.org, "
+                    f"or copy the extension into "
+                    f"~/.duckdb/extensions/v<version>/<platform>/. Refusing to "
+                    f"start."
+                ) from error
+    finally:
+        conn.close()
+
+
 @contextmanager
 def connect(store: ObjectStore | None = None) -> Iterator[duckdb.DuckDBPyConnection]:
     """An in-memory DuckDB connection with the spatial extension loaded.
@@ -43,9 +97,9 @@ def connect(store: ObjectStore | None = None) -> Iterator[duckdb.DuckDBPyConnect
     """
     conn = duckdb.connect(database=":memory:")
     try:
-        conn.execute("INSTALL spatial; LOAD spatial;")
+        _load(conn, "spatial")
         if store is not None:
-            conn.execute("INSTALL httpfs; LOAD httpfs;")
+            _load(conn, "httpfs")
             # DuckDB's S3 settings are connection-scoped, so credentials never
             # outlive the connection and never reach a global.
             conn.execute(f"SET s3_endpoint = '{_escape(store.endpoint)}'")
