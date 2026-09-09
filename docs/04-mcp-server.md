@@ -160,16 +160,16 @@ async def webmap_list_datasets(
     return format_page(r.json(), response_format)
 ```
 
-Markdown response shape — dense, scannable, IDs present but not dominant:
+Markdown response shape — dense and scannable:
 
 ```markdown
 **12 datasets** (showing 1–12)
 
 | Name | Kind | Features | Updated | ID |
 |---|---|---|---|---|
-| Wolfcamp A Porosity Picks | pointset | 1,847 | 2026-07-31 | `9f3a…c21b` |
-| Midland Basin Faults | fault_network | 23 | 2026-06-12 | `4e8d…7a02` |
-| Wolfcamp A Structure | grid | 812×640 | 2026-08-14 | `bb17…9e44` |
+| Wolfcamp A Porosity Picks | pointset | 1,847 | 2026-07-31 | `9f3ac21b-…-c21b` |
+| Midland Basin Faults | fault_network | 23 | 2026-06-12 | `4e8d0f31-…-7a02` |
+| Wolfcamp A Structure | grid | 812×640 | 2026-08-14 | `bb175c02-…-9e44` |
 ```
 
 JSON response follows the pagination contract:
@@ -180,6 +180,13 @@ JSON response follows the pagination contract:
   "items": [ /* DatasetSummary */ ]
 }
 ```
+
+**IDs are shown in full.** An earlier draft of this section abbreviated them to
+`9f3a…c21b`, which reads better and does not work: `webmap_describe_dataset` takes a UUID
+and a truncated one cannot be expanded, so the flow this document recommends — find with
+`webmap_search_datasets`, inspect with `webmap_describe_dataset` — had no way to pass an id
+from one call to the next. The same applies to `webmap_list_jobs` feeding `webmap_get_job`.
+Thirty-six characters a row is the cost of the column being an identifier.
 
 ### 4.2 `webmap_search_datasets`
 
