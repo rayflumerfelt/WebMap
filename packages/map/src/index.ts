@@ -6,7 +6,13 @@
  * reuse is already broken — and reuse is an explicit requirement of this
  * project. Enforced by `boundaries/element-types` in eslint.config.js.
  *
- * The `WebMap` component itself lands in Phase 2. The prop types are here now
- * because they are the contract the rest of the design is written against.
  */
-export type { LayerMetadata, MapView, MapWarning, WebMapProps } from './types.js';
+export { WebMap } from './WebMap.js';
+export { capture } from './capture.js';
+export type {
+  LayerMetadata,
+  MapView,
+  MapWarning,
+  WebMapHandle,
+  WebMapProps,
+} from './types.js';

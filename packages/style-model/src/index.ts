@@ -35,3 +35,11 @@ export type {
   LegendEntry,
   LegendSpec,
 } from './legend.js';
+export { compileStyle } from './style.js';
+export type {
+  Basemap,
+  CompiledStyle,
+  CompileStyleOptions,
+  LayerSource,
+  StyleLayer,
+} from './style.js';

@@ -8,7 +8,14 @@
  * is the specification as data, and the schema-driven property editor is
  * generated from it (`08-styling-palettes.md` §6).
  *
- * Components land in Phase 2 (legend, scale bar) and Phase 5 (ramp editor,
- * property editor).
+ * The ramp editor and the schema-driven property editor land in Phase 5.
  */
 export { webmapTheme } from './theme.js';
+export { Legend } from './Legend/Legend.js';
+export type { LegendProps } from './Legend/Legend.js';
+export { ScaleBar } from './ScaleBar/ScaleBar.js';
+export type { ScaleBarProps } from './ScaleBar/ScaleBar.js';
+export { metersPerPixel, scaleBar } from './ScaleBar/scale.js';
+export type { ScaleBarSpec, ScaleUnit } from './ScaleBar/scale.js';
+export { NorthArrow } from './NorthArrow/NorthArrow.js';
+export type { NorthArrowProps } from './NorthArrow/NorthArrow.js';

@@ -4,6 +4,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import boundaries from 'eslint-plugin-boundaries';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 /**
  * Elements are matched in `full` mode so that every file under a package is
@@ -36,8 +37,17 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // React's hook rules. `07-frontend.md` §2.2 names the recreate-the-map bug
+    // as the commonest one in this area, and `exhaustive-deps` is what catches
+    // its relatives — a stale closure in an effect, a listener re-registered
+    // on every render. The one deliberate suppression in the codebase (the
+    // create-once effect in WebMap.tsx) carries a comment saying why.
     files: ['apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
-    plugins: { boundaries },
+    plugins: { boundaries, 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+    },
     languageOptions: {
       globals: {
         // The browser surface this application actually uses. Declared

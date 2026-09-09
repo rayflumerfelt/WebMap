@@ -1,3 +1,12 @@
+import type {
+  FitBoundsOptions,
+  LngLatBoundsLike,
+  MapGeoJSONFeature,
+  PointLike,
+  StyleSpecification,
+} from 'maplibre-gl';
+import type maplibregl from 'maplibre-gl';
+
 import type { LayerMetadata as _LayerMetadata } from './metadata.js';
 
 export type { LayerMetadata } from './metadata.js';
@@ -27,13 +36,11 @@ export interface MapWarning {
 export interface WebMapProps {
   /**
    * MapLibre Style JSON. The single source of truth for appearance, and
-   * assembled server-side — never constructed ad hoc in the browser
-   * (`03-auth-security.md` §7.3).
-   *
-   * Typed as `unknown` until Phase 2 wires MapLibre's `StyleSpecification`;
-   * `any` would defeat the point (`CLAUDE.md` §5).
+   * derived rather than stored — `compileStyle` in `@webmap/style-model` is
+   * the one that builds it, and the same function the render service runs
+   * (`07-frontend.md` §3.1).
    */
-  style: unknown;
+  style: StyleSpecification;
 
   /** Initial camera. Uncontrolled after mount unless `view` is provided. */
   initialView?: MapView;
@@ -63,4 +70,26 @@ export interface WebMapProps {
   onWarning?: (warning: MapWarning) => void;
 
   className?: string;
+
+  /** Announced to screen readers in place of "Map". Name the subject — "Map
+   *  of Wolfcamp A structure" tells someone what they are on. */
+  ariaLabel?: string;
+}
+
+/**
+ * Operations that do not fit declarative props. `07-frontend.md` §2.1.
+ */
+export interface WebMapHandle {
+  fitBounds(bounds: LngLatBoundsLike, options?: FitBoundsOptions): void;
+  /** The map as a PNG. See `capture.ts` for why it is not `canvas.toBlob`. */
+  capture(): Promise<Blob>;
+  queryFeatures(point: PointLike, layerIds?: string[]): MapGeoJSONFeature[];
+  /**
+   * The escape hatch, and documented as unstable.
+   *
+   * It exists because not everything can be anticipated, but every use of it
+   * in `apps/web` is a signal that the public API is missing something —
+   * §2.1 asks for those to be tracked rather than accumulated.
+   */
+  getMap(): maplibregl.Map;
 }
