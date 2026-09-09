@@ -1,0 +1,33 @@
+/* apps/web/src/styles/layout.css
+   Desktop is the base case (07-frontend.md §5.1). Breakpoints add capability
+   at larger sizes; there is no `max-width` query in this codebase, and the
+   `no-max-width-query` pre-commit hook enforces that. */
+:root {
+  --panel-w-left: 280px;
+  --panel-w-right: 340px;
+  --toolbar-h: 44px;
+  --statusbar-h: 24px;
+  --row-h: 26px;          /* dense list rows — pointer, not fingertip */
+  --control-h: 28px;
+  --hit-slop: 4px;        /* invisible padding around small targets */
+}
+
+@media (min-width: 1920px) {
+  :root { --panel-w-left: 320px; --panel-w-right: 400px; }
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+/* Below 1280 px the app shows a notice rather than reflowing. Expressed as a
+   min-width query on the app shell rather than a max-width query on the
+   notice, so the desktop-first rule holds without exception. */
+.app-shell { display: none; }
+.min-width-notice { display: grid; place-items: center; min-height: 100vh; }
+
+@media (min-width: 1280px) {
+  .app-shell { display: grid; }
+  .min-width-notice { display: none; }
+}

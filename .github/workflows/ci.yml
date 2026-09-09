@@ -1,0 +1,130 @@
+# CLAUDE.md §12 sketches this file. Two deliberate differences, both noted
+# inline: the Postgres image is not the PostGIS one (adr/0002 removed PostGIS
+# from the control plane), and the boundary contracts run as their own job so
+# a violation is legible in the check list rather than buried in lint output.
+name: CI
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Plain Postgres, not postgis/postgis. Nothing in the control plane is
+        # spatial except dataset.bbox_4326, which is four floats
+        # (adr/0002-duckdb-data-plane.md).
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: webmap
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      WEBMAP_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/webmap
+      WEBMAP_MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/webmap
+      WEBMAP_REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -m "not slow" --cov
+      # Phase 0 acceptance: migrations apply *and roll back* cleanly. The
+      # round trip is the test — a one-way migration is discovered at the
+      # worst possible moment.
+      - run: uv run alembic upgrade head && uv run alembic downgrade base
+
+  boundaries:
+    # Its own job so a broken contract reads as "boundaries failed" in the
+    # check list. These are the rules CLAUDE.md §3.5 calls non-negotiable, and
+    # burying them inside a lint step makes them look like a style nit.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --all-extras
+      - run: uv run lint-imports
+
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  style-parity:
+    # The compilers must agree. This is the one job that catches drift
+    # between the TypeScript and Python style compilers.
+    #
+    # Phase 2 delivers both compilers and the shared vectors. The job exists
+    # now, and skips loudly rather than silently passing, so it cannot be
+    # forgotten when the vectors land.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v4
+      - name: Check whether the shared vectors exist yet
+        id: vectors
+        run: |
+          if [ -d packages/style-model/test-vectors ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Style parity vectors not present yet (Phase 2, 08-styling-palettes.md §3.1)."
+          fi
+      - if: steps.vectors.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.vectors.outputs.present == 'true'
+        run: pnpm --filter @webmap/style-model test
+      - if: steps.vectors.outputs.present == 'true'
+        run: uv run pytest python/webmap_core/tests/test_style_vectors.py
+
+  visual:
+    # Phase 3. Uploads diffs on failure — reviewing an image is faster than
+    # reading a pixel count.
+    if: false
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright/python:v1.49.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync
+      - run: uv run pytest tests/visual/
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-diffs
+          path: tests/visual/output/
+
+  mcp-eval:
+    # Phase 3, alongside the first MCP tools.
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: make eval

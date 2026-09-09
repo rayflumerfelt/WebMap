@@ -1,0 +1,69 @@
+# CLAUDE.md §11. The local pygrep hooks enforce §3.2, §3.3, and §5.1
+# mechanically. They are crude and they work.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [pydantic, numpy, types-shapely]
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: pnpm exec eslint --fix
+        language: system
+        files: \.(ts|tsx)$
+
+      - id: tsc
+        name: typecheck
+        entry: pnpm exec tsc --build
+        language: system
+        pass_filenames: false
+        files: \.(ts|tsx)$
+
+      - id: import-linter
+        name: package boundary contracts
+        # The module-graph rules grep cannot see: webmap_geo as a leaf, pyproj
+        # confined to one module, and the local MCP server holding no database
+        # (adr/0003, adr/0008).
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
+        files: \.py$
+
+      - id: no-bare-random
+        name: no bare numpy random
+        entry: 'np\.random\.(seed|rand|randn|choice|permutation)\('
+        language: pygrep
+        files: \.py$
+        # Tests live at python/<pkg>/tests/, not at the repo root — an
+        # anchored ^tests/ never matches and the exclude silently does nothing.
+        exclude: (^|/)tests/
+
+      - id: no-max-width-query
+        name: no max-width media queries (desktop-first)
+        entry: '@media[^{]*max-width'
+        language: pygrep
+        files: \.(css|scss|ts|tsx)$
+
+      - id: no-raw-db-session
+        name: no direct engine.connect
+        entry: 'engine\.(connect|begin)\('
+        language: pygrep
+        files: ^(apps|python)/.*\.py$
+        # The session helper is the one file that legitimately calls
+        # engine.begin(). It lives in apps/api/db/, not python/webmap_core/db/.
+        exclude: (^apps/api/src/webmap_api/db/session\.py$|(^|/)tests/)
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks

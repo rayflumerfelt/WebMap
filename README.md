@@ -6,7 +6,7 @@ drive it conversationally.
 The differentiator is **fault-constrained interpolation** — gridding that correctly refuses to
 interpolate across a sealing fault, exposed through a conversational interface.
 
-**Status:** specification, pre-implementation. No code yet.
+**Status:** Phase 0 (foundations) in progress. See [`docs/12-roadmap.md`](docs/12-roadmap.md).
 
 ---
 
@@ -57,7 +57,38 @@ exposure. See [`docs/00-overview.md`](docs/00-overview.md) §7 before proposing 
 
 ## Getting started
 
-Nothing to run yet — Phase 0 scaffolding is the next step. See
-[`docs/12-roadmap.md`](docs/12-roadmap.md) for its deliverables and acceptance criteria.
+Toolchain: Node 20+, pnpm, uv, Docker, and GNU Make.
 
-Toolchain the monorepo will expect: Node 20+, pnpm, uv, Docker, and GNU Make.
+```bash
+make setup      # install all deps, both languages
+make dev        # bring up the stack (Postgres, Redis, MinIO, TiTiler, api, worker)
+make seed       # load synthetic Midland Basin data in EPSG:2277
+make check      # lint + typecheck + test, both languages
+```
+
+`make check` is the gate. It runs ruff, mypy, `import-linter`, eslint, `tsc`,
+pytest and vitest — including the package boundary contracts, which are
+enforced rather than advisory (`CLAUDE.md` §3.5).
+
+On Windows, `make` is not present by default; install GNU Make, or run the
+recipes in the [`Makefile`](Makefile) directly — each is a single line for
+that reason. Docker Desktop needs WSL2 for its Linux engine.
+
+Copy [`.env.example`](.env.example) to `.env` for local development. Its
+defaults match [`infra/compose.yaml`](infra/compose.yaml), so nothing needs
+editing to run the stack.
+
+### What exists so far
+
+| Area | State |
+|---|---|
+| Monorepo, boundary lint (both languages) | Working; each contract verified against a deliberate violation |
+| Schema migration, RLS policies | Written; see [`infra/migrations/`](infra/migrations/) |
+| Compose stack, container images | Written |
+| Seed script | Working — 2,000 points, 20 faults, one grid |
+| `webmap_geo` | CRS, `AnalysisFrame`, Hilbert ordering, DuckDB data plane. Solvers are Phase 4 |
+| `webmap_core` | Models, permissions, settings, signing, quotas, jobs, versioning |
+| `webmap_io` | GeoParquet writer, COG writer, object storage |
+| `apps/api` | Boots, health endpoints, RLS startup assertions. Routes are Phase 1 |
+| `apps/mcp` | stdio transport and the authenticated client. Tools are Phases 1-4 |
+| `packages/*`, `apps/web` | Types and theme. Components are Phase 2 |

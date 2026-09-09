@@ -1,0 +1,244 @@
+[project]
+name = "webmap"
+version = "0.0.0"
+description = "WebMap monorepo root — tooling configuration and the dev toolchain."
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "python/webmap_geo",
+    "python/webmap_io",
+    "python/webmap_core",
+    "apps/api",
+    "apps/worker",
+    "apps/render",
+    "apps/mcp",
+]
+
+[tool.uv.sources]
+webmap-geo = { workspace = true }
+webmap-io = { workspace = true }
+webmap-core = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "alembic>=1.14",
+    "hypothesis>=6.122",
+    "import-linter>=2.1",
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "ruff>=0.8.4",
+    "types-shapely>=2.0",
+    # The workspace members, so `uv sync` gives one venv with everything
+    # importable and `make check` can typecheck across package boundaries.
+    "webmap-core",
+    "webmap-geo",
+    "webmap-io",
+    "webmap-api",
+    "webmap-worker",
+    "webmap-render",
+    "webmap-mcp",
+]
+
+[tool.uv.sources.webmap-api]
+workspace = true
+
+[tool.uv.sources.webmap-worker]
+workspace = true
+
+[tool.uv.sources.webmap-render]
+workspace = true
+
+[tool.uv.sources.webmap-mcp]
+workspace = true
+
+# --- CLAUDE.md §4.1 ---------------------------------------------------------
+
+[tool.ruff]
+line-length = 96
+target-version = "py312"
+# Ruff formats Python code blocks inside Markdown files. The specs in docs/
+# are the contract and their code blocks are illustrative excerpts, so letting
+# the formatter rewrite them edits the specification to match the tool.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",      # pycodestyle, pyflakes
+    "I",                # isort
+    "N",                # pep8-naming
+    "UP",               # pyupgrade
+    "B",                # bugbear
+    "A",                # builtin shadowing
+    "C4",               # comprehensions
+    "DTZ",              # naive datetimes — always tz-aware
+    "T20",              # no print()
+    "SIM",              # simplify
+    "PTH",              # pathlib over os.path
+    "NPY",              # numpy-specific
+    "RUF",
+]
+ignore = [
+    "E501",             # line length handled by the formatter
+    # N818 wants every exception named *Error. The specs name them otherwise
+    # and those names are load-bearing: `MissingCRS`, `PermissionDenied`, and
+    # `LimitExceeded` appear verbatim in CLAUDE.md §8's error-message standard,
+    # and `StyleRejected` in 03-auth-security.md §7.1. Renaming them to satisfy
+    # a naming rule would make the specs describe code that does not exist.
+    "N818",
+]
+
+[tool.ruff.lint.isort]
+# Without this, isort files our own packages under third-party and the import
+# blocks churn every time someone runs --fix.
+known-first-party = [
+    "webmap_api",
+    "webmap_core",
+    "webmap_geo",
+    "webmap_io",
+    "webmap_mcp",
+    "webmap_render",
+    "webmap_worker",
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"numpy.random.seed".msg = "Use an explicit numpy.random.Generator. See CLAUDE.md §3.3."
+"numpy.random.rand".msg = "Use an explicit numpy.random.Generator. See CLAUDE.md §3.3."
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic generates this shape; the module-level `revision` identifiers are
+# the framework's contract, not ours to rename.
+"infra/migrations/versions/*.py" = ["N999", "E402"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false     # geospatial libs return Any too often
+# Every package uses a src layout, so each src/ is its own import root.
+# Without this mypy finds each module twice — once by file path and once via
+# the installed distribution in .venv — and refuses to check anything.
+mypy_path = """
+python/webmap_geo/src:python/webmap_io/src:python/webmap_core/src:apps/api/src:apps/worker/src:apps/render/src:apps/mcp/src"""
+# Without the plugin, mypy reads BaseModel.__init__ as requiring every field
+# and flags `GridSpec()` — a model whose fields all have defaults — as
+# missing three arguments.
+plugins = ["pydantic.mypy"]
+explicit_package_bases = true
+files = [
+    "python/webmap_geo/src",
+    "python/webmap_geo/tests",
+    "python/webmap_io/src",
+    "python/webmap_io/tests",
+    "python/webmap_core/src",
+    "python/webmap_core/tests",
+    "apps/api/src",
+    "apps/worker/src",
+    "apps/render/src",
+    "apps/mcp/src",
+]
+
+[[tool.mypy.overrides]]
+module = ["triangle.*", "pyamg.*", "gstools.*", "skgstat.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "duckdb.*",
+    "pyogrio.*",
+    "rasterio.*",
+    "pyarrow.*",
+    "boto3.*",
+    "botocore.*",
+    "mypy_boto3_s3.*",
+    "arq.*",
+    "titiler.*",
+    "alembic.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+asyncio_mode = "auto"
+testpaths = ["python", "apps", "tests"]
+markers = [
+    "slow: takes over 10 seconds",
+    "reference: compares against Surfer/ArcGIS reference output",
+    "integration: needs a database",
+]
+filterwarnings = ["error::DeprecationWarning:webmap_.*"]
+
+# --- Package boundaries (05-geoprocessing.md §2.3, adr/0003, adr/0008) ------
+
+[tool.importlinter]
+root_packages = [
+    "webmap_geo",
+    "webmap_io",
+    "webmap_core",
+    "webmap_api",
+    "webmap_worker",
+    "webmap_render",
+    "webmap_mcp",
+]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "webmap_geo is a leaf"
+type = "forbidden"
+source_modules = ["webmap_geo"]
+forbidden_modules = ["webmap_core", "webmap_io", "fastapi", "sqlalchemy", "pydantic"]
+
+[[tool.importlinter.contracts]]
+name = "pyproj is confined to webmap_geo.crs"
+type = "forbidden"
+# Direct imports only. The rule is about which module *owns* pyproj, and
+# webmap_core.crs is a sanctioned wrapper over webmap_geo.crs
+# (adr/0003-geoprocessing-owns-crs.md) — so pyproj is reachable from it by
+# design. Without this, the contract forbids the very layering the ADR
+# introduced and the only way to satisfy it is to stop wrapping.
+allow_indirect_imports = true
+source_modules = [
+    "webmap_geo.interpolate",
+    "webmap_geo.mesh",
+    "webmap_geo.faults",
+    "webmap_geo.variogram",
+    "webmap_geo.contour",
+    "webmap_geo.aggregate",
+    "webmap_core",
+    "webmap_io",
+]
+forbidden_modules = ["pyproj"]
+
+[[tool.importlinter.contracts]]
+# adr/0008: the local MCP server is trusted with nothing. A contract makes
+# "verified by inspection" mechanical. It duplicates response formatting —
+# safe in two places — and imports no shared model or service code, because
+# webmap_core drags SQLAlchemy in behind it.
+name = "webmap_mcp holds no database, no geoprocessing, and no authorization"
+type = "forbidden"
+source_modules = ["webmap_mcp"]
+forbidden_modules = [
+    "sqlalchemy",
+    "asyncpg",
+    "psycopg",
+    "duckdb",
+    "webmap_core",
+    "webmap_geo",
+    "webmap_io",
+    "webmap_api",
+]
+
+[[tool.importlinter.contracts]]
+# 01-architecture.md §3.1: "apps/api must not contain geoprocessing
+# algorithms. It orchestrates." Calling into webmap_geo is orchestration and
+# is allowed; reaching for a solver dependency directly is not.
+name = "webmap_api contains no geoprocessing"
+type = "forbidden"
+source_modules = ["webmap_api"]
+forbidden_modules = ["scipy", "gstools", "skgstat", "triangle", "pyamg", "contourpy"]

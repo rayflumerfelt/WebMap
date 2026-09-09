@@ -7,6 +7,7 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.import_linter_cache/
 .coverage
 coverage.xml
 htmlcov/
@@ -14,6 +15,7 @@ htmlcov/
 # --- Node -------------------------------------------------------------------
 node_modules/
 dist/
+dist-types/
 .turbo/
 *.tsbuildinfo
 .vite/

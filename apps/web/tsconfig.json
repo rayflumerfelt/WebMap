@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist-types",
+    "rootDir": "src",
+    "jsx": "react-jsx",
+    "noEmit": false,
+    "emitDeclarationOnly": true
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../packages/style-model" },
+    { "path": "../../packages/ui" },
+    { "path": "../../packages/map" }
+  ]
+}
