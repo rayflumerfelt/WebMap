@@ -153,7 +153,17 @@ files = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["triangle.*", "pyamg.*", "gstools.*", "skgstat.*", "msal.*", "scipy.*"]
+module = [
+    "triangle.*",
+    "pyamg.*",
+    "gstools.*",
+    "skgstat.*",
+    "msal.*",
+    "scipy.*",
+    # Ships no py.typed marker. Used only by scripts/fetch_fonts.py to pin a
+    # variable font's weight axis before the glyphs are built.
+    "fontTools.*",
+]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

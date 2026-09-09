@@ -19,6 +19,7 @@ from sqlalchemy import text
 from webmap_api.auth import build_verifier
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
+from webmap_api.routes.glyphs import router as glyphs_router
 from webmap_api.routes.jobs import router as jobs_router
 from webmap_api.routes.projects import router as projects_router
 from webmap_api.routes.renders import router as renders_router
@@ -205,6 +206,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(sessions_router)
     app.include_router(renders_router)
     app.include_router(jobs_router)
+    app.include_router(glyphs_router)
 
     return app
 

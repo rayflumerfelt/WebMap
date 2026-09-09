@@ -48,6 +48,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY python/ python/
 COPY apps/ apps/
+
+# Map-label glyphs. MapLibre has no system-font fallback, so an image without
+# these draws no labels — silently. Baked in rather than mounted for the same
+# reason as the DuckDB extensions: 00-overview.md §7 puts this on an internal
+# network, and a container that has to fetch something at runtime is already
+# broken there.
+COPY infra/glyphs/ /app/glyphs/
+ENV WEBMAP_GLYPH_DIR=/app/glyphs
 COPY alembic.ini ./
 COPY infra/migrations/ infra/migrations/
 RUN --mount=type=cache,target=/root/.cache/uv \

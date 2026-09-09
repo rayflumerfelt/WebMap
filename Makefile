@@ -70,6 +70,9 @@ migrate:  ## Apply Alembic migrations
 migration:  ## Generate a new migration: make migration m="add x"
 	$(UV) run alembic revision -m "$(m)"
 
+fonts:  ## Download map-label fonts and build their MapLibre glyph ranges
+	$(UV) run python scripts/fetch_fonts.py
+
 duckdb-extensions:  ## Cache DuckDB extensions for a network that blocks the build
 	$(UV) run python scripts/fetch_duckdb_extensions.py
 

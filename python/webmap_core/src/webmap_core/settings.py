@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     # and no phantom warnings.
     internal_static: str = ""
 
+    #: Where the glyph ranges live. Empty means `infra/glyphs` beside the
+    #: repository, which is what a developer wants; a container sets it to
+    #: wherever the image put them.
+    glyph_dir: str = ""
+
     # --- Identity -----------------------------------------------------------
     #
     # `oidc` is the production path. `dev` verifies tokens signed by a key

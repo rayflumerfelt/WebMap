@@ -61,3 +61,8 @@ apps/render/shell/overlay.js.map
 # Host-side DuckDB extension cache for restricted networks. Binaries, ~100 MB,
 # and version-specific — fetched with `make duckdb-extensions`, never committed.
 .duckdb-extensions/
+
+# Downloaded font sources. Re-fetched by `make fonts`; the glyph ranges built
+# from them ARE committed (infra/glyphs), because an air-gapped deployment
+# cannot rebuild them and a map with no glyphs draws no labels at all.
+.fonts/
