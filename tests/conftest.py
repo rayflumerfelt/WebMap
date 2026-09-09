@@ -12,13 +12,25 @@ migration actually creates, so a policy that is wrong in the migration is
 wrong here too.
 """
 
+import io
+import json
 import os
 from collections.abc import AsyncIterator, Iterator
+from typing import Any
 from uuid import UUID, uuid4
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import pytest_asyncio
+import shapely
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+
+from webmap_core.db.session import principal_session
+from webmap_core.permissions import Principal
+from webmap_core.services import gridding, jobs
 
 #: Superuser connection, used only to create and drop the test database.
 #: Everything inside it runs as the same two roles production uses.
@@ -282,3 +294,198 @@ async def insert_dataset(
         },
     )
     return UUID(str(result.scalar_one()))
+
+
+TEXAS_CENTRAL = 2277
+BUCKET = "webmap-test"
+
+#: A patch of the Midland Basin in EPSG:2277 feet, about 10 x 8 miles.
+EXTENT = (1_500_000.0, 10_400_000.0, 1_552_000.0, 10_442_000.0)
+
+
+# --- the data plane ---------------------------------------------------------
+#
+# Shared by every test that goes through object storage. They live here rather
+# than in one test module and being imported by the others: a fixture imported
+# by name shadows the parameter of the same name in a helper's signature, and
+# ruff is right to call that a redefinition.
+
+
+@pytest.fixture(scope="session")
+def storage() -> Any:
+    """A MinIO client against the local stack, or skip."""
+    from webmap_io.storage import StorageConfig, client, ensure_bucket
+
+    config = StorageConfig(
+        endpoint="http://localhost:9000",
+        bucket=BUCKET,
+        access_key="minioadmin",
+        secret_key="minioadmin",
+    )
+    try:
+        s3 = client(config)
+        ensure_bucket(s3, BUCKET)
+    except Exception as exc:
+        pytest.skip(
+            f"No MinIO at {config.endpoint} ({type(exc).__name__}). Start it "
+            f"with: docker compose -f infra/compose.yaml up -d minio"
+        )
+    return s3
+
+
+@pytest.fixture(scope="session")
+def object_store() -> Any:
+    from webmap_geo.dataplane import ObjectStore
+
+    return ObjectStore(
+        endpoint="localhost:9000",
+        access_key="minioadmin",
+        secret_key="minioadmin",
+        use_ssl=False,
+    )
+
+
+def structure_surface(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """A dipping structure with a four-way closure on it.
+
+    A plane alone would be gridded correctly by anything; the closure is what
+    makes the surface worth checking, because a method that over-smooths loses
+    it and a method that overshoots invents another one beside it.
+    """
+    cx = (EXTENT[0] + EXTENT[2]) / 2
+    cy = (EXTENT[1] + EXTENT[3]) / 2
+    regional = -8_200.0 - 0.004 * (x - EXTENT[0]) - 0.002 * (y - EXTENT[1])
+    closure = 180.0 * np.exp(-(((x - cx) ** 2 + (y - cy) ** 2) / (2 * 4_000.0**2)))
+    return regional + closure
+
+
+def control_points() -> tuple[np.ndarray, np.ndarray]:
+    """The picks the fixture wrote, recomputed rather than re-read.
+
+    Same generator and same seed as `picks`, so this is the identical set —
+    and deriving it here keeps the COG check from depending on the reader it
+    is meant to be independent of.
+    """
+    rng = np.random.default_rng(20260909)
+    pads = rng.uniform([EXTENT[0], EXTENT[1]], [EXTENT[2], EXTENT[3]], size=(20, 2))
+    offsets = rng.normal(0.0, 1_800.0, size=(400, 2))
+    coords = np.repeat(pads, 20, axis=0) + offsets
+    coords[:, 0] = np.clip(coords[:, 0], EXTENT[0], EXTENT[2])
+    coords[:, 1] = np.clip(coords[:, 1], EXTENT[1], EXTENT[3])
+    values = structure_surface(coords[:, 0], coords[:, 1])
+
+    # The fixture drops every tenth pick's value, so those are not control.
+    logged = np.array([bool(i % 10) for i in range(len(values))])
+    return coords[logged], np.round(values[logged], 2)
+
+
+@pytest.fixture(scope="session")
+def picks(storage: Any) -> str:
+    """400 well picks on that structure, written as the ingest pipeline would.
+
+    Synthetic, as `CLAUDE.md` §7.5 requires. Clustered rather than uniform,
+    because well control is clustered by development history and a uniform
+    fixture would never exercise the paths that exist for that.
+    """
+    from webmap_io.storage import put_bytes
+
+    rng = np.random.default_rng(20260909)
+    pads = rng.uniform([EXTENT[0], EXTENT[1]], [EXTENT[2], EXTENT[3]], size=(20, 2))
+    offsets = rng.normal(0.0, 1_800.0, size=(400, 2))
+    coords = np.repeat(pads, 20, axis=0) + offsets
+    coords[:, 0] = np.clip(coords[:, 0], EXTENT[0], EXTENT[2])
+    coords[:, 1] = np.clip(coords[:, 1], EXTENT[1], EXTENT[3])
+
+    values = structure_surface(coords[:, 0], coords[:, 1])
+    geometry = shapely.points(coords[:, 0], coords[:, 1])
+
+    props = []
+    for i, value in enumerate(values):
+        record: dict[str, Any] = {"well_name": f"Wolfcamp {i:04d}"}
+        # A tenth of the picks were never logged, the way a real layer looks.
+        if i % 10:
+            record["tvdss_ft"] = round(float(value), 2)
+        props.append(json.dumps(record))
+
+    table = pa.table(
+        {
+            "id": pa.array(range(len(props)), type=pa.int64()),
+            "geometry": pa.array(shapely.to_wkb(geometry), type=pa.binary()),
+            "props": pa.array(props, type=pa.string()),
+        }
+    )
+    buffer = io.BytesIO()
+    pq.write_table(table, buffer)
+    key = "features/test_picks/v1.parquet"
+    put_bytes(storage, BUCKET, key, buffer.getvalue())
+    return key
+
+
+async def register_picks(
+    engine: AsyncEngine, principal: Principal, key: str, *, kind: str = "pointset"
+) -> UUID:
+    async with principal_session(engine, principal) as conn:
+        result = await conn.execute(
+            text(
+                """
+                INSERT INTO dataset (
+                    name, kind, connector, storage_srid, parquet_key, version,
+                    feature_count, owner_user_id, visibility)
+                VALUES (
+                    'Wolfcamp A Picks', CAST(:kind AS dataset_kind_t), 'upload',
+                    :srid, :key, 1, 400, :owner, 'private')
+                RETURNING id
+                """
+            ),
+            {"kind": kind, "srid": TEXAS_CENTRAL, "key": key, "owner": principal.user_id},
+        )
+        return UUID(str(result.scalar_one()))
+
+
+def worker_context(
+    engine: AsyncEngine, storage: Any, object_store: Any, redis: Any
+) -> dict[str, Any]:
+    """The arq context the worker's startup builds.
+
+    Two clients for the same bucket: boto3 writes the COG, DuckDB's
+    ObjectStore reads the Parquet. Passing one where the other belongs fails
+    with an AttributeError deep inside a solve, which is why they are named
+    apart here rather than left to a single `storage` key.
+    """
+    return {
+        "engine": engine,
+        "storage": storage,
+        "object_store": object_store,
+        "bucket": BUCKET,
+        "redis": redis,
+    }
+
+
+async def run_job(
+    engine: AsyncEngine,
+    storage: Any,
+    object_store: Any,
+    principal: Principal,
+    request: gridding.GridRequest,
+    *,
+    redis: Any = None,
+) -> tuple[UUID, dict[str, Any]]:
+    """Enqueue and execute, the way the API and the worker would."""
+    from tests.test_jobs import FakeRedis
+    from webmap_worker.tasks.interpolate import interpolate_task
+
+    redis = redis or FakeRedis()
+    async with principal_session(engine, principal) as conn:
+        enqueued = await jobs.enqueue(
+            conn,
+            principal,
+            kind="interpolate",
+            parameters=request.to_parameters(),
+            redis=redis,
+        )
+    context = jobs.context_for(principal, enqueued.job_id)
+    document = await interpolate_task(
+        worker_context(engine, storage, object_store, redis),
+        {"context": context.to_payload(), "parameters": request.to_parameters()},
+    )
+    return enqueued.job_id, document

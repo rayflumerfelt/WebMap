@@ -8,6 +8,7 @@ from webmap_core.db.session import create_engine
 from webmap_core.logging import configure_logging, get_logger
 from webmap_core.settings import Environment, get_settings
 from webmap_geo.dataplane import ObjectStore
+from webmap_worker.tasks.contour import contour_task
 from webmap_worker.tasks.health import ping
 from webmap_worker.tasks.interpolate import interpolate_task
 
@@ -68,7 +69,7 @@ class WorkerSettings:
     # queue path, and arq refuses to start a worker whose function list is
     # empty — which is how this container silently crashlooped the first time
     # the stack came up. Phase 4 still owes aggregate, ingest, sync and export.
-    functions: ClassVar[list[Any]] = [ping, interpolate_task]
+    functions: ClassVar[list[Any]] = [ping, interpolate_task, contour_task]
     cron_jobs: ClassVar[list[Any]] = []
 
     on_startup = startup

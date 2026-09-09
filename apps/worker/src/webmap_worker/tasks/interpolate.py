@@ -22,11 +22,11 @@ from uuid import UUID
 
 from webmap_core.crs import CrsContext
 from webmap_core.db.session import principal_session
-from webmap_core.exceptions import NotFound, PermissionDenied, QuotaExceeded, WebMapError
-from webmap_core.jobs import ErrorKind, JobCancelled, JobContext
+from webmap_core.jobs import JobCancelled, JobContext
 from webmap_core.logging import get_logger
 from webmap_core.services import gridding, jobs
 from webmap_worker.progress import ProgressReporter
+from webmap_worker.runtime import check_cancelled, classify, resources
 
 log = get_logger(__name__)
 
@@ -42,7 +42,7 @@ async def interpolate_task(ctx: dict[str, Any], payload: dict[str, Any]) -> dict
     context = JobContext.from_payload(payload["context"])
     request = gridding.GridRequest.from_parameters(payload["parameters"])
     principal = context.principal()
-    engine, store, object_store, bucket, redis = _resources(ctx)
+    engine, store, object_store, bucket, redis = resources(ctx)
 
     async def write(fraction: float, message: str) -> None:
         async with principal_session(engine, principal) as conn:
@@ -66,7 +66,7 @@ async def interpolate_task(ctx: dict[str, Any], payload: dict[str, Any]) -> dict
         log.info("interpolate_cancelled", job_id=str(context.job_id))
         return {"cancelled": True}
     except Exception as error:
-        kind = _classify(error)
+        kind = classify(error)
         async with principal_session(engine, principal) as conn:
             await jobs.mark_failed(conn, context.job_id, str(error), kind)
         log.warning(
@@ -100,7 +100,7 @@ async def _run(
 
     crs = CrsContext(storage_srid=inputs.storage_srid, analysis_srid=inputs.analysis_srid)
     control = await gridding.load_control(inputs, request, crs, object_store, bucket)
-    await _check_cancelled(redis, context.job_id)
+    await check_cancelled(redis, context.job_id)
 
     grid = gridding.build_grid(control.bounds(), crs, request, unit=crs.frame.units)
 
@@ -108,7 +108,7 @@ async def _run(
     if inputs.fault_parquet_key is not None:
         await reporter.phase("Validating fault network")
         constraints = await _load_constraints(inputs, crs, object_store, bucket)
-        await _check_cancelled(redis, context.job_id)
+        await check_cancelled(redis, context.job_id)
 
     await reporter.phase("Solving")
     result = interpolate(
@@ -131,7 +131,7 @@ async def _run(
     # COG is uploaded and the dataset registered; a cancellation arriving now
     # is honoured on the next poll of a different job, not by unregistering a
     # dataset somebody may already have opened.
-    await _check_cancelled(redis, context.job_id)
+    await check_cancelled(redis, context.job_id)
 
     await reporter.phase("Writing grid")
     async with principal_session(engine, principal) as conn:
@@ -214,39 +214,6 @@ async def _load_constraints(
     return constraints
 
 
-async def _check_cancelled(redis: Any, job_id: UUID) -> None:
-    """`10` §9. Polled at phase boundaries; raises so the caller unwinds.
-
-    Raising rather than returning a flag because every caller would have to
-    check it and one would forget — and the one that forgot would be the one
-    that writes the COG.
-    """
-    if await jobs.is_cancelled(redis, job_id):
-        raise JobCancelled(f"Job {job_id} was cancelled before its output was written.")
-
-
-def _classify(error: Exception) -> ErrorKind:
-    """`10` §8. Which failures are worth retrying.
-
-    A bad value column will be bad again in thirty seconds; a dropped S3
-    connection will not. Getting this wrong in the retryable direction turns a
-    clear message into four identical failures and a much later one.
-    """
-    from webmap_geo.exceptions import DegenerateInput, GeoError, NotProjected, UnknownCrs
-
-    if isinstance(error, PermissionDenied):
-        return ErrorKind.PERMISSION
-    if isinstance(error, QuotaExceeded):
-        return ErrorKind.RESOURCE
-    if isinstance(error, DegenerateInput | NotProjected | UnknownCrs | NotFound):
-        return ErrorKind.INPUT
-    if isinstance(error, MemoryError):
-        return ErrorKind.RESOURCE
-    if isinstance(error, GeoError | WebMapError):
-        return ErrorKind.INPUT
-    return ErrorKind.INTERNAL
-
-
 def _generator_for(job_id: UUID) -> Any:
     """A generator seeded from the job id.
 
@@ -258,29 +225,6 @@ def _generator_for(job_id: UUID) -> Any:
     import numpy as np
 
     return np.random.default_rng(job_id.int % (2**63))
-
-
-def _resources(ctx: dict[str, Any]) -> tuple[Any, Any, Any, str, Any]:
-    """Pull the worker's shared clients out of the arq context.
-
-    Named here rather than indexed inline so a missing key fails with
-    something a person can act on: an arq context is a plain dict, and a
-    KeyError from deep inside a solve says nothing about worker startup.
-    """
-    missing = [key for key in ("engine", "storage", "object_store", "bucket") if key not in ctx]
-    if missing:
-        raise RuntimeError(
-            f"The worker context is missing {', '.join(missing)}. These are "
-            f"created in webmap_worker.main.startup — a task cannot run without "
-            f"them, and a KeyError from inside a solve would not say so."
-        )
-    return (
-        ctx["engine"],
-        ctx["storage"],
-        ctx["object_store"],
-        ctx["bucket"],
-        ctx.get("redis"),
-    )
 
 
 __all__ = ["interpolate_task"]
