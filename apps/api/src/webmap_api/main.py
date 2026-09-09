@@ -15,8 +15,6 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from webmap_api.auth import build_verifier
-from webmap_api.db import assert_rls_enforced, create_engine
-from webmap_api.db.session import assert_policies_present, unscoped_session
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
 from webmap_api.routes.projects import router as projects_router
@@ -24,6 +22,8 @@ from webmap_api.routes.renders import router as renders_router
 from webmap_api.routes.sessions import router as sessions_router
 from webmap_api.routes.tiles import router as tiles_router
 from webmap_api.routes.uploads import router as uploads_router
+from webmap_core.db import assert_rls_enforced, create_engine
+from webmap_core.db.session import assert_policies_present, unscoped_session
 from webmap_core.exceptions import (
     LimitExceeded,
     NotFound,

@@ -6,6 +6,12 @@ hook excludes exactly this path (`CLAUDE.md` §11). A session opened anywhere
 else has no `webmap.user_id` set, so every RLS policy evaluates against a
 missing setting and the query errors or, worse, matches nothing and looks
 like an empty result.
+
+It lives in `webmap_core` rather than in the API because **the worker needs
+principal-scoped connections too**. A job runs long after its request is
+gone, and §3.2's rule — never create a session without a `Principal` — has to
+hold there as well. The alternative was a second `engine.begin()` in the
+worker, which is exactly the thing the hook exists to prevent.
 """
 
 from collections.abc import AsyncIterator

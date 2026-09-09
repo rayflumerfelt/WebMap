@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.fixtures.build import build_all
-from webmap_api.db.session import principal_session
+from webmap_core.db.session import principal_session
 from webmap_core.models import DatasetKind, GeometryKind
 from webmap_core.permissions import Principal
 from webmap_core.services import datasets as service

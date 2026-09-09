@@ -471,13 +471,14 @@ repos:
         language: pygrep
         files: ^(apps|python)/.*\.py$
         # The session helper is the one file that legitimately calls
-        # engine.begin(). Packages use a src layout, so the path is
-        # apps/api/src/webmap_api/db/ — not apps/api/db/, and not
-        # python/webmap_core/db/. Re-check these paths whenever the layout
+        # engine.begin(). It lives in webmap_core rather than the API because
+        # the worker needs principal-scoped sessions too. Packages use a src
+        # layout, so the path is python/webmap_core/src/webmap_core/db/ —
+        # not python/webmap_core/db/. Re-check this path whenever the layout
         # moves: an anchored path that no longer matches makes the exclude
         # silently do nothing, which is the same failure as the ^tests/ one
         # above.
-        exclude: (^apps/api/src/webmap_api/db/session\.py$|(^|/)tests/)
+        exclude: (^python/webmap_core/src/webmap_core/db/session\.py$|(^|/)tests/)
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2

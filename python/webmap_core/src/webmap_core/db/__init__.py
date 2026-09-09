@@ -1,6 +1,6 @@
 """Database access. Every session goes through `principal_session`."""
 
-from webmap_api.db.session import (
+from webmap_core.db.session import (
     assert_rls_enforced,
     create_engine,
     principal_session,

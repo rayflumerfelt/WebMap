@@ -26,7 +26,6 @@ import httpx
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from webmap_api.db.session import principal_session, unscoped_session
 from webmap_api.dependencies import (
     AppSettings,
     CurrentPrincipal,
@@ -34,6 +33,7 @@ from webmap_api.dependencies import (
     get_channel,
     get_claims,
 )
+from webmap_core.db.session import principal_session, unscoped_session
 from webmap_core.exceptions import InvalidToken, NotFound
 from webmap_core.identity import AuthenticationFailed, Claims
 from webmap_core.logging import get_logger

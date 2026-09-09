@@ -114,7 +114,7 @@ async def engine(database_urls: tuple[str, str]) -> AsyncIterator[AsyncEngine]:
     subject for an RLS test even with FORCE enabled, because it is also the
     role that could drop the policies.
     """
-    from webmap_api.db.session import create_engine
+    from webmap_core.db.session import create_engine
 
     app_url, _ = database_urls
     eng = create_engine(app_url)
@@ -241,7 +241,7 @@ async def raw_visible_dataset_ids(
     """
     from sqlalchemy import text
 
-    from webmap_api.db.session import principal_session
+    from webmap_core.db.session import principal_session
     from webmap_core.permissions import Principal
 
     assert isinstance(principal, Principal)

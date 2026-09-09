@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from webmap_api.db.session import principal_session, unscoped_session
+from webmap_core.db.session import principal_session, unscoped_session
 from webmap_core.identity import AuthenticationFailed, Claims, TokenVerifier
 from webmap_core.logging import bind_request
 from webmap_core.permissions import Channel, Principal

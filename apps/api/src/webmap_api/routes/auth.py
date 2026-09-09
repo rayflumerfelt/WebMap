@@ -22,8 +22,8 @@ from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from webmap_api.db.session import unscoped_session
 from webmap_api.dependencies import AppSettings, CurrentPrincipal, ScopedConn
+from webmap_core.db.session import unscoped_session
 from webmap_core.identity import AuthenticationFailed, Claims
 from webmap_core.logging import get_logger
 from webmap_core.permissions import Channel

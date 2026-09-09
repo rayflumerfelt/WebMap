@@ -24,7 +24,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.conftest import insert_dataset, raw_visible_dataset_ids
-from webmap_api.db.session import principal_session
+from webmap_core.db.session import principal_session
 from webmap_core.exceptions import NotFound, PermissionDenied
 from webmap_core.permissions import GrantRole, Permission, Principal
 from webmap_core.services import datasets as service
