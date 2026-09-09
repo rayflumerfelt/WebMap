@@ -48,6 +48,13 @@ class ContourRequest:
     smoothing: float = 0.0
     index_every: int = 5
     min_length: float | None = None
+    #: Also fill the intervals between levels, as polygons (`08` §5.2).
+    #:
+    #: *Also*, not *instead*: bands without their contours is a map you cannot
+    #: read a value off, and producing both from one call is what guarantees
+    #: the fill edge sits under the line. Two datasets, one job, one level
+    #: list.
+    fill: bool = False
     output_name: str | None = None
     project_id: UUID | None = None
     visibility: Visibility = Visibility.TEAM
@@ -62,6 +69,7 @@ class ContourRequest:
             "smoothing": self.smoothing,
             "index_every": self.index_every,
             "min_length": self.min_length,
+            "fill": self.fill,
             "output_name": self.output_name,
             "project_id": str(self.project_id) if self.project_id else None,
             "visibility": self.visibility.value,
@@ -78,6 +86,7 @@ class ContourRequest:
             smoothing=parameters.get("smoothing", 0.0),
             index_every=parameters.get("index_every", 5),
             min_length=parameters.get("min_length"),
+            fill=bool(parameters.get("fill", False)),
             output_name=parameters.get("output_name"),
             project_id=(
                 UUID(parameters["project_id"]) if parameters.get("project_id") else None
@@ -235,6 +244,136 @@ def trace(surface: Any, grid: Any, levels: Any, request: ContourRequest) -> list
             f"range, or the fragments were all shorter than the minimum length."
         )
     return lines
+
+
+def fill_bands(surface: Any, grid: Any, levels: Any, request: ContourRequest) -> list[Any]:
+    """Fill the intervals between the same levels the lines were traced at.
+
+    No separate density guard: band complexity tracks line complexity, so an
+    interval `trace` already accepted produces a band set of the same order.
+    Guarding twice on the same quantity would let the two limits drift apart
+    and start refusing filled maps whose contours were fine.
+    """
+    from webmap_geo.contour.bands import contour_bands
+    from webmap_geo.exceptions import DegenerateInput
+
+    bands = contour_bands(
+        surface,
+        grid,
+        levels=levels,
+        smoothing=request.smoothing,
+    )
+    if not bands:
+        raise DegenerateInput(
+            f"No filled bands were produced at levels {levels.min():g} to "
+            f"{levels.max():g}. Every level fell outside the surface's range, "
+            f"so there are no intervals to fill."
+        )
+    return bands
+
+
+async def write_band_dataset(
+    conn: AsyncConnection,
+    principal: Principal,
+    context: JobContext,
+    request: ContourRequest,
+    source: GridSource,
+    bands: list[Any],
+    levels: Any,
+    *,
+    store: Any,
+    bucket: str,
+) -> UUID:
+    """Write the filled bands as their own polygon layer.
+
+    A separate dataset rather than extra columns on the contour layer: they
+    are different geometry, they are styled differently, and a geologist turns
+    the fill off to read the lines. One layer that is both cannot do that.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from webmap_io.parquet import write_features
+    from webmap_io.storage import feature_key, put_bytes
+
+    dataset_id = uuid4()
+    key = feature_key(str(dataset_id), 1)
+
+    geometry = np.asarray([band.geometry for band in bands], dtype=object)
+    props: list[dict[str, Any]] = [
+        {
+            "lower": band.lower,
+            "upper": band.upper,
+            # The value one colour stands for, so a legend swatch has a number
+            # rather than a range to place on a ramp.
+            "midpoint": band.midpoint,
+            # The outermost bands mean "below" and "above", not a closed
+            # interval — a legend that labels them as one claims a floor and a
+            # ceiling the data does not have.
+            "is_open_ended": band.is_open_ended,
+            # Precomputed because it is the question a filled map is drawn to
+            # answer, and because recomputing it in the browser would be in
+            # web-mercator metres rather than the analysis frame's units.
+            "area": band.area,
+        }
+        for band in bands
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bands.parquet"
+        write_features(path, geometry=geometry, props=props, srid=source.storage_srid)
+        put_bytes(store, bucket, key, path.read_bytes())
+
+    name = request.output_name or f"{source.name} contours"
+    await create_dataset(
+        conn,
+        principal,
+        name=f"{name} (filled)",
+        kind=DatasetKind.VECTOR,
+        geometry_kind=GeometryKind.POLYGON,
+        storage_srid=source.storage_srid,
+        connector="derived",
+        project_id=request.project_id or source.project_id,
+        parquet_key=key,
+        feature_count=len(bands),
+        bbox_4326=source.bbox_4326,
+        attribute_schema=[
+            {"name": "lower", "type": "double"},
+            {"name": "upper", "type": "double"},
+            {"name": "midpoint", "type": "double"},
+            {"name": "is_open_ended", "type": "boolean"},
+            {"name": "area", "type": "double"},
+        ],
+        owner_team_id=request.owner_team_id,
+        visibility=request.visibility,
+        caption=band_caption(source, bands, levels),
+        dataset_id=dataset_id,
+    )
+
+    await record_lineage(
+        conn,
+        principal,
+        output_dataset_id=dataset_id,
+        operation="contour_bands",
+        parameters={
+            "levels": [float(level) for level in levels],
+            "interval": interval_of(levels),
+            "smoothing": request.smoothing,
+            "source_srid": source.storage_srid,
+        },
+        input_dataset_ids=[source.dataset_id],
+        job_id=context.job_id,
+    )
+    return dataset_id
+
+
+def band_caption(source: GridSource, bands: list[Any], levels: Any) -> str:
+    """Names the interval, as the line caption does, so the pair read alike."""
+    interval = interval_of(levels)
+    return (
+        f"{len(bands):,} filled bands of {source.name} at {interval:g} intervals, "
+        f"{float(np.min(levels)):g} to {float(np.max(levels)):g}"
+    )
 
 
 def interval_of(levels: Any) -> float:
@@ -400,13 +539,16 @@ __all__ = [
     "MAX_CONTOUR_FEATURES",
     "ContourRequest",
     "GridSource",
+    "band_caption",
     "caption",
     "choose_levels",
     "contours_of",
+    "fill_bands",
     "index_values",
     "interval_of",
     "read_grid",
     "resolve_grid",
     "trace",
+    "write_band_dataset",
     "write_contour_dataset",
 ]

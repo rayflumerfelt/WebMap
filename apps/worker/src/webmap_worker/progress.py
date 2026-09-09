@@ -45,6 +45,23 @@ PHASES: dict[str, list[tuple[str, float]]] = {
         ("Tracing contours", 0.60),
         ("Writing features", 0.20),
     ],
+    # Filling is a separate kind rather than an optional phase, because the
+    # weights have to sum to 1.0 either way: a phase that is skipped half the
+    # time leaves the bar short of the end on those runs, which reads as a job
+    # that stalled at 80%.
+    #
+    # Filling costs about what tracing costs. Measured on a 1000x1000 grid of
+    # rough structure at a 15-contour interval: 0.060 s to trace, 0.066 s to
+    # fill. The ratio is not stable across surfaces — a smooth cone fills in
+    # half the time, a fragmented one in twice — so these are equal weights
+    # rather than a false precision.
+    "contour_filled": [
+        ("Loading grid", 0.10),
+        ("Choosing levels", 0.03),
+        ("Tracing contours", 0.33),
+        ("Filling bands", 0.35),
+        ("Writing features", 0.19),
+    ],
 }
 
 #: Seconds between database writes. One second is about as fast as a progress

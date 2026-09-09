@@ -435,6 +435,15 @@ def _succeeded(job: dict[str, Any], job_id: str, kind: str) -> str:
     if result.get("interval"):
         lines.append(f"- **Contour interval**: {result['interval']:g}")
 
+    # A filled run writes a second layer, and this is the only place its id is
+    # ever shown. Left out, the polygons exist and nothing that reads this can
+    # find them — which is indistinguishable from `fill` having been ignored.
+    band_dataset_id = result.get("band_dataset_id")
+    if band_dataset_id:
+        lines.append(f"- **Filled bands**: `{clean(str(band_dataset_id))}`")
+    if result.get("band_count") is not None:
+        lines.append(f"- **Bands**: {_count(result['band_count'])}")
+
     grid = result.get("grid") or {}
     if grid.get("nx"):
         lines.append(

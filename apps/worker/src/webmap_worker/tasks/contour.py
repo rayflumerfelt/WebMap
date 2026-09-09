@@ -37,7 +37,9 @@ async def contour_task(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[str
         async with principal_session(engine, principal) as conn:
             await jobs.report_progress(conn, context.job_id, fraction, message)
 
-    reporter = ProgressReporter(write, context.job_id, "contour")
+    reporter = ProgressReporter(
+        write, context.job_id, "contour_filled" if request.fill else "contour"
+    )
 
     async with principal_session(engine, principal) as conn:
         await jobs.mark_running(conn, context.job_id)
@@ -86,6 +88,12 @@ async def _run(
     lines = contours.trace(surface, grid, levels, request)
     await check_cancelled(redis, context.job_id)
 
+    bands: list[Any] = []
+    if request.fill:
+        await reporter.phase("Filling bands")
+        bands = contours.fill_bands(surface, grid, levels, request)
+        await check_cancelled(redis, context.job_id)
+
     await reporter.phase("Writing features")
     async with principal_session(engine, principal) as conn:
         dataset_id = await contours.write_contour_dataset(
@@ -99,6 +107,24 @@ async def _run(
             "feature_count": len(lines),
             "caption": contours.caption(source, lines, levels),
         }
+        if bands:
+            # Written inside the same transaction as the lines. The two share a
+            # level list and are only meaningful together, so a run that
+            # registered one and not the other would leave a filled map with no
+            # contours on it, or contours with a fill that does not match.
+            band_dataset_id = await contours.write_band_dataset(
+                conn,
+                principal,
+                context,
+                request,
+                source,
+                bands,
+                levels,
+                store=store,
+                bucket=bucket,
+            )
+            document["band_dataset_id"] = str(band_dataset_id)
+            document["band_count"] = len(bands)
         await jobs.mark_succeeded(conn, context.job_id, document)
 
     log.info(
@@ -106,6 +132,7 @@ async def _run(
         job_id=str(context.job_id),
         dataset_id=str(dataset_id),
         lines=len(lines),
+        bands=len(bands),
     )
     return document
 

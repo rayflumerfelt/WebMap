@@ -619,7 +619,50 @@ def auto_levels(vmin: float, vmax: float, target_count: int = 15) -> np.ndarray:
 Contour output carries attributes: `value`, `is_index` (every Nth for heavier styling), and
 `closed`. Index contours drive label placement in the style.
 
-### 7.1 Label anchors
+### 7.1 Filled bands
+
+```python
+# python/webmap_geo/contour/bands.py
+
+def contour_bands(
+    surface: NDArray[np.floating],
+    grid: GridDefinition,
+    levels: NDArray[np.floating] | None = None,
+    *,
+    smoothing: float = 0.0,
+    min_area: float | None = None,
+) -> list[ContourBand]:
+    """Fill the intervals between contour levels, as polygons."""
+```
+
+**A colour-filled grid renders these bands; it does not produce them.** The difference is
+whether anything can be measured or exported: area per band answers "how much of this lease is
+above the spill point", which is usually the question a filled map is drawn to ask. A PNG
+answers nothing.
+
+`n` levels give up to `n + 1` bands. **Both ends are closed** — the outermost run to the
+surface's own extremes — because an unfilled margin is indistinguishable from no-data, which is
+the confusion the extrapolation reporting exists to prevent. Those two bands carry
+`is_open_ended`, so a legend says "below 8,600" rather than claiming a floor the data lacks.
+
+One band per interval, as a multipolygon, rather than one feature per connected part: the band
+is what a legend entry names and what an area is totalled against, and a structure map's
+8,600 ft interval is routinely a dozen disjoint pieces nobody wants listed separately.
+
+NaN stays unfilled. A fault-blanked compartment becomes a hole in the band rather than ground
+coloured as though it had been interpolated.
+
+**Lines and bands are the same curve, not two curves that agree closely.** They come from one
+level list and are smoothed by one function (`contour/smooth.py`), and the tests assert the
+maximum departure of a contour from its band edge is **exactly zero** at every smoothing level
+— not a tolerance, which would let them drift a fraction of a cell apart and leave a coloured
+fringe along every contour.
+
+Areas are checked against a closed form rather than a golden file: on a cone `z = r`, the band
+between `r = 200` and `r = 400` is `pi * (400^2 - 200^2)`, met to within 0.5% — the bound being
+the chord error of marching squares over a 10 ft cell, not slack.
+
+### 7.2 Label anchors
 
 Polygon label anchors are computed here rather than left to the renderer, because they are
 geometry (`adr/0004`) and because MapLibre's own placement is per-tile.
@@ -627,21 +670,47 @@ geometry (`adr/0004`) and because MapLibre's own placement is per-tile.
 ```python
 # python/webmap_geo/label.py
 
-def label_anchors(polygons: gpd.GeoSeries, frame: AnalysisFrame) -> gpd.GeoSeries:
-    """One representative interior point per polygon.
+@dataclass(frozen=True)
+class LabelAnchor:
+    point: Point
+    method: str          # 'centroid' or 'pole'
+    clearance: float     # distance to the nearest edge, in the frame's units
 
-    Area centroid where it falls inside the polygon; otherwise the pole of
-    inaccessibility (Shapely's `polylabel`) — the centre of the largest
-    inscribed circle, the point furthest from any edge and so the one with the
-    most room for text. A crescent-shaped lease, or a township with a lake in
-    it, has its centroid outside itself, and a label there sits on open ground.
 
-    Computed against the whole geometry, once. MapLibre computes its own
-    against the *tile-clipped* polygon at 2px precision, per tile and per ring
-    group, so a polygon spanning a tile boundary gets a different anchor in
-    each tile — the label moves while panning and drifts while zooming.
-    """
+def label_anchors(
+    geometries: Sequence[BaseGeometry],
+    frame: AnalysisFrame,
+    *,
+    tolerance_ratio: float = 0.01,
+) -> list[LabelAnchor | None]:
+    """One representative interior point per feature."""
 ```
+
+Shapely in, Shapely out — no geopandas, which `webmap_geo` does not depend on and must not
+(`CLAUDE.md` §3.5). Assembling these into a dataset is the caller's job.
+
+**Area centroid where it falls inside the polygon; the pole of inaccessibility where it does
+not.** The pole is the centre of the largest inscribed circle — the point furthest from any
+edge, and so the one with the most room for text. A crescent-shaped lease, or a township with a
+lake over its middle, has its centroid outside its own material, and a label there sits on open
+ground. Shapely ships `polylabel`, so this costs no new dependency.
+
+**One anchor per feature, on its largest part.** A multipolygon lease gets one label, not one
+per sliver.
+
+**The result is aligned with the input, gaps included.** A geometry with no polygonal area
+yields `None` rather than being dropped: the caller zips these back onto features by position,
+and a shorter list shifts every label after the first empty one onto the wrong feature — a map
+whose names are all correct and all in the wrong places, which reads as a data problem rather
+than as this.
+
+`clearance` is measured against the **boundary**, holes included. A ring of land around a lake
+is a long way from the outside and a few feet from the water; reporting the first tells the
+caller there is room for a label that will sit in the lake.
+
+`tolerance_ratio` is relative to `sqrt(area)` rather than absolute, because a lease and a basin
+differ by four orders of magnitude and one fixed tolerance either costs seconds on the small
+one or returns a corner of the large one.
 
 The output is a point dataset in its own right, so an anchor can be inspected, moved by hand
 and exported with the map. `08-styling-palettes.md` §2.4 covers what the style does with it.

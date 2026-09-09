@@ -507,11 +507,28 @@ async def webmap_contour(
             ),
         ),
     ] = 5,
+    fill: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Also produce the filled bands between the levels, as polygons. "
+                "Use this when the question is about area - how much of a lease "
+                "lies above a spill point - or when the map is to be exported. A "
+                "colour-filled grid renders the same bands but produces no "
+                "geometry, so nothing can be measured or exported from it."
+            ),
+        ),
+    ] = False,
 ) -> str:
     """Generate contour lines from a gridded surface.
 
     Returns a job handle. The output is a vector dataset carrying each line's
     value and whether it is an index contour, suitable for rendering or export.
+
+    With `fill`, a second polygon dataset is produced from the same levels,
+    carrying each band's bounds and its area. Both come back on the job result
+    as `dataset_id` and `band_dataset_id`.
     """
     source = await _get(f"/api/v1/datasets/{dataset_id}")
 
@@ -522,6 +539,8 @@ async def webmap_contour(
         detail.append(f"- **Interval**: {interval:g}")
     else:
         detail.append("- **Interval**: automatic (a round number)")
+    if fill:
+        detail.append("- **Output**: contour lines and filled bands, on the same levels")
 
     submitted = await _post(
         "/api/v1/jobs/contour",
@@ -533,6 +552,7 @@ async def webmap_contour(
                 "levels": levels,
                 "smoothing": smoothing,
                 "index_every": index_every,
+                "fill": fill,
             }
         ),
     )

@@ -546,3 +546,151 @@ def test_the_quoted_interval_is_the_median_gap() -> None:
     assert contours.interval_of(np.array([0.0, 10.0, 20.0, 30.0])) == pytest.approx(10.0)
     assert contours.interval_of(np.array([0.0, 1.0, 11.0, 21.0])) == pytest.approx(10.0)
     assert contours.interval_of(np.array([5.0])) == 0.0
+
+
+# --- filled bands ------------------------------------------------------------
+
+
+async def test_filling_produces_a_polygon_layer_beside_the_lines(
+    engine: AsyncEngine,
+    storage: Any,
+    object_store: Any,
+    picks: str,
+    principals: dict[str, object],
+) -> None:
+    """`08` §5.2. A colour-filled grid renders these bands; only this produces
+    them, and the difference is whether anything can be measured or exported."""
+    owner = principals["owner"]
+    assert isinstance(owner, Principal)
+    grid_id = await make_grid(engine, storage, object_store, owner, picks)
+
+    _, document = await run_contour(
+        engine,
+        storage,
+        object_store,
+        owner,
+        contours.ContourRequest(dataset_id=grid_id, fill=True),
+    )
+
+    assert "band_dataset_id" in document, "fill=True produced no bands"
+    band_id = UUID(document["band_dataset_id"])
+    assert band_id != UUID(document["dataset_id"]), "bands and lines are one layer"
+
+    async with principal_session(engine, owner) as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT kind, geometry_kind, feature_count, attribute_schema, caption "
+                    "FROM dataset WHERE id = :id"
+                ),
+                {"id": band_id},
+            )
+        ).one()
+
+    assert row.kind == DatasetKind.VECTOR
+    assert row.geometry_kind == GeometryKind.POLYGON
+    assert row.feature_count == document["band_count"] > 0
+    assert {field["name"] for field in row.attribute_schema} == {
+        "lower",
+        "upper",
+        "midpoint",
+        "is_open_ended",
+        "area",
+    }
+    assert "filled bands" in row.caption
+
+
+async def test_bands_are_not_produced_unless_asked_for(
+    engine: AsyncEngine,
+    storage: Any,
+    object_store: Any,
+    picks: str,
+    principals: dict[str, object],
+) -> None:
+    """A second layer appearing in the tree unbidden is worse than no feature:
+    nobody knows where it came from and everybody deletes it."""
+    owner = principals["owner"]
+    assert isinstance(owner, Principal)
+    grid_id = await make_grid(engine, storage, object_store, owner, picks)
+
+    _, document = await run_contour(
+        engine, storage, object_store, owner, contours.ContourRequest(dataset_id=grid_id)
+    )
+
+    assert "band_dataset_id" not in document
+
+
+async def test_the_bands_record_lineage_to_the_grid_they_filled(
+    engine: AsyncEngine,
+    storage: Any,
+    object_store: Any,
+    picks: str,
+    principals: dict[str, object],
+) -> None:
+    """A derived dataset that cannot say what made it cannot be reproduced,
+    and `CLAUDE.md` §3.3 makes that non-negotiable."""
+    owner = principals["owner"]
+    assert isinstance(owner, Principal)
+    grid_id = await make_grid(engine, storage, object_store, owner, picks)
+
+    _, document = await run_contour(
+        engine,
+        storage,
+        object_store,
+        owner,
+        contours.ContourRequest(dataset_id=grid_id, fill=True, interval=50.0),
+    )
+
+    async with principal_session(engine, owner) as conn:
+        lineage = await get_lineage(conn, owner, UUID(document["band_dataset_id"]))
+
+    assert lineage is not None, "the band layer has no lineage record"
+    assert lineage["operation"] == "contour_bands"
+    assert lineage["input_dataset_ids"] == [grid_id]
+    assert lineage["parameters"]["interval"] == pytest.approx(50.0)
+
+
+async def test_the_bands_and_the_lines_share_one_level_list(
+    engine: AsyncEngine,
+    storage: Any,
+    object_store: Any,
+    picks: str,
+    principals: dict[str, object],
+) -> None:
+    """The whole reason they are produced together. Two calls could be given
+    different levels, and then the fill edges wander across the contours."""
+    owner = principals["owner"]
+    assert isinstance(owner, Principal)
+    grid_id = await make_grid(engine, storage, object_store, owner, picks)
+
+    _, document = await run_contour(
+        engine,
+        storage,
+        object_store,
+        owner,
+        contours.ContourRequest(dataset_id=grid_id, fill=True),
+    )
+
+    async with principal_session(engine, owner) as conn:
+        lines = await get_lineage(conn, owner, UUID(document["dataset_id"]))
+        bands = await get_lineage(conn, owner, UUID(document["band_dataset_id"]))
+
+    assert lines is not None and bands is not None
+    assert bands["parameters"]["levels"] == lines["parameters"]["levels"]
+
+
+async def test_a_filled_job_reports_progress_through_its_own_phases(
+    engine: AsyncEngine,
+    storage: Any,
+    object_store: Any,
+    picks: str,
+    principals: dict[str, object],
+) -> None:
+    """Filling is a separate job kind because the phase weights must sum to
+    1.0 either way. A skipped phase would leave the bar short of the end,
+    which reads as a job that stalled."""
+    from webmap_worker.progress import PHASES
+
+    assert sum(weight for _, weight in PHASES["contour_filled"]) == pytest.approx(1.0)
+    assert "Filling bands" in [name for name, _ in PHASES["contour_filled"]]
+    assert "Filling bands" not in [name for name, _ in PHASES["contour"]]

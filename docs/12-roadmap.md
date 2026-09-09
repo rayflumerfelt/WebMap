@@ -18,7 +18,7 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 Updated 2026-09-09 (Phase 4 in progress). A phase is complete only when every criterion
 passes; a criterion met with a caveat says so rather than being ticked quietly.
 
-Verified on this date against a live stack: 861 Python tests including the full integration
+Verified on this date against a live stack: 906 Python tests including the full integration
 suite, 319 TypeScript tests, and lint, formatting, typechecking and the package-boundary
 contracts clean in both languages.
 
@@ -313,15 +313,24 @@ fault is gridded with it.
 - [x] Lineage record is sufficient to re-run and reproduce the identical grid — asserted by
       re-running the job and comparing the arrays, not by inspecting the record
 - [x] Contour intervals are round numbers a geologist would choose
+- [x] Filled bands measure the area between their levels — checked against a closed form on a
+      cone, and sitting exactly under the contours drawn over them
 
 **Still owed by Phase 4:** universal kriging and cubic spline (`Method` has four members:
 ordinary kriging, minimum curvature, IDW, nearest); breakline-aware interpolation;
-**filled contour bands** — polygons between levels, for exporting and attributing the bands
-that a colour-filled grid only renders (`08` §5.2); **label anchors** — a per-layer point
-dataset of area centroids with a `polylabel` fallback, so a polygon's label stops moving
-between tiles and zooms (`08` §2.4); `webmap_aggregate` and `webmap_fit_variogram`; the
-`aggregate` package, which is still an empty placeholder; and the worker's ingest, sync and
-export tasks.
+`webmap_aggregate` and `webmap_fit_variogram`; the `aggregate` package, which is still an empty
+placeholder; and the worker's ingest, sync and export tasks.
+
+**Label anchors are half done.** The geoprocessing exists and is tested — `webmap_geo.label`
+places one anchor per feature, centroid where it falls inside and pole of inaccessibility where
+it does not, with the clearance around it (`05` §7.2). What is missing is the job that turns a
+polygon layer into an anchor *dataset*: without it the anchors cannot be stored, inspected,
+hand-corrected or referenced by a style, which is most of the reason for computing them here
+rather than letting MapLibre do it per tile.
+
+**Filled contour bands are done** (`05` §7.1). `webmap_contour` takes `fill`, and produces the
+polygons between levels as a second layer from the same level list — with each band's bounds,
+midpoint, area and whether it is open-ended.
 
 **Risk.** Minimum curvature is now the only fault-aware interpolator, so a geologist who wants
 a kriged surface of a faulted field cannot have one. Mitigated by saying so at the point of

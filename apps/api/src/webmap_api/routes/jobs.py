@@ -110,6 +110,7 @@ class ContourRequestModel(WebMapModel):
     levels: list[float] | None = None
     smoothing: float = Field(default=0.0, ge=0.0, le=0.5)
     index_every: int = Field(default=5, ge=2, le=20)
+    fill: bool = False
     output_name: str | None = None
     project_id: UUID | None = None
     visibility: Visibility = Visibility.TEAM
@@ -123,6 +124,7 @@ class ContourRequestModel(WebMapModel):
             levels=self.levels,
             smoothing=self.smoothing,
             index_every=self.index_every,
+            fill=self.fill,
             output_name=self.output_name,
             project_id=self.project_id,
             visibility=self.visibility,

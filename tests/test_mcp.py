@@ -453,8 +453,14 @@ async def test_a_grid_can_be_made_and_polled_entirely_through_the_tools(
     # having it — unlike a listing, which is where a full id has to appear.
     grid_id = uuid.UUID(re.findall(r"`([0-9a-f-]{36})`", status)[0])
 
-    contoured = await ada.webmap_contour(dataset_id=grid_id)
+    # `fill=True`, so this crosses the whole surface for filled bands too:
+    # tool signature, HTTP body, the API model — which is `extra="forbid"`, so
+    # a stale container rejects the field rather than dropping it — the job
+    # payload, and the worker. That rejection is how a rebuild being skipped
+    # was caught, and it is worth keeping a test on the path that caught it.
+    contoured = await ada.webmap_contour(dataset_id=grid_id, fill=True)
     assert "Contouring job queued" in contoured
+    assert "filled bands" in contoured
 
     # **Waited for, not fired and forgotten.** The contour layer is created by
     # the worker, so returning here would let the module's teardown run before
@@ -468,6 +474,10 @@ async def test_a_grid_can_be_made_and_polled_entirely_through_the_tools(
             break
         await asyncio.sleep(2)
     assert "succeeded" in status, status
+    # Two layers out of one job, on one level list (`08` §5.2).
+    assert len(set(re.findall(r"`([0-9a-f-]{36})`", status))) >= 2, (
+        f"the filled run produced no band layer beside the contours: {status}"
+    )
 
 
 async def test_cancelling_requires_confirmation(api_base_url: str) -> None:

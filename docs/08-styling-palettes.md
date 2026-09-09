@@ -619,11 +619,16 @@ look wrong to people who cannot say why; aligned, the map reads as one object.
 One set of levels therefore drives three renderings, with nothing to keep in sync because
 there is only one list:
 
-| Rendering | What it is |
-|---|---|
-| Contour lines | LineStrings at the levels |
-| Colour-filled grid | Discrete colormap with bands *at* those levels |
-| Polygon bands | Filled contour output between the same levels |
+| Rendering | What it is | Where it comes from |
+|---|---|---|
+| Contour lines | LineStrings at the levels | `webmap_contour` |
+| Colour-filled grid | Discrete colormap with bands *at* those levels | a tile parameter (§5.2) |
+| Polygon bands | Filled areas between the same levels | `webmap_contour` with `fill` |
+
+The first and third come out of **one job on one level list** — `fill` produces both, rather
+than there being a separate filling call that could be given different levels. Their geometry
+is identical where they meet: `05` §7.1 measures the departure of a contour from its band edge
+at zero, at every smoothing level.
 
 The snap is on by default when contours are present and can be turned off — a gradient is the
 better choice when the gradient itself is the message, as for porosity or saturation, where

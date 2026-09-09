@@ -124,6 +124,53 @@ def test_a_succeeded_job_leads_with_the_dataset_id() -> None:
     assert "succeeded" in rendered
 
 
+def test_a_filled_contour_job_names_both_layers_it_made() -> None:
+    """**A second dataset nobody can find is the same as no second dataset.**
+
+    `webmap_contour(fill=True)` writes the polygon bands as their own layer,
+    and this response is the only place its id is ever shown. Left out, the
+    polygons exist in storage and every caller concludes `fill` was ignored.
+    """
+    rendered = job_status(
+        job(
+            state="succeeded",
+            progress=1.0,
+            result={
+                "dataset_id": "9f3ac21b-0000-4000-8000-000000000001",
+                "band_dataset_id": "9f3ac21b-0000-4000-8000-000000000002",
+                "band_count": 14,
+                "feature_count": 208,
+                "interval": 50.0,
+                "caption": "208 contours of Wolfcamp A at 50 intervals",
+            },
+        )
+    )
+
+    assert "9f3ac21b-0000-4000-8000-000000000001" in rendered
+    assert "9f3ac21b-0000-4000-8000-000000000002" in rendered
+    assert "Filled bands" in rendered
+    assert "14" in rendered
+
+
+def test_an_unfilled_contour_job_does_not_mention_bands() -> None:
+    """Silence rather than a "none" row: a line about something that does not
+    exist reads as a feature that failed."""
+    rendered = job_status(
+        job(
+            state="succeeded",
+            progress=1.0,
+            result={
+                "dataset_id": "9f3ac21b-0000-4000-8000-000000000001",
+                "feature_count": 208,
+                "interval": 50.0,
+            },
+        )
+    )
+
+    assert "Filled bands" not in rendered
+    assert "Bands" not in rendered
+
+
 def test_the_warnings_are_the_last_thing_before_the_id_is_used() -> None:
     """**A gridded surface looks identical whether it came from 1,847 wells or
     six.** These are the only place the difference is stated, so they are

@@ -20,6 +20,7 @@ import numpy as np
 from numpy.typing import NDArray
 from shapely.geometry import LineString
 
+from webmap_geo.contour.smooth import MAX_SMOOTHING, chaikin
 from webmap_geo.exceptions import DegenerateInput
 from webmap_geo.grid import GridDefinition
 
@@ -30,10 +31,6 @@ _NICE = (1.0, 2.0, 2.5, 5.0, 10.0)
 #: Every fifth contour is an index contour — the convention on every published
 #: structure map, and the reason a dense one is readable at all.
 INDEX_EVERY = 5
-
-#: Above this, smoothing moves a contour measurably off the value it claims.
-#: `05` §7: "the API caps it and the render metadata records it."
-MAX_SMOOTHING = 0.5
 
 
 @dataclass(frozen=True)
@@ -214,42 +211,15 @@ def contour_grid(
 
 
 def _chaikin(line: LineString, smoothing: float) -> LineString:
-    """Chaikin corner-cutting.
+    """Corner-cutting, by the same rule a filled band's edge uses.
 
-    Raw contours follow grid cell boundaries and look angular — a structure map
-    of staircases. Chaikin replaces each corner with two points a fraction of
-    the way along its edges, which rounds without introducing a control point
-    the data did not have.
-
-    The cut fraction is capped well below the 0.25 that would move a vertex to
-    the midpoint of its edge. `05` §7 is explicit that smoothing can drift a
-    contour off the value it claims, and the cap is where that stops being
-    negligible.
+    Shared with `contour.bands` through `contour.smooth`: a band boundary and
+    the line drawn over it are the same level, and two smoothing
+    implementations would let the fill creep out from under the line.
     """
     coords = np.asarray(line.coords, dtype=float)
-    if len(coords) < 3:
-        return line
-
     closed = bool(np.allclose(coords[0], coords[-1]))
-    fraction = 0.25 * (smoothing / MAX_SMOOTHING)
-
-    # Two passes: one is visibly angular still, three starts to shrink the
-    # curve toward its chord.
-    for _ in range(2):
-        cut: list[NDArray[np.float64]] = []
-        if not closed:
-            cut.append(coords[0])
-        for index in range(len(coords) - 1):
-            a, b = coords[index], coords[index + 1]
-            cut.append(a + fraction * (b - a))
-            cut.append(b - fraction * (b - a))
-        if not closed:
-            cut.append(coords[-1])
-        else:
-            cut.append(cut[0])
-        coords = np.asarray(cut)
-
-    return LineString(coords)
+    return LineString(chaikin(coords, smoothing, closed=closed))
 
 
 def index_levels(lines: list[ContourLine]) -> list[float]:

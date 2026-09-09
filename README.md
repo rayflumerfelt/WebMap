@@ -124,6 +124,22 @@ make duckdb-extensions
 docker compose -f infra/compose.yaml -f infra/compose.offline.yaml up -d
 ```
 
+**The `api` and `worker` images bake the source in.** There is no bind mount
+and no hot reload, so a change to a route, a request model, a service or a
+worker task is invisible to a running stack until it is rebuilt:
+
+```bash
+docker compose -f infra/compose.yaml build api worker
+docker compose -f infra/compose.yaml up -d api worker
+```
+
+This matters because the integration tests run against the live container. A
+stale image fails them in a way that looks like a code bug: request models are
+`extra="forbid"`, so a field the running server has not heard of comes back as
+`Invalid request — <field>: Extra inputs are not permitted` rather than being
+quietly dropped. That message means the *server* is old. Rebuild before
+concluding anything about the field.
+
 `make check` is the gate. It runs ruff, mypy, `import-linter`, eslint, `tsc`,
 pytest and vitest — including the package boundary contracts, which are
 enforced rather than advisory (`CLAUDE.md` §3.5).
