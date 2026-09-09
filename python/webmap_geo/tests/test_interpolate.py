@@ -298,10 +298,12 @@ def test_compartment_control_counts_are_reported() -> None:
 def test_kriging_says_plainly_that_it_ignores_faults() -> None:
     """**Silently ignoring them would be the worst outcome.**
 
-    Barrier-aware kriging needs path distance on a constrained mesh (§6.2),
-    which is not built. A surface that smears throw across a sealing fault
-    while the map draws the fault on top of it is wrong in a way that looks
-    authoritative.
+    Kriging measures distance in a straight line and stays that way — `05`
+    §6.2 records the measurements behind dropping barrier-aware kriging rather
+    than shipping it. A surface that smears throw across a sealing fault while
+    the map draws the fault on top of it is wrong in a way that looks
+    authoritative, so the warning says it plainly and names the method that
+    does honour faults.
     """
     rng = np.random.default_rng(SEED)
     points, values = scattered(rng)
@@ -311,7 +313,10 @@ def test_kriging_says_plainly_that_it_ignores_faults() -> None:
         points, values, grid(), method=Method.ORDINARY_KRIGING, constraints=constraints, rng=rng
     )
 
-    assert any("does not yet honour" in w for w in result.warnings)
+    assert any("does not honour" in w for w in result.warnings)
+    assert any("straight line" in w for w in result.warnings), (
+        "the reason matters as much as the fact — 'not supported' invites a user to wait for it"
+    )
     assert any("minimum_curvature" in w for w in result.warnings)
 
 

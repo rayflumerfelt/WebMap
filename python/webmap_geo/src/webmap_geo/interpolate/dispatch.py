@@ -156,16 +156,18 @@ def interpolate(
 
     if method is Method.ORDINARY_KRIGING:
         if hard:
-            # **Said plainly rather than silently ignored.** Barrier-aware
-            # kriging needs path distance on a constrained mesh (§6.2), which
-            # is not built yet; kriging with faults present but not honoured
-            # would produce a surface that smears throw across a sealing fault
-            # while the map shows the fault on top of it.
+            # **Said plainly rather than silently ignored.** Kriging here is
+            # Euclidean and stays that way: `05` §6.2 records the measurements
+            # behind dropping barrier-aware kriging rather than shipping it.
+            # A surface that smears throw across a sealing fault, under a fault
+            # line the map draws on top, is the failure this sentence exists to
+            # prevent — it looks like a finished structure map.
             warnings.append(
                 f"{len(hard)} hard constraint(s) were supplied but ordinary "
-                f"kriging does not yet honour them — the surface is continuous "
-                f"across every fault. Use minimum_curvature for a fault-aware "
-                f"surface, or remove the constraints to acknowledge the choice."
+                f"kriging does not honour them — it measures distance in a "
+                f"straight line, so the surface is continuous across every "
+                f"fault. Use minimum_curvature for a fault-aware surface, or "
+                f"remove the constraints to acknowledge the choice."
             )
         if variogram is None:
             variogram = fit_auto(coords, z, rng=rng)

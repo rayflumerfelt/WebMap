@@ -1,13 +1,13 @@
-"""Constrained triangulation and path distance. `05-geoprocessing.md` §5, §6.2.
+"""Constrained triangulation and fault compartments. `05-geoprocessing.md` §5.
 
 Two properties carry everything else:
 
-- **No triangle spans a fault.** That is what makes the constraint structural
-  rather than a matter of every downstream caller remembering to check.
-- **Path distance across a sealing fault is not the straight-line distance.**
-  A surface built on the straight-line one smears throw across the fault while
-  the map draws the fault on top of it — geologically wrong and entirely
-  plausible.
+- **No triangle spans a fault**, and the two sides of a sealing fault share no
+  vertex. That is what makes the constraint structural rather than a matter of
+  every downstream caller remembering to check.
+- **A compartment is a region a fault-free path can cover.** A compartment
+  with no control in it is a region whose surface came from the smoothness
+  term alone, and it draws exactly like the well-controlled part.
 """
 
 from __future__ import annotations
@@ -21,11 +21,9 @@ from webmap_geo.faults.network import Constraint, ConstraintKind
 from webmap_geo.frame import AnalysisFrame
 from webmap_geo.mesh import (
     FAULT_SEGMENT,
-    barrier_aware_neighbours,
+    assign_compartments,
     build_mesh,
     compartment_of,
-    nearest_vertex,
-    path_distances,
 )
 
 TEXAS = AnalysisFrame(srid=2277, units="usft")
@@ -169,124 +167,6 @@ def test_a_non_positive_max_area_says_what_it_is_for() -> None:
         build_mesh(scattered(), [], BBOX, TEXAS, max_area=0.0)
 
 
-# --- path distance ------------------------------------------------------------
-
-
-def test_a_sealing_fault_makes_the_far_side_unreachable() -> None:
-    """**The whole point.** Two wells 20 ft apart either side of a sealing
-    fault are not neighbours, and a variogram that treats them as such
-    produces a surface with no throw across a fault the map draws."""
-    points = np.array([[480.0, 500.0], [520.0, 500.0]])
-    mesh = build_mesh(points, [wall()], BBOX, TEXAS)
-
-    west = nearest_vertex(mesh, points[0])
-    east = nearest_vertex(mesh, points[1])
-
-    reached = path_distances(mesh, west, {east})
-
-    assert east not in reached, "a path crossed a sealing fault"
-
-
-def test_a_fault_tip_lets_a_path_round_it_at_the_right_cost() -> None:
-    """Not unreachable — *correctly downweighted*. A well on the far side of a
-    tipping fault is a legitimate neighbour, and the distance is the way
-    round, not the way through."""
-    points = np.array([[480.0, 200.0], [520.0, 200.0]])
-    mesh = build_mesh(points, [tipping_fault()], BBOX, TEXAS, max_area=10_000.0)
-
-    west = nearest_vertex(mesh, points[0])
-    east = nearest_vertex(mesh, points[1])
-
-    reached = path_distances(mesh, west, {east})
-
-    assert east in reached, "the path round the fault tip was not found"
-    straight = float(np.hypot(*(points[1] - points[0])))
-    # The fault tip is at y = 500 and the points are at y = 200, so the way
-    # round is at least twice the 300 ft up plus the 40 ft across.
-    assert reached[east] > 600.0
-    assert reached[east] > 10 * straight
-
-
-def test_path_distance_without_faults_is_close_to_straight_line() -> None:
-    """A sanity check on the graph itself. Path distance over a triangulated
-    plane is a little longer than the straight line — the path follows edges —
-    but not by much on a refined mesh, and a large gap would mean the
-    adjacency is wrong rather than that the geometry is."""
-    points = np.array([[100.0, 500.0], [900.0, 500.0]])
-    mesh = build_mesh(points, [], BBOX, TEXAS, max_area=2_000.0)
-
-    a = nearest_vertex(mesh, points[0])
-    b = nearest_vertex(mesh, points[1])
-
-    reached = path_distances(mesh, a, {b})
-
-    assert b in reached
-    assert 800.0 <= reached[b] < 800.0 * 1.35
-
-
-def test_the_search_stops_at_its_radius() -> None:
-    """`max_distance` bounds the cost. Without it every query walks the whole
-    mesh, which at a million grid nodes is the entire budget."""
-    points = scattered(40)
-    mesh = build_mesh(points, [], BBOX, TEXAS, max_area=5_000.0)
-    source = nearest_vertex(mesh, np.array([500.0, 500.0]))
-    targets = {int(nearest_vertex(mesh, point)) for point in points}
-
-    near = path_distances(mesh, source, targets, max_distance=200.0)
-    far = path_distances(mesh, source, targets, max_distance=2_000.0)
-
-    assert len(near) < len(far)
-    assert all(distance <= 200.0 for distance in near.values())
-
-
-# --- neighbourhoods -----------------------------------------------------------
-
-
-def test_neighbours_come_back_nearest_first_by_path_distance() -> None:
-    points = scattered(40)
-    mesh = build_mesh(points, [], BBOX, TEXAS, max_area=5_000.0)
-    control = np.array([nearest_vertex(mesh, point) for point in points])
-    source = nearest_vertex(mesh, np.array([500.0, 500.0]))
-
-    found = barrier_aware_neighbours(mesh, control, source, k=8)
-
-    assert len(found) == 8
-    assert list(found.distances) == sorted(found.distances)
-
-
-def test_a_neighbourhood_never_reaches_through_a_sealing_fault() -> None:
-    """**The property that makes fault-aware kriging fault-aware.** Every
-    neighbour must be on the same side of the fault as the target."""
-    west_points = np.column_stack([np.linspace(100.0, 450.0, 20), np.full(20, 500.0)])
-    east_points = np.column_stack([np.linspace(550.0, 900.0, 20), np.full(20, 500.0)])
-    points = np.vstack([west_points, east_points])
-    mesh = build_mesh(points, [wall()], BBOX, TEXAS, max_area=10_000.0)
-    control = np.array([nearest_vertex(mesh, point) for point in points])
-
-    source = nearest_vertex(mesh, np.array([450.0, 500.0]))
-    found = barrier_aware_neighbours(mesh, control, source, k=20)
-
-    assert len(found) > 0
-    for index in found.indices:
-        assert mesh.vertices[index][0] <= 500.0 + 1e-6, (
-            "a neighbour was found on the far side of a sealing fault"
-        )
-
-
-def test_a_target_with_no_reachable_control_returns_nothing() -> None:
-    """Absence, not an infinite distance. Reporting infinity invites a caller
-    to include the point with a tiny weight, and the right weight is not small
-    but missing."""
-    west = np.column_stack([np.linspace(100.0, 400.0, 10), np.full(10, 500.0)])
-    mesh = build_mesh(west, [wall()], BBOX, TEXAS, max_area=10_000.0)
-    control = np.array([nearest_vertex(mesh, point) for point in west])
-
-    source = nearest_vertex(mesh, np.array([900.0, 500.0]))
-    found = barrier_aware_neighbours(mesh, control, source, k=8)
-
-    assert len(found) == 0
-
-
 # --- compartments --------------------------------------------------------------
 
 
@@ -321,3 +201,30 @@ def test_two_crossing_faults_produce_four_compartments() -> None:
     mesh = build_mesh(scattered(), crossing, BBOX, TEXAS)
 
     assert compartment_of(mesh).max() == 3
+
+
+def test_a_point_is_assigned_to_the_side_of_the_fault_it_is_on() -> None:
+    """**The nearest-vertex trap.** A vertex on a sealing fault exists twice
+    after the split, at the same coordinate, one copy per side. A point just
+    west of the fault whose nearest vertex is the eastern copy would be filed
+    in the eastern compartment — so membership is decided by containing
+    triangle instead."""
+    mesh = build_mesh(scattered(), [wall()], BBOX, TEXAS, max_area=5_000.0)
+
+    west = np.array([[100.0, 500.0], [499.0, 300.0], [499.0, 700.0]])
+    east = np.array([[900.0, 500.0], [501.0, 300.0], [501.0, 700.0]])
+
+    west_labels = assign_compartments(mesh, west)
+    east_labels = assign_compartments(mesh, east)
+
+    assert len(set(west_labels.tolist())) == 1, "the western points disagree"
+    assert len(set(east_labels.tolist())) == 1, "the eastern points disagree"
+    assert west_labels[0] != east_labels[0], "both sides got the same compartment"
+
+
+def test_without_faults_every_point_is_in_one_compartment() -> None:
+    mesh = build_mesh(scattered(), [], BBOX, TEXAS)
+
+    labels = assign_compartments(mesh, scattered(20, seed=11))
+
+    assert len(set(labels.tolist())) == 1

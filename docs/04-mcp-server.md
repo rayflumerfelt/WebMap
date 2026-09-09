@@ -90,7 +90,8 @@ mcp = MCPServer(
     instructions=(
         "WebMap is a geospatial mapping system for subsurface geology. Use it to "
         "find spatial datasets, interpolate scattered point data into gridded "
-        "surfaces (honoring geological faults), derive contours, and render maps "
+        "surfaces (honoring geological faults, with minimum_curvature), derive "
+        "contours, and render maps "
         "for presentations.\n\n"
         "Typical flow: find a dataset with webmap_search_datasets, inspect it with "
         "webmap_describe_dataset, grid it with webmap_interpolate, then render with "
@@ -271,10 +272,13 @@ async def webmap_interpolate(
     ] = "ordinary_kriging",
     fault_dataset_id: Annotated[UUID | None, Field(
         None, description=(
-            "Fault network to honor. Interpolation will not cross features "
-            "marked constraint_kind='fault'. Strongly recommended for any "
-            "structure or thickness map in a faulted area — omitting it "
-            "produces geologically wrong surfaces that still look plausible."))
+            "Fault network to honor. Honored by minimum_curvature only, "
+            "which will not interpolate across features marked "
+            "constraint_kind='fault'. Strongly recommended for any structure "
+            "or thickness map in a faulted area — omitting it produces "
+            "geologically wrong surfaces that still look plausible. Supplying "
+            "it with a kriging method returns a warning rather than a "
+            "barrier: kriging is Euclidean and is continuous across faults."))
     ] = None,
     cell_size: Annotated[float | None, Field(
         None, gt=0, description=(
@@ -483,15 +487,14 @@ Response — an image content block plus a text block:
 
 - **Layers**: Wolfcamp A Porosity (grid), Midland Basin Faults, Well Control
 - **Values**: 4.1 – 21.8 % porosity
-- **Method**: ordinary kriging, exponential variogram (range 4,200 ft,
-  nugget 1.1, sill 12.4), anisotropy 1.8:1 at 035°, faults honored
+- **Method**: minimum curvature, tension 0.0, faults honored
 - **Grid**: 250 ft cells, 812 × 640
 - **CRS**: NAD83 / Texas Central, ftUS (EPSG:2277)
 - **Vintage**: 2026-07-31
 - **Control**: 1,847 points, 23 faults
 
 **Suggested caption**: Wolfcamp A porosity distribution, Midland Basin.
-Ordinary kriging of 1,847 well control points with fault constraints;
+Minimum curvature of 1,847 well control points with fault constraints;
 250 ft grid. Values 4.1–21.8%.
 
 Open interactively: https://webmap.corp/s/k3n8fq

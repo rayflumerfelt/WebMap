@@ -246,7 +246,7 @@ The longest phase and the differentiator. Do not compress it.
 - Variogram estimation with subsampling and declustering; automatic and interactive fitting
 - Minimum curvature (Briggs) with fault-aware stencils
 - Constrained Delaunay triangulation and fault network validation/cleaning
-- Ordinary and universal kriging with local neighborhoods and barrier-aware distance
+- Ordinary and universal kriging with local neighborhoods (Euclidean; not fault-aware)
 - Cubic spline, IDW, nearest
 - Contouring with smoothing and index contours
 - arq job queue with progress, cancellation, quotas, idempotency
@@ -262,26 +262,37 @@ whether the interpolator or the constraint handling is at fault.
 2. Minimum curvature, no faults (1 week)
 3. Constrained triangulation + fault validation (1.5 weeks)
 4. Fault-aware minimum curvature (1 week)
-5. Fault-aware kriging (1.5 weeks)
-6. Contouring + job infrastructure (1 week)
+5. Contouring + job infrastructure (1 week)
+
+**Fault-aware kriging was cut**, not deferred. `05-geoprocessing.md` §6.2 carries the
+measurements: the mesh path-distance search missed the performance target by an order of
+magnitude, and the cheap approximation that would have met it is within ~6% of path distance
+for the median neighbour pair, which is not a convincing trade to build a second faulted
+interpolator on. Minimum curvature is the fault-aware method. A structure map across a sealing
+fault is gridded with it.
 
 **Acceptance**
 
 - [ ] Minimum curvature matches the Surfer reference grid within 0.5% of value range
 - [ ] Kriging with a known synthetic variogram recovers the field within tolerance
-- [ ] A surface gridded across a sealing fault shows the correct discontinuity — verified
-      visually and by sampling either side
+- [ ] A surface gridded across a sealing fault with **minimum curvature** shows the correct
+      discontinuity — verified visually and by sampling either side
+- [ ] Kriging with a fault network supplied warns that it does not honour it, and names the
+      method that does
 - [ ] A breakline produces gradient discontinuity with value continuity
 - [ ] Fault network validation catches all defects in the hostile fault fixture, each with a
       location
-- [ ] 100k points → 1000×1000 with faults completes in under 5 minutes
+- [ ] 100k points → 1000×1000 with faults completes in under 5 minutes (minimum curvature)
 - [ ] Cancelling a running job leaves no partial dataset registered
 - [ ] Lineage record is sufficient to re-run and reproduce the identical grid
 - [ ] Contour intervals are round numbers a geologist would choose
 
-**Risk.** Fault-aware kriging performance. The Dijkstra neighbor search is 5–20× slower than
-cKDTree. If it misses the target, the compartment-major caching in `05-geoprocessing.md` §5.2 is
-the first lever; reducing default `n_neighbors` is the second.
+**Risk.** Minimum curvature is now the only fault-aware interpolator, so a geologist who wants
+a kriged surface of a faulted field cannot have one. Mitigated by saying so at the point of
+use — `webmap_interpolate` warns when a fault network is supplied with a kriging method, and
+names minimum curvature — rather than by producing a surface that looks fault-aware and is not.
+Watch for users routing around the warning by omitting the fault network entirely, which
+produces the same wrong surface with nothing said about it.
 
 ---
 

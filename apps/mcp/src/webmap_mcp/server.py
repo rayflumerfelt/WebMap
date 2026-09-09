@@ -49,7 +49,8 @@ from webmap_mcp.tokens import build_token_source
 INSTRUCTIONS = (
     "WebMap is a geospatial mapping system for subsurface geology. Use it to "
     "find spatial datasets, interpolate scattered point data into gridded "
-    "surfaces (honoring geological faults), derive contours, and render maps "
+    "surfaces (honoring geological faults, with minimum_curvature), derive "
+    "contours, and render maps "
     "for presentations.\n\n"
     "Typical flow: find a dataset with webmap_search_datasets, inspect it with "
     "webmap_describe_dataset, grid it with webmap_interpolate, then render with "

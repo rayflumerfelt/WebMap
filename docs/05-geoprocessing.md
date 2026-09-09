@@ -27,8 +27,8 @@ dependencies = [
 ]
 ```
 
-Deliberately **not** used: PyKrige (global solve only, no barriers), verde (no barriers, and
-we need the mesh anyway).
+Deliberately **not** used: PyKrige (global solve only — a moving neighbourhood is not
+optional at this scale), verde (no fault constraints, and we need the mesh anyway).
 
 ---
 
@@ -275,8 +275,10 @@ class ConstrainedMesh:
     segment_kind: np.ndarray    # (k,) — 0 = fault, 1 = breakline
     vertex_z: np.ndarray | None  # (n,) known values, NaN where unknown
 
-    def edge_is_blocked(self, v0: int, v1: int) -> bool:
-        """True if traversal between these vertices crosses a hard fault."""
+    split_vertices: frozenset[int]  # copies made by the fault split
+
+    def adjacency(self) -> dict[int, list[int]]:
+        """Vertex -> neighbours. Faults separate the graph topologically."""
         ...
 
 
@@ -311,6 +313,30 @@ def build_mesh(
 
 **Performance.** 500k points with fault constraints triangulates in seconds. Not the
 bottleneck.
+
+**A vertex on a fault has to be split, not merely marked.** An earlier draft gave
+`ConstrainedMesh` an `edge_is_blocked(v0, v1)` predicate — "true if traversal between these
+vertices crosses a hard fault" — and that predicate can never be true. A constrained Delaunay
+triangulation guarantees no edge crosses a constrained edge, which is the whole point of the
+`p` flag; paths cross a fault through the fault's *own vertices*, which the triangles on both
+sides share. Measured on a 60-point domain with one sealing fault, 38 of the 40 vertices lying
+on the fault were adjacent to both sides, so edge blocking stopped nothing at all.
+
+`build_mesh` therefore splits every vertex on a hard fault into one copy per fan of incident
+triangles, the standard treatment for a crack in a mesh. The two sides then share no vertex
+and the separation is topological, so nothing downstream has to remember to check. A fault
+**tip** has a single fan and is not split — which is correct, because a tip is exactly where
+the two sides do connect.
+
+**Constraints are clipped to the domain.** Fault traces legitimately run past the area of
+interest, and `triangle` keeps their outside vertices while triangulating nothing around them,
+leaving isolated vertices that then read as one-vertex fault compartments. Before clipping, one
+sealing fault over a 60-point domain reported 4 compartments of sizes [233, 204, 1, 1]; after,
+2 of [233, 204]. Sealing is preserved, because the trace still meets the boundary.
+
+**What uses the mesh.** Fault network validation and compartment labelling. It was also built
+to carry barrier-aware kriging, which §6.2 explains was measured and dropped — the
+triangulation stands on its own and is where a future fault-aware interpolator would start.
 
 ---
 
@@ -377,7 +403,7 @@ def _assemble_biharmonic(grid, points, values, constraints, tension):
 
 ### 6.2 Ordinary and universal kriging
 
-Two hard requirements at this scale: local neighborhoods, and fault-aware distance.
+One hard requirement at this scale: local neighborhoods.
 
 ```python
 # python/webmap_geo/interpolate/kriging.py
@@ -391,10 +417,8 @@ def ordinary_kriging(
     values: np.ndarray,
     grid: GridDefinition,
     variogram: FittedVariogram,
-    constraints: list[Constraint] | None = None,
     n_neighbors: int = 48,
     max_radius: float | None = None,
-    mesh: ConstrainedMesh | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Ordinary kriging with a moving neighbourhood.
 
@@ -403,57 +427,47 @@ def ordinary_kriging(
     WHY LOCAL: ordinary kriging solves an (n+1) x (n+1) system per estimate.
     Global kriging at n=500,000 is a 500,001-square dense system — roughly
     2 TB and O(n^3) to factor. Impossible. Moving neighbourhoods reduce this
-    to n_neighbors-square systems, solved per grid node. Standard practice;
-    it also composes correctly with the fault constraint because the
-    neighbourhood search is exactly where barrier awareness applies.
+    to n_neighbors-square systems, solved per grid node. Standard practice.
 
-    FAULT HANDLING: when constraints are supplied, neighbour search uses
-    path distance on the constrained mesh rather than Euclidean distance.
-    Points separated by a sealing fault are either unreachable (excluded) or
-    reachable only around the fault tip (correctly downweighted). This is
-    the same principle as ArcGIS's kriging-with-barriers.
+    NOT FAULT-AWARE. Distance here is Euclidean, so a kriged surface is
+    continuous across every fault. Use minimum curvature for a faulted
+    structure map; see "Kriging does not honour faults" below.
 
     ANISOTROPY is applied by transforming coordinates into the variogram's
     principal frame before the search, so the neighbourhood is elliptical.
     """
-    if constraints and mesh is None:
-        raise ValueError(
-            "Fault constraints supplied without a mesh. Build one with "
-            "build_mesh() — barrier-aware distance requires the mesh "
-            "adjacency structure."
-        )
     ...
 ```
 
-Fault-aware neighbor search:
+#### Kriging does not honour faults
 
-```python
-def _neighbors_with_barriers(
-    mesh: ConstrainedMesh,
-    target_xy: np.ndarray,
-    point_vertex_ids: np.ndarray,
-    k: int,
-    max_radius: float | None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """k nearest control points by path distance on the constrained mesh.
+**Kriging is Euclidean.** Supplying a fault network to `webmap_interpolate` with
+`method="ordinary_kriging"` produces a warning, not a barrier: the surface is continuous
+across every fault, and a geologist reading it will see throw smeared into a smooth ramp under
+a fault line the map draws on top. **Minimum curvature is the fault-aware method** — its
+finite-difference stencil drops links blocked by a hard fault (§6.1), which is a genuine
+discontinuity and is what a faulted structure map needs.
 
-    Dijkstra from the target's containing triangle, traversing only mesh
-    edges not blocked by a hard fault. Terminates when k control points are
-    reached or max_radius is exceeded.
+An earlier draft of this section specified barrier-aware kriging: neighbour search by Dijkstra
+path distance on the constrained mesh of §5, in the manner of ArcGIS's kriging-with-barriers.
+It was removed rather than shipped, for two measured reasons.
 
-    Cost: O(E log V) per grid node, with E bounded locally by max_radius.
-    Expensive relative to a cKDTree query — expect 5-20x slower kriging with
-    faults than without. This is why gridding is an async job.
+*It is too slow.* A multi-source k-nearest search over the mesh — already the fast
+formulation, one pass rather than one Dijkstra per node — took 14 s on a mesh of 8,855
+vertices. A 1000×1000 grid needs a mesh of roughly two million, which extrapolates to about
+55 minutes against the 5-minute budget in §10. The compartment-major frontier caching this
+section used to propose is an optimisation on a constant factor, not on that gap.
 
-    OPTIMISATION: grid nodes within the same fault compartment and close
-    together share most of their neighbourhood. Process nodes in
-    compartment-major order and cache the Dijkstra frontier.
-    """
-```
+*The cheap approximation is not obviously worse.* Restricting each node to control in its own
+fault compartment is exact for a sealing fault and costs no more than unfaulted kriging. Its
+only error is at a fault **tip**, where it uses straight-line distance and the true path wraps
+around. Measured over 18,800 neighbour pairs on a tipping-fault domain, path/straight distance
+was 1.056 at the median, 1.175 at p99, and above 2× for 0.03% of pairs — and the ~5% median
+gap is itself an artefact of walking triangle edges rather than a real detour, so mesh path
+distance carries a bias of its own.
 
-**Universal kriging** adds a low-order polynomial trend, fitted by GLS and subtracted before
-ordinary kriging of the residuals. Use when the data has regional dip — common for structure
-maps across a basin margin.
+That leaves compartment restriction as the natural design if kriging is made fault-aware
+later. It is not implemented today, and this section does not describe it as though it were.
 
 ### 6.3 Variogram fitting
 
@@ -530,7 +544,7 @@ def fit(
 - **Cubic spline** — `scipy.interpolate.RBFInterpolator` with a thin-plate or cubic kernel on
   the constrained mesh vertices, then mesh sampling. Fast, smooth, can overshoot; warn when
   output range exceeds input range by more than 20%.
-- **IDW** — trivial, but honor barriers via mesh path distance when constraints are present.
+- **IDW** — trivial, and Euclidean like kriging: it does not honour barriers.
   Produces bull's-eyes; offer it, do not default to it.
 - **Nearest** — diagnostic only. Useful for checking data coverage.
 
@@ -704,7 +718,7 @@ Measured on 8 vCPU, 32 GB.
 | Minimum curvature, no faults | 1000×1000 grid | < 10 s | AMG-bound |
 | Minimum curvature, with faults | 1000×1000, 50 faults | < 25 s | Stencil assembly cost |
 | Ordinary kriging, no faults | 100k pts → 1000×1000 | < 60 s | cKDTree + local solve |
-| Ordinary kriging, with faults | 100k pts → 1000×1000 | < 5 min | Dijkstra-bound; the expensive case |
+| Minimum curvature, with faults | 100k pts → 1000×1000 | < 5 min | Solver-bound; the expensive case |
 | Triangulation | 500k pts + 100 faults | < 15 s | |
 | Contouring | 2000×2000, 20 levels | < 5 s | |
 

@@ -34,9 +34,9 @@ The target interaction is:
 > **Geologist:** Show me a color-filled contour map of Wolfcamp A porosity for the Midland
 > Basin acreage.
 >
-> **Claude:** *[calls `webmap_list_datasets`, `webmap_create_grid`, `webmap_render_map`]*
-> Here it is — kriged with an exponential variogram, 250 ft grid spacing, faults honored.
-> Porosity ranges 4.1–21.8%. *[displays PNG]*
+> **Claude:** *[calls `webmap_list_datasets`, `webmap_interpolate`, `webmap_render_map`]*
+> Here it is — minimum curvature, 250 ft grid spacing, faults honored. Porosity ranges
+> 4.1–21.8%. *[displays PNG]*
 >
 > **Geologist:** The southeast corner looks over-smoothed. Let me adjust it.
 >

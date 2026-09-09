@@ -265,8 +265,12 @@ approaches, constrained triangulation is the one that generalizes: faults become
 discontinuities in mesh connectivity, so every interpolator built on the mesh honors them
 without special-casing. This is broadly how GOCAD/SKUA works.
 
-Briggs (1974) finite-difference minimum curvature with fault-aware stencils is retained as a
-fast path for the common case.
+**Amended.** Briggs (1974) finite-difference minimum curvature with fault-aware stencils is
+not a fast path for the common case — it is the only fault-aware interpolator we ship. Kriging
+is Euclidean and continuous across faults; `05-geoprocessing.md` §6.2 records the measurements
+that led to dropping barrier-aware kriging rather than shipping it. The triangulation remains,
+carrying fault validation and compartment labelling, and remains the right foundation if a
+fault-aware kriging is built later.
 
 Detail in `05-geoprocessing.md`.
 
