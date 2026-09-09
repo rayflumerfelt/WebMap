@@ -68,12 +68,24 @@ class Principal:
 
 @runtime_checkable
 class Ownable(Protocol):
-    """The ownership block every ownable table repeats (`02` §3.3)."""
+    """The ownership block every ownable table repeats (`02` §3.3).
 
-    id: UUID
-    owner_user_id: UUID
-    owner_team_id: UUID | None
-    visibility: str
+    Read-only members, so a frozen row satisfies it. That is not only a typing
+    convenience: a permission check must never mutate the object it is
+    deciding about, and declaring the protocol this way says so.
+    """
+
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def owner_user_id(self) -> UUID: ...
+
+    @property
+    def owner_team_id(self) -> UUID | None: ...
+
+    @property
+    def visibility(self) -> str: ...
 
 
 @dataclass(frozen=True)

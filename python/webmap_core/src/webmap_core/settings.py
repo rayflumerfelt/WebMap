@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     internal_static: str = "http://localhost:8000/static"
 
     # --- Identity -----------------------------------------------------------
+    #
+    # `oidc` is the production path. `dev` verifies tokens signed by a key
+    # generated in-process, so the whole identity chain — claims, directory
+    # sync, Principal, RLS context, require() — is exercisable without a
+    # reachable IdP. See adr/0009-offline-identity-seam.md; the combination
+    # `environment=prod` with `auth_mode=dev` is refused below.
+    auth_mode: Literal["oidc", "dev"] = "dev"
+
     oidc_discovery_url: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: SecretStr = SecretStr("")
@@ -64,6 +72,22 @@ class Settings(BaseSettings):
     # rejected rather than replayed here (`03` §4.4).
     oidc_audience: str = "api://webmap"
     api_scope: str = "api://webmap/.default"
+
+    # Claim names differ by directory and by tenant configuration: Entra may
+    # emit groups as `groups` or `roles`, and email as `email`,
+    # `preferred_username`, or `upn`. These are the deployment-day unknowns
+    # adr/0009 names, so they are configuration rather than constants.
+    oidc_groups_claim: str = "groups"
+    oidc_name_claim: str = "name"
+    oidc_email_claim: str = "email"
+
+    # Signs the browser session cookie. Rotating it logs everyone out, which
+    # is the intended effect of a suspected compromise.
+    session_secret: SecretStr = SecretStr("dev-only-not-a-secret")
+    session_cookie_name: str = "webmap_session"
+    # 03 §2: access token 15 minutes, refresh in an httpOnly cookie.
+    access_token_ttl_seconds: int = Field(900, gt=0, le=3600)
+    session_ttl_seconds: int = Field(28_800, gt=0)
 
     # --- Signing ------------------------------------------------------------
     # HMAC key for scoped tile tokens (`03` §6). Rotating it invalidates
@@ -108,9 +132,22 @@ class Settings(BaseSettings):
         if self.environment is not Environment.PROD:
             return self
 
+        # Guard 1 of 4 from adr/0009. The development verifier accepts tokens
+        # this process signed for itself; in production that is an open door,
+        # so the combination does not start. The other three guards are in
+        # apps/api/auth/dev.py, the startup banner, and a test.
+        if self.auth_mode != "oidc":
+            raise ValueError(
+                f"environment=prod with auth_mode={self.auth_mode!r}. The "
+                f"development token verifier accepts tokens this process "
+                f"signed for itself and must never run in production. Set "
+                f"WEBMAP_AUTH_MODE=oidc. Refusing to start."
+            )
+
         placeholders = {
             "tile_token_secret": self.tile_token_secret.get_secret_value()
             == "dev-only-not-a-secret",
+            "session_secret": self.session_secret.get_secret_value() == "dev-only-not-a-secret",
             "s3_access_key": self.s3_access_key.get_secret_value() == "minioadmin",
             "s3_secret_key": self.s3_secret_key.get_secret_value() == "minioadmin",
             "oidc_client_id": not self.oidc_client_id,

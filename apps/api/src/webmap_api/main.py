@@ -14,8 +14,11 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from webmap_api.auth import build_verifier
 from webmap_api.db import assert_rls_enforced, create_engine
 from webmap_api.db.session import assert_policies_present, unscoped_session
+from webmap_api.routes.auth import router as auth_router
+from webmap_api.routes.datasets import router as datasets_router
 from webmap_core.exceptions import (
     NotFound,
     PermissionDenied,
@@ -23,6 +26,7 @@ from webmap_core.exceptions import (
     VersionConflict,
     WebMapError,
 )
+from webmap_core.identity import AuthenticationFailed
 from webmap_core.logging import bind_request, configure_logging, get_logger
 from webmap_core.settings import Environment, Settings, get_settings
 
@@ -32,6 +36,7 @@ log = get_logger(__name__)
 #: becomes a 500 — deliberately, so an unhandled case is loud rather than
 #: quietly returning 400 and looking like the caller's fault.
 _STATUS_FOR: dict[type[WebMapError], int] = {
+    AuthenticationFailed: 401,
     PermissionDenied: 403,
     NotFound: 404,
     VersionConflict: 409,
@@ -47,6 +52,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = create_engine(settings.database_url)
     app.state.settings = settings
     app.state.engine = engine
+    # Guard 3 of 4 (adr/0009): a non-production verifier announces itself at
+    # WARNING, naming the mode and environment.
+    app.state.verifier = build_verifier(settings)
 
     # Both assertions run before the first request is served. A deployment
     # that cannot prove RLS is enforced does not start — see
@@ -54,7 +62,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await assert_rls_enforced(engine)
     await assert_policies_present(engine)
 
-    log.info("api_started", environment=settings.environment.value)
+    log.info(
+        "api_started",
+        environment=settings.environment.value,
+        auth_mode=settings.auth_mode,
+    )
     try:
         yield
     finally:
@@ -127,6 +139,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with unscoped_session(request.app.state.engine) as conn:
             await conn.execute(text("SELECT 1"))
         return {"status": "ready"}
+
+    app.include_router(auth_router)
+    app.include_router(datasets_router)
 
     return app
 

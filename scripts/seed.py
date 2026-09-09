@@ -412,6 +412,20 @@ def _register(seeded: list[SeededDataset], vmin: float, vmax: float, database_ur
             assert row is not None
             team_id = row[0]
 
+            # A second team nobody in the seed belongs to. It exists so the
+            # local stack can demonstrate team-scoped visibility by hand: the
+            # dev roster puts Alan here and Ada and Grace on Permian, which is
+            # the shape "User A cannot read User B's data" needs.
+            cur.execute(
+                """
+                INSERT INTO team (id, slug, display_name, idp_group_id)
+                VALUES (%s, 'exploration', 'Exploration Team',
+                        'seed-group-exploration')
+                ON CONFLICT (slug) DO UPDATE SET display_name = EXCLUDED.display_name
+                """,
+                (sid("team:exploration"),),
+            )
+
             cur.execute(
                 "INSERT INTO team_member (team_id, user_id) VALUES (%s, %s) "
                 "ON CONFLICT DO NOTHING",
