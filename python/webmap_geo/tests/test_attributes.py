@@ -179,6 +179,42 @@ def test_sorting_by_an_unknown_attribute_lists_the_real_ones(layer: str) -> None
         feature_attributes(layer, order_by="porsoity")
 
 
+def test_a_column_that_starts_partway_through_the_file_is_still_found(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """**Attributes are sparse by campaign, not at random.**
+
+    A field added 200 wells into a drilling programme is absent from exactly
+    the rows a head sample reads. This looked up attribute names from the
+    first 200 rows, so such a column reported as not existing at all — the
+    layer could not be sorted by it, and once gridding used the same lookup,
+    a surface could not be built from a column holding a thousand values.
+    """
+    count = 600
+    path = tmp_path_factory.mktemp("late") / "features.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "id": pa.array(range(count), type=pa.int64()),
+                "props": pa.array(
+                    [
+                        json.dumps(
+                            {"well_name": f"Well {i:04d}"}
+                            | ({"porosity": 4.0 + i / 100} if i >= 300 else {})
+                        )
+                        for i in range(count)
+                    ]
+                ),
+            }
+        ),
+        path,
+    )
+
+    page = feature_attributes(str(path), order_by="porosity", descending=True)
+
+    assert page.items[0]["porosity"] == pytest.approx(4.0 + 599 / 100)
+
+
 def test_a_sort_column_cannot_smuggle_sql(layer: str) -> None:
     """The validation above is what stands between a query parameter and the
     query. Asserted directly, because the reason it exists is not obvious from

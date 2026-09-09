@@ -88,11 +88,6 @@ def feature_attributes(
             )
         total = int(counted[0])
 
-        # The keys of the props map, which is the layer's attribute schema as
-        # stored. Read from the file rather than from the registry so a page
-        # cannot be sorted by a column the file does not have.
-        available = _columns(conn, parquet_key)
-
         direction = "DESC" if descending else "ASC"
 
         # **The ordering is total, and every expression carries its own
@@ -111,6 +106,12 @@ def feature_attributes(
         # wanted the largest values, not the missing ones.
         terms = [f"id {direction}"]
         if order_by is not None:
+            # The keys of the props map, which is the layer's attribute schema
+            # as stored. Read from the file rather than from the registry so a
+            # page cannot be sorted by a column the file does not have. Looked
+            # up only when there is a column to validate — it is a scan of the
+            # props column, and an unsorted page has nothing to check.
+            available = attribute_names(conn, parquet_key)
             if order_by not in available:
                 raise DegenerateInput(
                     f"'{order_by}' is not an attribute of this layer. Available "
@@ -141,22 +142,40 @@ def feature_attributes(
     return AttributePage(items=items, total=total, offset=offset, limit=limit)
 
 
-def _columns(conn: Any, parquet_key: str) -> set[str]:
-    """Attribute names present in the file.
+def attribute_names(conn: Any, parquet_key: str) -> set[str]:
+    """Every attribute name present anywhere in the file.
 
-    Sampled from the first rows rather than derived from the Parquet schema,
-    because attributes live inside a JSON `props` column — the schema knows
-    there is a map, not what is in it.
+    Read from the data rather than from the Parquet schema, because attributes
+    live inside a JSON `props` column — the schema knows there is a map, not
+    what is in it.
+
+    **The whole column, not a sample.** This sampled the first 200 rows until
+    a layer of 1,200 wells where porosity was added 200 wells into the
+    programme reported that it had no porosity at all: attributes are sparse
+    *by campaign*, so a field added partway through is absent from exactly the
+    rows a head sample reads. The consequence was a column that could not be
+    sorted on, and — once gridding used this — a surface that could not be
+    built from a column holding a thousand values.
+
+    Pushed into DuckDB rather than done in Python: measured at 76 ms over
+    500,000 rows against 1 ms for the 200-row sample that gave the wrong
+    answer. Callers pay it only when they have a column name to validate.
     """
     rows = conn.execute(
-        "SELECT props FROM read_parquet($key) WHERE props IS NOT NULL LIMIT 200",
+        """
+        SELECT DISTINCT unnest(json_keys(props)) AS name
+        FROM read_parquet($key)
+        WHERE props IS NOT NULL
+        """,
         {"key": parquet_key},
     ).fetchall()
-
-    names: set[str] = set()
-    for (props,) in rows:
-        names.update(json.loads(props).keys())
-    return names
+    return {str(row[0]) for row in rows}
 
 
-__all__ = ["DEFAULT_PAGE", "MAX_PAGE", "AttributePage", "feature_attributes"]
+__all__ = [
+    "DEFAULT_PAGE",
+    "MAX_PAGE",
+    "AttributePage",
+    "attribute_names",
+    "feature_attributes",
+]
