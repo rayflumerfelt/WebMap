@@ -20,6 +20,7 @@ from webmap_api.db.session import assert_policies_present, unscoped_session
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
 from webmap_api.routes.projects import router as projects_router
+from webmap_api.routes.tiles import router as tiles_router
 from webmap_api.routes.uploads import router as uploads_router
 from webmap_core.exceptions import (
     LimitExceeded,
@@ -32,6 +33,7 @@ from webmap_core.exceptions import (
 from webmap_core.identity import AuthenticationFailed
 from webmap_core.logging import bind_request, configure_logging, get_logger
 from webmap_core.settings import Environment, Settings, get_settings
+from webmap_geo.exceptions import DegenerateInput, GeoError, NotProjected
 from webmap_io.exceptions import (
     MissingCRS,
     PathTraversal,
@@ -45,6 +47,14 @@ log = get_logger(__name__)
 #: Domain errors mapped to status codes. Anything not listed is a bug and
 #: becomes a 500 — deliberately, so an unhandled case is loud rather than
 #: quietly returning 400 and looking like the caller's fault.
+#: Every package that raises its own exceptions needs its base class
+#: registered as a handler below *and* its members mapped here. Missing one is
+#: not a cosmetic gap: an unmapped domain error becomes a 500, which replaces a
+#: carefully worded message with "an internal error occurred". That has
+#: happened twice — `webmap_io.MissingCRS` returned 500 on a shapefile with no
+#: .prj, and `webmap_geo.DegenerateInput` returned 500 on an out-of-range tile
+#: coordinate. Both were found by a test asserting the status code rather than
+#: the message.
 _STATUS_FOR: dict[type[Exception], int] = {
     AuthenticationFailed: 401,
     PermissionDenied: 403,
@@ -59,6 +69,10 @@ _STATUS_FOR: dict[type[Exception], int] = {
     UnsupportedFormat: 422,
     PathTraversal: 400,
     UnknownShare: 404,
+    # Geometry failures are the caller's arguments: a tile coordinate
+    # outside the grid, a geographic CRS where a projected one is needed.
+    DegenerateInput: 400,
+    NotProjected: 422,
 }
 
 
@@ -123,6 +137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(WebMapError)
     @app.exception_handler(WebMapIOError)
+    @app.exception_handler(GeoError)
     async def handle_domain_error(request: Request, exc: Exception) -> JSONResponse:
         """Domain errors keep their message; unmapped ones do not.
 
@@ -161,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(projects_router)
+    app.include_router(tiles_router)
     app.include_router(uploads_router)
     app.include_router(datasets_router)
 
