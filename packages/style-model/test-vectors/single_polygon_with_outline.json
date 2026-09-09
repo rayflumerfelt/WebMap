@@ -1,0 +1,24 @@
+{
+  "name": "single_polygon_with_outline",
+  "description": "A polygon compiles to TWO layers, fill then outline. A separate line layer rather than fill-outline-color, which MapLibre renders at exactly 1px and ignores width and dashes on. Order matters: the outline must paint over the fill.",
+  "symbology": {
+    "type": "single",
+    "symbol": {
+      "geometry": "polygon", "fillColor": "#c6dbef", "fillOpacity": 0.6,
+      "outlineColor": "#08306b", "outlineWidth": 2
+    }
+  },
+  "palettes": {},
+  "source_id": "leases",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "leases-fill", "type": "fill", "source": "leases", "source-layer": "features",
+      "paint": { "fill-color": "#c6dbef", "fill-opacity": 0.6 }
+    },
+    {
+      "id": "leases-outline", "type": "line", "source": "leases", "source-layer": "features",
+      "paint": { "line-color": "#08306b", "line-width": 2 }
+    }
+  ]
+}

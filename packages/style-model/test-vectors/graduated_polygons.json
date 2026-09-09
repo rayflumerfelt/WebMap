@@ -1,0 +1,86 @@
+{
+  "name": "graduated_polygons",
+  "description": "Five classes, four breaks, five colours. Uses 'step' rather than 'interpolate' because graduated classification is discrete by definition; interpolating would blur class boundaries and make the legend a lie. Colours are the viridis stops sampled at i/(n-1) and rounded, worked out independently of the implementation.",
+  "symbology": {
+    "type": "graduated",
+    "field": "porosity",
+    "method": "pretty",
+    "classCount": 5,
+    "breaks": [
+      5,
+      10,
+      15,
+      20
+    ],
+    "paletteId": "viridis",
+    "vary": "color",
+    "baseSymbol": {
+      "geometry": "polygon",
+      "fillColor": "#cccccc",
+      "fillOpacity": 0.8,
+      "outlineColor": "#333333",
+      "outlineWidth": 0.5
+    }
+  },
+  "palettes": {
+    "viridis": {
+      "id": "viridis",
+      "name": "Viridis",
+      "isContinuous": true,
+      "interpolation": "linear",
+      "stops": [
+        {
+          "position": 0.0,
+          "color": "#440154"
+        },
+        {
+          "position": 0.5,
+          "color": "#21918c"
+        },
+        {
+          "position": 1.0,
+          "color": "#fde725"
+        }
+      ]
+    }
+  },
+  "source_id": "grid_polys",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "grid_polys-fill",
+      "type": "fill",
+      "source": "grid_polys",
+      "source-layer": "features",
+      "paint": {
+        "fill-color": [
+          "step",
+          [
+            "get",
+            "porosity"
+          ],
+          "#440154",
+          5,
+          "#334970",
+          10,
+          "#21918c",
+          15,
+          "#8fbc59",
+          20,
+          "#fde725"
+        ],
+        "fill-opacity": 0.8
+      }
+    },
+    {
+      "id": "grid_polys-outline",
+      "type": "line",
+      "source": "grid_polys",
+      "source-layer": "features",
+      "paint": {
+        "line-color": "#333333",
+        "line-width": 0.5
+      }
+    }
+  ]
+}

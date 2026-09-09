@@ -1,0 +1,48 @@
+{
+  "name": "continuous_raster",
+  "description": "A grid compiles to one raster layer and no colour information. The ramp is a TiTiler URL parameter on the source, which is what makes changing a palette a parameter change rather than a regrid (01-architecture.md 2.5). A compiler that baked colours in here would silently undo that.",
+  "symbology": {
+    "type": "continuous_raster",
+    "paletteId": "viridis",
+    "range": [
+      4.1,
+      21.8
+    ],
+    "clamp": true,
+    "opacity": 0.85
+  },
+  "palettes": {
+    "viridis": {
+      "id": "viridis",
+      "name": "Viridis",
+      "isContinuous": true,
+      "interpolation": "linear",
+      "stops": [
+        {
+          "position": 0.0,
+          "color": "#440154"
+        },
+        {
+          "position": 0.5,
+          "color": "#21918c"
+        },
+        {
+          "position": 1.0,
+          "color": "#fde725"
+        }
+      ]
+    }
+  },
+  "source_id": "porosity_grid",
+  "expected_layers": [
+    {
+      "id": "porosity_grid-raster",
+      "type": "raster",
+      "source": "porosity_grid",
+      "paint": {
+        "raster-opacity": 0.85,
+        "raster-resampling": "linear"
+      }
+    }
+  ]
+}

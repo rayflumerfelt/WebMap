@@ -1,0 +1,27 @@
+{
+  "name": "line_with_casing",
+  "description": "A casing is a second pass BENEATH the main line, so it is emitted first. Reversed, a road casing becomes a hairline outline and fault decorations disappear under their own line.",
+  "symbology": {
+    "type": "single",
+    "symbol": {
+      "geometry": "line", "color": "#d73027", "width": 2, "opacity": 1,
+      "cap": "round", "join": "round",
+      "casing": { "color": "#ffffff", "width": 4 }
+    }
+  },
+  "palettes": {},
+  "source_id": "faults",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "faults-casing", "type": "line", "source": "faults", "source-layer": "features",
+      "layout": { "line-cap": "round", "line-join": "round" },
+      "paint": { "line-color": "#ffffff", "line-width": 4 }
+    },
+    {
+      "id": "faults-line", "type": "line", "source": "faults", "source-layer": "features",
+      "layout": { "line-cap": "round", "line-join": "round" },
+      "paint": { "line-color": "#d73027", "line-width": 2, "line-opacity": 1 }
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "name": "rule_based_zoom",
+  "description": "Rules produce one layer set each, in order, so later rules paint over earlier ones - what a rule list means to anyone coming from QGIS. The filter and zoom bounds ride on every layer a rule produces, not only the first.",
+  "symbology": {
+    "type": "rules",
+    "rules": [
+      {
+        "filter": [
+          ">=",
+          [
+            "get",
+            "throw_ft"
+          ],
+          200
+        ],
+        "label": "Major",
+        "minZoom": 6,
+        "symbol": {
+          "geometry": "line",
+          "color": "#67000d",
+          "width": 3,
+          "opacity": 1,
+          "cap": "butt",
+          "join": "miter"
+        }
+      },
+      {
+        "filter": [
+          "<",
+          [
+            "get",
+            "throw_ft"
+          ],
+          200
+        ],
+        "label": "Minor",
+        "minZoom": 10,
+        "maxZoom": 22,
+        "symbol": {
+          "geometry": "line",
+          "color": "#fb6a4a",
+          "width": 1,
+          "opacity": 0.8,
+          "cap": "butt",
+          "join": "miter"
+        }
+      }
+    ]
+  },
+  "palettes": {},
+  "source_id": "faults",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "faults-rule-0-line",
+      "type": "line",
+      "source": "faults",
+      "source-layer": "features",
+      "layout": {
+        "line-cap": "butt",
+        "line-join": "miter"
+      },
+      "paint": {
+        "line-color": "#67000d",
+        "line-width": 3,
+        "line-opacity": 1
+      },
+      "filter": [
+        ">=",
+        [
+          "get",
+          "throw_ft"
+        ],
+        200
+      ],
+      "minzoom": 6
+    },
+    {
+      "id": "faults-rule-1-line",
+      "type": "line",
+      "source": "faults",
+      "source-layer": "features",
+      "layout": {
+        "line-cap": "butt",
+        "line-join": "miter"
+      },
+      "paint": {
+        "line-color": "#fb6a4a",
+        "line-width": 1,
+        "line-opacity": 0.8
+      },
+      "filter": [
+        "<",
+        [
+          "get",
+          "throw_ft"
+        ],
+        200
+      ],
+      "minzoom": 10,
+      "maxzoom": 22
+    }
+  ]
+}

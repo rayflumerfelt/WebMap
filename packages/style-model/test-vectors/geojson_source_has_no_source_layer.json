@@ -1,0 +1,32 @@
+{
+  "name": "geojson_source_has_no_source_layer",
+  "description": "Layers under the 5,000-feature threshold are served as GeoJSON (06-rendering.md 7.1), and a GeoJSON source has no source-layer. Emitting one anyway makes MapLibre render nothing, silently - the layer is present, styled, and empty.",
+  "symbology": {
+    "type": "single",
+    "symbol": {
+      "geometry": "point",
+      "marker": "circle",
+      "size": 4,
+      "color": "#000000",
+      "strokeColor": "#ffffff",
+      "strokeWidth": 1,
+      "opacity": 1
+    }
+  },
+  "palettes": {},
+  "source_id": "small_layer",
+  "expected_layers": [
+    {
+      "id": "small_layer-circle",
+      "type": "circle",
+      "source": "small_layer",
+      "paint": {
+        "circle-radius": 4,
+        "circle-color": "#000000",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 1,
+        "circle-opacity": 1
+      }
+    }
+  ]
+}

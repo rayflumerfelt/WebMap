@@ -1,0 +1,90 @@
+{
+  "name": "graduated_points_size_and_colour",
+  "description": "vary='both' produces two step expressions on one layer. Sizes interpolate linearly across sizeRange while colours sample the ramp; both are stepped, because they describe the same classes. Three classes exercise the odd-count midpoint a two-class case would hide.",
+  "symbology": {
+    "type": "graduated",
+    "field": "porosity",
+    "method": "quantile",
+    "classCount": 3,
+    "breaks": [
+      8,
+      14
+    ],
+    "paletteId": "viridis",
+    "vary": "both",
+    "sizeRange": [
+      3,
+      9
+    ],
+    "baseSymbol": {
+      "geometry": "point",
+      "marker": "circle",
+      "size": 5,
+      "color": "#cccccc",
+      "strokeColor": "#ffffff",
+      "strokeWidth": 0.5,
+      "opacity": 0.9
+    }
+  },
+  "palettes": {
+    "viridis": {
+      "id": "viridis",
+      "name": "Viridis",
+      "isContinuous": true,
+      "interpolation": "linear",
+      "stops": [
+        {
+          "position": 0.0,
+          "color": "#440154"
+        },
+        {
+          "position": 0.5,
+          "color": "#21918c"
+        },
+        {
+          "position": 1.0,
+          "color": "#fde725"
+        }
+      ]
+    }
+  },
+  "source_id": "wells",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "wells-circle",
+      "type": "circle",
+      "source": "wells",
+      "source-layer": "features",
+      "paint": {
+        "circle-radius": [
+          "step",
+          [
+            "get",
+            "porosity"
+          ],
+          3,
+          8,
+          6,
+          14,
+          9
+        ],
+        "circle-color": [
+          "step",
+          [
+            "get",
+            "porosity"
+          ],
+          "#440154",
+          8,
+          "#21918c",
+          14,
+          "#fde725"
+        ],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 0.5,
+        "circle-opacity": 0.9
+      }
+    }
+  ]
+}

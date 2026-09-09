@@ -1,0 +1,23 @@
+{
+  "name": "single_point",
+  "description": "The simplest case: one symbol, one layer. Establishes the paint-property names and the id convention every other vector builds on.",
+  "symbology": {
+    "type": "single",
+    "symbol": {
+      "geometry": "point", "marker": "circle", "size": 5,
+      "color": "#2166ac", "strokeColor": "#ffffff", "strokeWidth": 1, "opacity": 1
+    }
+  },
+  "palettes": {},
+  "source_id": "wells",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "wells-circle", "type": "circle", "source": "wells", "source-layer": "features",
+      "paint": {
+        "circle-radius": 5, "circle-color": "#2166ac",
+        "circle-stroke-color": "#ffffff", "circle-stroke-width": 1, "circle-opacity": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "name": "categorized_faults",
+  "description": "A 'match' expression on constraint_kind. A category whose value is null is skipped, because match cannot express the absence of an attribute; those features fall through to the 'other' symbol, which is also the fallback match requires as its last argument.",
+  "symbology": {
+    "type": "categorized",
+    "field": "constraint_kind",
+    "categories": [
+      {
+        "value": "fault",
+        "label": "Fault (sealing)",
+        "symbol": {
+          "geometry": "line",
+          "color": "#b2182b",
+          "width": 2,
+          "opacity": 1,
+          "cap": "butt",
+          "join": "miter"
+        }
+      },
+      {
+        "value": "breakline",
+        "label": "Breakline",
+        "symbol": {
+          "geometry": "line",
+          "color": "#2166ac",
+          "width": 1.5,
+          "opacity": 1,
+          "cap": "butt",
+          "join": "miter"
+        }
+      }
+    ],
+    "other": {
+      "geometry": "line",
+      "color": "#999999",
+      "width": 1,
+      "opacity": 1,
+      "cap": "butt",
+      "join": "miter"
+    }
+  },
+  "palettes": {},
+  "source_id": "faults",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "faults-line",
+      "type": "line",
+      "source": "faults",
+      "source-layer": "features",
+      "layout": {
+        "line-cap": "butt",
+        "line-join": "miter"
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "constraint_kind"
+          ],
+          "fault",
+          "#b2182b",
+          "breakline",
+          "#2166ac",
+          "#999999"
+        ],
+        "line-width": 2,
+        "line-opacity": 1
+      }
+    }
+  ]
+}
