@@ -33,8 +33,22 @@ def write_layer(
     path: Path,
     geometry: Sequence[object],
     props: list[dict[str, object]],
+    *,
+    geoparquet: bool = True,
 ) -> str:
-    """The shape the ingest pipeline writes: id, WKB geometry, JSON props."""
+    """A layer in the shape the ingest pipeline writes.
+
+    `geoparquet=True` writes the `geo` file metadata a real object carries, so
+    DuckDB's spatial extension hands the geometry column back as GEOMETRY.
+    Without it the column comes back as a BLOB of WKB, and the two need
+    different SQL.
+
+    **The default was the wrong way round once**, and the cost was specific: a
+    reader written against BLOB-only fixtures passed every test here and failed
+    on every ingested layer with "No function matches the given name and
+    argument types". It was caught end to end against a seeded dataset. Both
+    forms are exercised now, and the realistic one is the default.
+    """
     table = pa.table(
         {
             "id": pa.array(range(len(props)), type=pa.int64()),
@@ -44,6 +58,24 @@ def write_layer(
             "props": pa.array([json.dumps(p) for p in props], type=pa.string()),
         }
     )
+    if geoparquet:
+        table = table.replace_schema_metadata(
+            {
+                "geo": json.dumps(
+                    {
+                        "version": "1.1.0",
+                        "primary_column": "geometry",
+                        "columns": {
+                            "geometry": {
+                                "encoding": "WKB",
+                                "geometry_types": ["Point"],
+                                "crs": None,
+                            }
+                        },
+                    }
+                )
+            }
+        )
     pq.write_table(table, path)
     return str(path)
 
@@ -194,6 +226,48 @@ def test_coincident_points_are_reported_but_not_removed(
     assert len(control) == 8, "nothing was removed"
     assert control.n_coincident == 2
     assert "doubled import" in " ".join(control.warnings())
+
+
+def test_a_plain_wkb_column_is_read_as_well_as_a_geoparquet_one(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """**The encoding that got this wrong.** DuckDB hands a GeoParquet
+    geometry column back as GEOMETRY and a metadata-less one back as BLOB, and
+    `ST_GeomFromWKB` accepts only the second. Both have to work: the first is
+    what every ingested layer is, and the second is what an exported or
+    hand-built file often is."""
+    points = [shapely.Point(EXTENT[0] + i * 100.0, EXTENT[1]) for i in range(10)]
+    props: list[dict[str, object]] = [{"porosity": 12.0 + i} for i in range(10)]
+    plain = write_layer(
+        tmp_path_factory.mktemp("plain") / "wkb.parquet", points, props, geoparquet=False
+    )
+    tagged = write_layer(
+        tmp_path_factory.mktemp("tagged") / "geo.parquet", points, props, geoparquet=True
+    )
+
+    from_plain = read_control_points(plain, "porosity", TEXAS)
+    from_tagged = read_control_points(tagged, "porosity", TEXAS)
+
+    assert np.array_equal(from_plain.coords, from_tagged.coords)
+    assert np.array_equal(from_plain.values, from_tagged.values)
+
+
+def test_a_table_with_no_geometry_column_says_so(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    path = tmp_path_factory.mktemp("bare") / "attrs.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "id": pa.array([1, 2, 3], type=pa.int64()),
+                "props": pa.array([json.dumps({"porosity": 12.0})] * 3),
+            }
+        ),
+        path,
+    )
+
+    with pytest.raises(DegenerateInput, match="no `geometry` column"):
+        read_control_points(str(path), "porosity", TEXAS)
 
 
 # --- refusals ----------------------------------------------------------------

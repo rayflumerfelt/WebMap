@@ -13,6 +13,20 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+# rasterio's manylinux wheel links libexpat dynamically and does not vendor it;
+# python:*-slim does not ship it. Missing, `import rasterio` fails with
+# "libexpat.so.1: cannot open shared object file" at the first COG read or
+# write — which in the worker is *after* a job has been accepted, solved, and
+# is about to produce its only output.
+#
+# Installed in the API image too. Nothing there imports rasterio today, which
+# is exactly why the gap went unnoticed: the first API path that reads a raster
+# would 500 in production and pass every local test run outside Docker.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
+
 # `--package` is load-bearing, not an optimisation. The workspace root declares
 # no runtime dependencies — members reach the environment through its dev group
 # — so a plain `uv sync --no-dev` installs nothing at all. Naming the package

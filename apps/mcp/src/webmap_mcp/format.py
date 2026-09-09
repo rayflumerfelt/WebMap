@@ -327,3 +327,192 @@ def session_detail(session: dict[str, Any]) -> str:
         lines.append(f"View: {box[0]:.3f}, {box[1]:.3f} to {box[2]:.3f}, {box[3]:.3f}")
 
     return "\n".join(lines)
+
+
+# --- jobs --------------------------------------------------------------------
+
+
+def job_submitted(payload: dict[str, Any], *, what: str, detail: list[str]) -> str:
+    """The response to a submission. `04-mcp-server.md` §5.1.
+
+    **The last line is the load-bearing one.** Without "do not call again for
+    the same input", an agent that polls, sees `queued`, and reasons that
+    nothing is happening will resubmit — and while idempotency catches that
+    within the hour, the response is what stops it being attempted at all.
+
+    A submission that matched an existing job says so explicitly, because
+    "queued" on a job someone else's retry created is otherwise
+    indistinguishable from a fresh one.
+    """
+    job_id = clean(str(payload.get("job_id", "")))
+    lines: list[str] = []
+
+    if payload.get("already_running"):
+        lines.append(f"Already running as job `{short_id(job_id)}` — not resubmitted.")
+        lines.append("")
+        lines.append(
+            "An identical request from you is still in flight. Poll it with "
+            "webmap_get_job rather than submitting again."
+        )
+        return "\n".join(lines)
+
+    lines.append(f"{what} queued.")
+    lines.append("")
+    lines.append(f"- **Job**: `{short_id(job_id)}`")
+    lines.extend(detail)
+    lines.append("")
+    lines.append(
+        f"Poll with `webmap_get_job` using the full id `{job_id}`. Do not call "
+        f"again for the same input."
+    )
+    return "\n".join(lines)
+
+
+def job_status(job: dict[str, Any]) -> str:
+    """`04-mcp-server.md` §8.1. Four shapes, because four states mean four
+    different next actions."""
+    job_id = clean(str(job.get("id", "")))
+    state = str(job.get("state", "unknown"))
+    kind = clean(job.get("kind"))
+
+    if state == "running":
+        return _running(job, job_id, kind)
+    if state == "queued":
+        return (
+            f"**Job** `{short_id(job_id)}` — queued ({kind})\n\n"
+            f"Waiting for a worker. Poll again in a few seconds; do not "
+            f"resubmit."
+        )
+    if state == "succeeded":
+        return _succeeded(job, job_id, kind)
+    if state == "cancelled":
+        return (
+            f"**Job** `{short_id(job_id)}` — cancelled ({kind})\n\n"
+            f"Nothing was produced. Cancelled jobs discard their partial "
+            f"output, so no dataset was registered."
+        )
+    return _failed(job, job_id, kind)
+
+
+def _running(job: dict[str, Any], job_id: str, kind: str) -> str:
+    percent = round(float(job.get("progress") or 0.0) * 100)
+    lines = [f"**Job** `{short_id(job_id)}` — running ({percent}%)"]
+
+    if job.get("progress_message"):
+        lines.append(clean(job["progress_message"]))
+
+    remaining = job.get("estimated_remaining_seconds")
+    if remaining is not None:
+        lines.append(f"Estimated {remaining} s remaining.")
+
+    lines.append("")
+    poll = job.get("poll_after_seconds") or 3
+    lines.append(f"Poll again in about {poll} s.")
+    return "\n".join(lines)
+
+
+def _succeeded(job: dict[str, Any], job_id: str, kind: str) -> str:
+    result = job.get("result") or {}
+    lines = [f"**Job** `{short_id(job_id)}` — succeeded ({kind})", ""]
+
+    dataset_id = result.get("dataset_id")
+    if dataset_id:
+        lines.append(f"- **Output dataset**: `{clean(str(dataset_id))}`")
+    if result.get("caption"):
+        lines.append(f"- **Result**: {clean(result['caption'])}")
+    if result.get("feature_count") is not None:
+        lines.append(f"- **Features**: {_count(result['feature_count'])}")
+    if result.get("interval"):
+        lines.append(f"- **Contour interval**: {result['interval']:g}")
+
+    grid = result.get("grid") or {}
+    if grid.get("nx"):
+        lines.append(
+            f"- **Grid**: {grid['nx']}x{grid['ny']} at {grid.get('cell_size', 0):g} "
+            f"(EPSG:{grid.get('srid')})"
+        )
+
+    lines.extend(_diagnostics(result.get("diagnostics") or {}))
+
+    # **The warnings are not decoration.** A gridded surface looks identical
+    # whether it came from 1,847 wells or six, and these are the only place
+    # the difference is stated. Put last so they are the final thing read
+    # before the dataset id is used.
+    warnings = result.get("warnings") or []
+    if warnings:
+        lines.append("")
+        lines.append("⚠️ **Read before using this surface:**")
+        for warning in warnings:
+            lines.append(f"- {clean(warning)}")
+
+    return "\n".join(lines)
+
+
+def _diagnostics(diagnostics: dict[str, Any]) -> list[str]:
+    """`05-geoprocessing.md` §6.5, condensed to the three numbers that change
+    someone's mind about trusting a surface."""
+    lines: list[str] = []
+
+    control = diagnostics.get("n_control_points")
+    if control is not None:
+        lines.append(f"- **Control points**: {_count(control)}")
+
+    output = diagnostics.get("output_range")
+    source = diagnostics.get("input_range")
+    if output and source:
+        lines.append(
+            f"- **Range**: {output[0]:g} to {output[1]:g} "
+            f"(data: {source[0]:g} to {source[1]:g})"
+        )
+
+    fraction = diagnostics.get("extrapolated_fraction")
+    if fraction is not None:
+        radius = diagnostics.get("search_radius")
+        within = f" of any control point within {radius:g}" if radius else ""
+        lines.append(f"- **Extrapolated**: {fraction:.0%} of cells are out{within}")
+
+    validation = diagnostics.get("cross_validation") or {}
+    if validation.get("rmse") is not None:
+        lines.append(f"- **Cross-validation RMSE**: {validation['rmse']:.4g}")
+
+    return lines
+
+
+def _failed(job: dict[str, Any], job_id: str, kind: str) -> str:
+    """`04` §8.1: "both paths forward are named, and the consequence of the
+    easy one is stated." The error text carries that; this adds only whether
+    retrying is worth anything."""
+    lines = [f"**Job** `{short_id(job_id)}` — failed ({kind})", ""]
+    lines.append(clean(job.get("error") or "No error message was recorded."))
+
+    error_kind = job.get("error_kind")
+    if error_kind in ("input", "permission"):
+        lines.append("")
+        lines.append(
+            "Resubmitting unchanged will fail the same way — this is about the "
+            "request, not about the system being busy."
+        )
+    elif error_kind == "transient":
+        lines.append("")
+        lines.append("This looks temporary. Resubmitting is reasonable.")
+    elif error_kind == "resource":
+        lines.append("")
+        lines.append(
+            "The job exceeded a resource limit. A coarser cell size or a "
+            "smaller extent would fit."
+        )
+    return "\n".join(lines)
+
+
+def job_list(jobs: list[dict[str, Any]]) -> str:
+    if not jobs:
+        return "No jobs. Submitted analyses appear here while they run."
+
+    lines = ["| Job | Kind | State | Progress | Started |", "|---|---|---|---|---|"]
+    for job in jobs:
+        percent = f"{round(float(job.get('progress') or 0.0) * 100)}%"
+        lines.append(
+            f"| `{short_id(str(job.get('id', '')))}` | {clean(job.get('kind'))} "
+            f"| {clean(job.get('state'))} | {percent} | {_date(job.get('started_at'))} |"
+        )
+    return "\n".join(lines)

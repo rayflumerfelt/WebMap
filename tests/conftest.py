@@ -12,16 +12,14 @@ migration actually creates, so a policy that is wrong in the migration is
 wrong here too.
 """
 
-import io
 import json
 import os
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 import pytest_asyncio
 import shapely
@@ -407,17 +405,27 @@ def picks(storage: Any) -> str:
             record["tvdss_ft"] = round(float(value), 2)
         props.append(json.dumps(record))
 
-    table = pa.table(
-        {
-            "id": pa.array(range(len(props)), type=pa.int64()),
-            "geometry": pa.array(shapely.to_wkb(geometry), type=pa.binary()),
-            "props": pa.array(props, type=pa.string()),
-        }
-    )
-    buffer = io.BytesIO()
-    pq.write_table(table, buffer)
+    # **Written by the real writer, not by hand.** A hand-built Parquet has no
+    # GeoParquet `geo` metadata, so DuckDB hands its geometry column back as a
+    # BLOB rather than as GEOMETRY — and a reader that only ever saw the BLOB
+    # form passes every unit test and fails on every ingested layer. That
+    # happened; this fixture is why it will not happen twice.
+    import tempfile
+
+    from webmap_io.parquet import write_features
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "picks.parquet"
+        write_features(
+            path,
+            geometry=np.asarray(geometry, dtype=object),
+            props=[json.loads(record) for record in props],
+            srid=TEXAS_CENTRAL,
+        )
+        payload = path.read_bytes()
+
     key = "features/test_picks/v1.parquet"
-    put_bytes(storage, BUCKET, key, buffer.getvalue())
+    put_bytes(storage, BUCKET, key, payload)
     return key
 
 

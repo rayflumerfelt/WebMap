@@ -10,6 +10,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
+from arq import create_pool
+from arq.connections import RedisSettings
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -17,6 +19,7 @@ from sqlalchemy import text
 from webmap_api.auth import build_verifier
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
+from webmap_api.routes.jobs import router as jobs_router
 from webmap_api.routes.projects import router as projects_router
 from webmap_api.routes.renders import router as renders_router
 from webmap_api.routes.sessions import router as sessions_router
@@ -101,6 +104,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await assert_rls_enforced(engine)
     await assert_policies_present(engine)
 
+    # The arq pool. Created here rather than per request so a submission does
+    # not pay a Redis handshake, and connected at startup so a deployment with
+    # an unreachable queue fails now rather than accepting jobs that will
+    # never run.
+    app.state.queue = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+
     log.info(
         "api_started",
         environment=settings.environment.value,
@@ -109,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await app.state.queue.aclose()
         await engine.dispose()
         log.info("api_stopped")
 
@@ -188,6 +198,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(datasets_router)
     app.include_router(sessions_router)
     app.include_router(renders_router)
+    app.include_router(jobs_router)
 
     return app
 

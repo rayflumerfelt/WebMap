@@ -17,6 +17,7 @@ finished map says so.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -139,6 +140,7 @@ def read_control_points(
             )
 
         predicate = f" AND ({where})" if where else ""
+        geometry = _geometry_expression(conn, parquet_key)
 
         # **Two queries, because ST_X raises on a non-point** rather than
         # returning NULL — a line in a pointset layer would abort the read
@@ -147,8 +149,7 @@ def read_control_points(
         # a data read on.
         tally = conn.execute(
             f"""
-            SELECT ST_GeometryType(ST_GeomFromWKB(geometry)) = 'POINT' AS is_point,
-                   count(*) AS n
+            SELECT ST_GeometryType({geometry}) = 'POINT' AS is_point, count(*) AS n
             FROM read_parquet($key)
             WHERE 1 = 1{predicate}
             GROUP BY 1
@@ -163,7 +164,7 @@ def read_control_points(
                    ST_Y(geom) AS y,
                    try_cast(props->>'{value_column}' AS DOUBLE) AS value
             FROM (
-                SELECT ST_GeomFromWKB(geometry) AS geom, props
+                SELECT {geometry} AS geom, props
                 FROM read_parquet($key)
                 WHERE 1 = 1{predicate}
             )
@@ -180,6 +181,41 @@ def read_control_points(
         )
 
     return _assemble(rows, counts.get(False, 0), value_column, frame)
+
+
+def _geometry_expression(conn: Any, parquet_key: str) -> str:
+    """How to get a GEOMETRY out of this file's geometry column.
+
+    **The two encodings are not interchangeable and the difference is
+    invisible until it fails.** A GeoParquet object written by the ingest
+    pipeline carries `geo` file metadata, and DuckDB's spatial extension reads
+    it and hands back a `GEOMETRY('EPSG:2277')` column. A Parquet file without
+    that metadata — which is what a hand-built test fixture usually is — hands
+    back a `BLOB` of WKB.
+
+    `ST_GeomFromWKB` accepts only the BLOB, so a reader written against a
+    fixture works perfectly in tests and fails on every real dataset with
+    "No function matches the given name and argument types". That is exactly
+    what happened: this was caught by an end-to-end test against a seeded
+    layer, not by any of the fourteen unit tests over synthetic files.
+    """
+    # DESCRIBE over the whole table rather than over a `SELECT geometry`: the
+    # narrower form raises a BinderException on a table without the column,
+    # which is a stack trace where a sentence belongs.
+    described = conn.execute(
+        "DESCRIBE SELECT * FROM read_parquet($key)", {"key": parquet_key}
+    ).fetchall()
+    types = {str(row[0]): str(row[1]).upper() for row in described}
+
+    if "geometry" not in types:
+        raise DegenerateInput(
+            f"{parquet_key} has no `geometry` column, so it holds no features to "
+            f"interpolate — its columns are {', '.join(sorted(types)) or 'none'}. "
+            f"An attribute-only table cannot be gridded."
+        )
+
+    column_type = types["geometry"]
+    return "geometry" if column_type.startswith("GEOMETRY") else "ST_GeomFromWKB(geometry)"
 
 
 def _assemble(
