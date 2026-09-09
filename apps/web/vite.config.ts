@@ -7,5 +7,5 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } },
   },
-  test: { environment: 'jsdom', globals: false },
+  test: { environment: 'jsdom', globals: false, setupFiles: ['./vitest.setup.ts'] },
 });
