@@ -251,7 +251,15 @@ forbidden_modules = [
 # 01-architecture.md §3.1: "apps/api must not contain geoprocessing
 # algorithms. It orchestrates." Calling into webmap_geo is orchestration and
 # is allowed; reaching for a solver dependency directly is not.
+#
+# Direct imports only, for the same reason the pyproj contract above is:
+# webmap_geo imports contourpy and scipy by design, so *any* orchestration
+# call reaches them transitively. Without this flag the contract forbids
+# exactly the layering it exists to enforce — it broke the first time a route
+# imported a service that contours, and the only way to satisfy it would have
+# been to stop calling webmap_geo from the API at all.
 name = "webmap_api contains no geoprocessing"
 type = "forbidden"
+allow_indirect_imports = true
 source_modules = ["webmap_api"]
 forbidden_modules = ["scipy", "gstools", "skgstat", "triangle", "pyamg", "contourpy"]
