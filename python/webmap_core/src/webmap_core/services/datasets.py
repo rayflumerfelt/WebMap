@@ -262,23 +262,31 @@ async def create_dataset(
     description: str | None = None,
     source_uri: str | None = None,
     source_checksum: str | None = None,
+    dataset_id: UUID | None = None,
 ) -> UUID:
     """Register a dataset.
 
     `owner_user_id` is the principal, always. The INSERT policy enforces that
     at the database too, so a request that tries to create an object owned by
     someone else fails twice.
+
+    `dataset_id` may be supplied by a caller that has to know the id before
+    the row exists — ingest does, because the storage key embeds it and the
+    object is written first. An orphaned object is recoverable; a row pointing
+    at a key that was never written is not.
     """
     result = await conn.execute(
         text(
             """
             INSERT INTO dataset (
+                id,
                 project_id, name, description, kind, geometry_kind, connector,
                 source_uri, source_checksum, sync_state, storage_srid,
                 bbox_4326, parquet_key, version, feature_count,
                 attribute_schema, cog_key, caption,
                 owner_user_id, owner_team_id, visibility)
             VALUES (
+                coalesce(CAST(:dataset_id AS uuid), gen_random_uuid()),
                 :project_id, :name, :description, :kind, :geometry_kind,
                 :connector, :source_uri, :source_checksum, 'ready',
                 :storage_srid, :bbox_4326, :parquet_key, 1, :feature_count,
@@ -288,6 +296,7 @@ async def create_dataset(
             """
         ),
         {
+            "dataset_id": dataset_id,
             "project_id": project_id,
             "name": name,
             "description": description,

@@ -1,5 +1,12 @@
 """Domain exceptions.
 
+`MissingCRS` is deliberately *not* defined here. It belongs to `webmap_io`,
+which raises it, and defining a second class of the same name here made
+`except MissingCRS` depend on which module the catcher happened to import
+from — and left the API mapping only one of them, so a shapefile with no .prj
+returned 500 instead of a helpful 4xx. Import it from `webmap_io.exceptions`.
+
+
 Every message answers three questions: what happened, why, and what now
 (`CLAUDE.md` §8). For MCP tools the message *is* the interface — Claude reads
 it and decides what to do next, so a dead-end message ends the conversation.
@@ -16,10 +23,6 @@ class PermissionDenied(WebMapError):
 
 class NotFound(WebMapError):
     """A referenced object does not exist, or is not visible to the principal."""
-
-
-class MissingCRS(WebMapError):
-    """A source arrived with no coordinate reference system. Never guess one."""
 
 
 class InvalidToken(WebMapError):

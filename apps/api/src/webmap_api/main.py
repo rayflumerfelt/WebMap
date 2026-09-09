@@ -19,7 +19,9 @@ from webmap_api.db import assert_rls_enforced, create_engine
 from webmap_api.db.session import assert_policies_present, unscoped_session
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
+from webmap_api.routes.uploads import router as uploads_router
 from webmap_core.exceptions import (
+    LimitExceeded,
     NotFound,
     PermissionDenied,
     QuotaExceeded,
@@ -29,18 +31,33 @@ from webmap_core.exceptions import (
 from webmap_core.identity import AuthenticationFailed
 from webmap_core.logging import bind_request, configure_logging, get_logger
 from webmap_core.settings import Environment, Settings, get_settings
+from webmap_io.exceptions import (
+    MissingCRS,
+    PathTraversal,
+    UnknownShare,
+    UnsupportedFormat,
+    WebMapIOError,
+)
 
 log = get_logger(__name__)
 
 #: Domain errors mapped to status codes. Anything not listed is a bug and
 #: becomes a 500 — deliberately, so an unhandled case is loud rather than
 #: quietly returning 400 and looking like the caller's fault.
-_STATUS_FOR: dict[type[WebMapError], int] = {
+_STATUS_FOR: dict[type[Exception], int] = {
     AuthenticationFailed: 401,
     PermissionDenied: 403,
     NotFound: 404,
     VersionConflict: 409,
     QuotaExceeded: 429,
+    LimitExceeded: 413,
+    # I/O failures are the caller's file, not our fault: 422. These carry the
+    # messages `11-file-io.md` §8 insists on, and returning 500 for them would
+    # replace "your shapefile is missing its .prj" with "internal error".
+    MissingCRS: 422,
+    UnsupportedFormat: 422,
+    PathTraversal: 400,
+    UnknownShare: 404,
 }
 
 
@@ -104,7 +121,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     @app.exception_handler(WebMapError)
-    async def handle_domain_error(request: Request, exc: WebMapError) -> JSONResponse:
+    @app.exception_handler(WebMapIOError)
+    async def handle_domain_error(request: Request, exc: Exception) -> JSONResponse:
         """Domain errors keep their message; unmapped ones do not.
 
         `CLAUDE.md` §8 messages are written to be read by a geologist or by
@@ -141,18 +159,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ready"}
 
     app.include_router(auth_router)
+    app.include_router(uploads_router)
     app.include_router(datasets_router)
 
     return app
 
 
 def _snake(name: str) -> str:
-    out: list[str] = []
-    for i, char in enumerate(name):
-        if char.isupper() and i:
-            out.append("_")
-        out.append(char.lower())
-    return "".join(out)
+    """Class name to the machine-readable `error` code in the response body.
+
+    Acronyms stay whole: `MissingCRS` is `missing_crs`, not `missing_c_r_s`.
+    Clients switch on this string, so it has to be the obvious spelling —
+    and the naive character-by-character version produced codes nobody would
+    guess.
+    """
+    import re
+
+    # Split before a capital that follows a lowercase, and before the last
+    # capital of a run that is followed by a lowercase. That keeps `CRS`
+    # together while still separating `MissingCRS` into two words.
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name)
+    return spaced.lower()
 
 
 app = create_app()
