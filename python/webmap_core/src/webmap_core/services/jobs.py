@@ -29,21 +29,18 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from webmap_core.exceptions import NotFound, PermissionDenied, QuotaExceeded
+from webmap_core.exceptions import NotFound, PermissionDenied
 from webmap_core.jobs import ErrorKind, JobContext
 from webmap_core.logging import get_logger
 from webmap_core.models import JobState
 from webmap_core.permissions import Principal
+from webmap_core.quota import DEFAULT_POLICY, QuotaPolicy, Usage, check_concurrency
 
 log = get_logger(__name__)
 
 #: `10` §10. Long enough to cover a retry after a client timeout, short enough
 #: that a deliberate re-run an hour later is honoured rather than deduplicated.
 IDEMPOTENCY_WINDOW_SECONDS = 3600
-
-#: `10` §7. Concurrent jobs per user. Enough to grid two surfaces while a third
-#: renders; low enough that one person cannot occupy every worker.
-MAX_CONCURRENT_JOBS_PER_USER = 3
 
 #: Redis key prefixes, named here so the worker and the API cannot disagree.
 CANCEL_KEY = "job:cancel:"
@@ -90,6 +87,7 @@ async def enqueue(
     kind: str,
     parameters: dict[str, Any],
     redis: Any = None,
+    policy: QuotaPolicy = DEFAULT_POLICY,
 ) -> Enqueued:
     """Create a job row, subject to quota and idempotency.
 
@@ -107,7 +105,7 @@ async def enqueue(
             log.info("job_deduplicated", kind=kind, job_id=str(job_id))
             return Enqueued(job_id=job_id, was_created=False)
 
-    await _check_quota(conn, principal)
+    await _check_quota(conn, principal, policy)
 
     result = await conn.execute(
         text(
@@ -132,31 +130,77 @@ async def enqueue(
     return Enqueued(job_id=job_id, was_created=True)
 
 
-async def _check_quota(conn: AsyncConnection, principal: Principal) -> None:
-    """`10` §7. A limit with the offending value and a next action.
+async def _check_quota(
+    conn: AsyncConnection, principal: Principal, policy: QuotaPolicy
+) -> None:
+    """Measure this principal's usage and hand it to `quota.check_concurrency`.
 
-    Refusing at submission rather than queueing indefinitely: a job that sits
-    behind five of your own is indistinguishable from one that is stuck, and
-    the queue depth is invisible from a conversation.
+    The limits and their messages live in `webmap_core.quota`; this function's
+    only job is the measurement. Refusing at submission rather than queueing
+    indefinitely is the deliberate part: a job sitting behind five of your own
+    is indistinguishable from a stuck one, and queue depth is invisible from a
+    conversation.
+
+    `oldest_running_job_age_seconds` is measured rather than omitted because
+    it is what turns the refusal into a decision — "the oldest started 40
+    minutes ago" is how someone chooses between waiting and cancelling.
     """
     result = await conn.execute(
         text(
             """
-            SELECT count(*) FROM job
-            WHERE requested_by = :user AND state IN ('queued', 'running')
+            SELECT
+                count(*) FILTER (
+                    WHERE requested_by = :user AND state = 'running') AS running,
+                count(*) FILTER (
+                    WHERE requested_by = :user AND state = 'queued') AS queued,
+                count(*) FILTER (
+                    WHERE state = 'running'
+                      AND requested_by = ANY(:teammates)) AS team_running,
+                max(EXTRACT(EPOCH FROM (now() - started_at))) FILTER (
+                    WHERE requested_by = :user AND state = 'running'
+                ) AS oldest_age,
+                coalesce(sum(EXTRACT(EPOCH FROM (finished_at - started_at))) FILTER (
+                    WHERE requested_by = :user
+                      AND finished_at >= date_trunc('day', now() AT TIME ZONE 'UTC')
+                ), 0) AS compute_today
+            FROM job
             """
         ),
-        {"user": principal.user_id},
+        {"user": principal.user_id, "teammates": await _teammates(conn, principal)},
     )
-    active = int(result.scalar_one())
+    row = result.one()
 
-    if active >= MAX_CONCURRENT_JOBS_PER_USER:
-        raise QuotaExceeded(
-            f"You already have {active} jobs queued or running (limit "
-            f"{MAX_CONCURRENT_JOBS_PER_USER}). Wait for one to finish, or cancel "
-            f"one with webmap_cancel_job — a queued job behind five of your own "
-            f"is indistinguishable from a stuck one."
-        )
+    check_concurrency(
+        Usage(
+            running_jobs=int(row.running),
+            queued_jobs=int(row.queued),
+            team_running_jobs=int(row.team_running),
+            compute_seconds_today=int(row.compute_today),
+            oldest_running_job_age_seconds=(
+                int(row.oldest_age) if row.oldest_age is not None else None
+            ),
+        ),
+        policy,
+    )
+
+
+async def _teammates(conn: AsyncConnection, principal: Principal) -> list[UUID]:
+    """Everyone sharing a team with this principal, including them.
+
+    `job` carries no team column, so the team's usage is resolved through
+    membership. Counting *every* running job instead would be simpler and
+    would produce "your team has 8 jobs running" about strangers, which is a
+    refusal someone cannot act on — they would go and ask their team, and
+    their team would not be running anything.
+    """
+    if not principal.team_ids:
+        return [principal.user_id]
+
+    result = await conn.execute(
+        text("SELECT DISTINCT user_id FROM team_member WHERE team_id = ANY(:teams)"),
+        {"teams": sorted(principal.team_ids)},
+    )
+    return sorted({principal.user_id, *(row.user_id for row in result)})
 
 
 async def get_job(conn: AsyncConnection, principal: Principal, job_id: UUID) -> dict[str, Any]:
@@ -345,7 +389,6 @@ __all__ = [
     "CANCEL_KEY",
     "IDEMPOTENCY_KEY",
     "IDEMPOTENCY_WINDOW_SECONDS",
-    "MAX_CONCURRENT_JOBS_PER_USER",
     "Enqueued",
     "context_for",
     "enqueue",

@@ -21,6 +21,7 @@ from webmap_core.exceptions import NotFound, PermissionDenied, QuotaExceeded
 from webmap_core.jobs import ErrorKind
 from webmap_core.models import JobState
 from webmap_core.permissions import Principal
+from webmap_core.quota import DEFAULT_POLICY
 from webmap_core.services import jobs as service
 
 pytestmark = pytest.mark.integration
@@ -161,25 +162,54 @@ async def test_a_different_parameter_is_a_different_job(
 # --- quota (§7) --------------------------------------------------------------
 
 
+async def _fill_running(engine: AsyncEngine, principal: Principal, n: int) -> list[UUID]:
+    """`n` jobs in the running state, as a busy worker pool would leave them."""
+    ids: list[UUID] = []
+    for i in range(n):
+        enqueued = await _enqueue(
+            engine, principal, parameters={**PARAMS, "cell_size": 100.0 + i}
+        )
+        async with principal_session(engine, principal) as conn:
+            await service.mark_running(conn, enqueued.job_id)
+        ids.append(enqueued.job_id)
+    return ids
+
+
 async def test_the_concurrency_limit_names_the_limit_and_a_next_action(
     engine: AsyncEngine, principals: dict[str, object]
 ) -> None:
     """`CLAUDE.md` §8: a resource limit names the offending value and what to
-    change. Refused at submission rather than queued indefinitely — a job
-    sitting behind five of your own is indistinguishable from a stuck one, and
-    queue depth is invisible from a conversation."""
+    change. The limits and their wording live in `webmap_core.quota`; this
+    service measures usage and hands it over, so that there is one place where
+    "how many is too many" is decided."""
     owner = principals["owner"]
     assert isinstance(owner, Principal)
 
-    for n in range(service.MAX_CONCURRENT_JOBS_PER_USER):
-        await _enqueue(engine, owner, parameters={**PARAMS, "cell_size": 100.0 + n})
+    await _fill_running(engine, owner, DEFAULT_POLICY.max_concurrent_jobs_per_user)
 
     with pytest.raises(QuotaExceeded) as excinfo:
         await _enqueue(engine, owner, parameters={**PARAMS, "cell_size": 999.0})
 
     message = str(excinfo.value)
-    assert str(service.MAX_CONCURRENT_JOBS_PER_USER) in message
+    assert str(DEFAULT_POLICY.max_concurrent_jobs_per_user) in message
     assert "webmap_cancel_job" in message, "the message must name a next action"
+    assert "minutes ago" in message, (
+        "the age of the blocking job is what turns a refusal into a decision "
+        "between waiting and cancelling"
+    )
+
+
+async def test_queued_jobs_are_allowed_well_past_the_running_limit(
+    engine: AsyncEngine, principals: dict[str, object]
+) -> None:
+    """Three *running* is the limit; queueing is bounded separately and far
+    higher. Conflating them would refuse a second submission while one job
+    ran, which is the ordinary way anyone works."""
+    owner = principals["owner"]
+    assert isinstance(owner, Principal)
+
+    for i in range(DEFAULT_POLICY.max_concurrent_jobs_per_user + 2):
+        await _enqueue(engine, owner, parameters={**PARAMS, "cell_size": 100.0 + i})
 
 
 async def test_a_finished_job_does_not_count_against_the_quota(
@@ -188,26 +218,46 @@ async def test_a_finished_job_does_not_count_against_the_quota(
     owner = principals["owner"]
     assert isinstance(owner, Principal)
 
-    for n in range(service.MAX_CONCURRENT_JOBS_PER_USER):
-        enqueued = await _enqueue(engine, owner, parameters={**PARAMS, "cell_size": 100.0 + n})
+    for job_id in await _fill_running(
+        engine, owner, DEFAULT_POLICY.max_concurrent_jobs_per_user
+    ):
         async with principal_session(engine, owner) as conn:
-            await service.mark_running(conn, enqueued.job_id)
-            await service.mark_succeeded(conn, enqueued.job_id, {"dataset_id": str(uuid4())})
+            await service.mark_succeeded(conn, job_id, {"dataset_id": str(uuid4())})
 
-    # No exception: the three succeeded jobs are not occupying anything.
+    # No exception: the finished jobs are not occupying a worker.
     await _enqueue(engine, owner, parameters={**PARAMS, "cell_size": 777.0})
 
 
 async def test_one_persons_jobs_do_not_consume_anothers_quota(
     engine: AsyncEngine, principals: dict[str, object]
 ) -> None:
+    owner, stranger = principals["owner"], principals["stranger"]
+    assert isinstance(owner, Principal) and isinstance(stranger, Principal)
+
+    await _fill_running(engine, owner, DEFAULT_POLICY.max_concurrent_jobs_per_user)
+
+    await _enqueue(engine, stranger)  # not refused
+
+
+async def test_the_team_limit_counts_teammates_and_not_strangers(
+    engine: AsyncEngine, principals: dict[str, object]
+) -> None:
+    """ "Your team has 8 jobs running" about people who are not on your team is
+    a refusal nobody can act on — they go and ask their team, and their team
+    is not running anything. `job` has no team column, so membership resolves
+    it."""
     owner, teammate = principals["owner"], principals["teammate"]
+    stranger = principals["stranger"]
     assert isinstance(owner, Principal) and isinstance(teammate, Principal)
+    assert isinstance(stranger, Principal)
 
-    for n in range(service.MAX_CONCURRENT_JOBS_PER_USER):
-        await _enqueue(engine, owner, parameters={**PARAMS, "cell_size": 100.0 + n})
+    # A stranger saturating the pool must not count against the team.
+    await _fill_running(engine, stranger, DEFAULT_POLICY.max_concurrent_jobs_per_user)
+    await _fill_running(engine, teammate, DEFAULT_POLICY.max_concurrent_jobs_per_user)
 
-    await _enqueue(engine, teammate)  # not refused
+    # The owner shares a team with the teammate but not the stranger: three
+    # teammate jobs are under the team limit of eight, so this is accepted.
+    await _enqueue(engine, owner)
 
 
 # --- visibility --------------------------------------------------------------
