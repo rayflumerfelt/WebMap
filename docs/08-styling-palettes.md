@@ -162,8 +162,8 @@ export interface LabelSymbol {
   size: number;
   sizeMode: LabelSizeMode;
   color: string;
-  /** Zero by default — see §2.4. Kept as a field because over a colour-filled
-   *  grid a halo is the only thing that keeps text legible. */
+  /** A new label layer starts with no halo — `haloWidth: 0`. A default rather
+   *  than a rule; see §2.4. */
   haloColor: string;
   haloWidth: number;
   /** A MapLibre *font stack*, e.g. `['Oswald Bold']`. Bold and italic are
@@ -336,16 +336,14 @@ every renderer in the deployment understands.
 
 #### Halos
 
-The imported labelling specification says **labels have no halo**, and that is the default:
-`haloWidth: 0`. Halos thicken text, muddy dense line work, and on a well-symbol map at survey
-density they turn a legible sheet into fog.
+**`haloWidth` defaults to 0**, so a new label layer has none. Halos thicken text and muddy dense
+line work; on a well-symbol map at survey density they turn a legible sheet into fog.
 
-> **Open point.** That rule came from a project without colour-filled grids. Over a viridis or
-> spectral ramp, unhaloed text is unreadable at any size — the glyph and the ground are the same
-> luminance somewhere in every ramp. The field is therefore kept and defaults to zero, so the
-> imported rule is what a new layer gets, and a grid-overlay label can still be made readable.
-> If halos should be absent unconditionally, the field comes out and the grid case has to be
-> answered another way.
+A default rather than a rule, and the difference matters. Over a colour-filled grid a halo is
+usually the only thing that keeps text legible — the glyph and the ground match in luminance
+somewhere in every ramp, and no single text colour fixes that across the whole map. The control
+sits in the text section of the formatting dialog beside colour and size (`07` §6.2), and a
+style template (§7) can carry a different starting value for a layer type that needs one.
 
 ---
 

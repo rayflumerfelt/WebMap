@@ -528,8 +528,9 @@ Sections the requirement did not name but the model needs, all already in `Symbo
   geological visualisation and `Graduated.vary` already carries `'size'`.
 - **Which column is labelled, and at what zooms.** With collision detection off (`08` §2.4)
   the zoom window is the *only* thinning control, so it is not an advanced option — it is how a
-  section grid stops being a wall of text. Halo colour and width belong here too, defaulting to
-  none per the labelling spec, and needed over a colour-filled grid.
+  section grid stops being a wall of text. Halo colour and width belong here too, starting at
+  none — a default, not a rule, since over a colour-filled grid a halo is usually what makes
+  the text readable at all.
 - **Null and no-data colour.** *Other* catches unlisted text. It does not catch a numeric null,
   a value outside the gradient range, or a blanked grid cell — and a well with no porosity
   reading is not zero.

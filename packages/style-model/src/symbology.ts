@@ -91,9 +91,9 @@ export interface LabelSymbol {
   size: number;
   sizeMode: LabelSizeMode;
   color: string;
-  /** Zero by default: halos muddy dense line work, and the imported labelling
-   *  spec calls for none. Kept as a field because over a colour-filled grid a
-   *  halo is the only thing that keeps text legible. See `08` §2.4. */
+  /** A new label layer starts with no halo — `haloWidth: 0`. A default rather
+   *  than a rule: over a colour-filled grid a halo is usually the only thing
+   *  that keeps text legible. See `08` §2.4. */
   haloColor: string;
   haloWidth: number;
   /** A MapLibre *font stack*, e.g. `['Oswald Bold']`. Bold and italic are
