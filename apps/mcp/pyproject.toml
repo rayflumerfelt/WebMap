@@ -22,6 +22,9 @@ broker = ["msal>=1.31"]
 
 [project.scripts]
 webmap-mcp = "webmap_mcp.server:main"
+# The per-workstation registration step adr/0008 asks to be "a single
+# command".
+webmap-mcp-install = "webmap_mcp.install:main"
 
 [build-system]
 requires = ["hatchling"]

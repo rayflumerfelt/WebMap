@@ -20,6 +20,11 @@ Package: `python/webmap_io`.
 | KML / KMZ | ✓ | ✓ | pyogrio | Presentation exchange |
 | DXF | ✓ | ✗ | pyogrio | Fault picks sometimes arrive this way |
 
+> **Implemented so far:** read for shapefile, GeoJSON, GeoPackage, and CSV/XYZ — the
+> Phase 1 set. GeoParquet and COG are written by the ingest and grid paths. Surfer
+> `.grd`, ZMAP+, KML and DXF read, and every write path other than GeoParquet and COG,
+> are outstanding; so is §7 export and its loss reporting. See `12-roadmap.md`.
+
 **pyogrio, not fiona.** GDAL bindings with a vectorized read path — 5–10× faster on large
 layers, returns arrays rather than per-feature dicts.
 

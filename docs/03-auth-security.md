@@ -12,6 +12,14 @@
 > `adr/0008-local-stdio-mcp.md` and §4. That removes what this document previously called
 > the highest schedule risk in the set.
 
+> **Implementation note.** The OIDC authorization-code flow (§2) and the credential
+> broker (§4.3) are written but have never run against a directory — development has no
+> route to one. `adr/0009-offline-identity-seam.md` puts a verifier seam at the narrowest
+> point so everything downstream of token verification is exercised offline by the same
+> code production runs. What remains untested is the acquisition call itself, and the
+> three things most likely to be wrong are named in that ADR: the audience value, the
+> groups claim name, and whether groups arrive as object ids or display names.
+
 ---
 
 ## 1. Threat model

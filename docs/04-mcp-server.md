@@ -38,6 +38,12 @@ render returns the interpolation method, its parameters, value range, units, CRS
 
 Twenty tools in six groups.
 
+> **Implemented so far:** the four discovery tools, in Phase 1 rather than Phase 3.
+> Phase 1's own acceptance criteria require the server to "call an authenticated tool"
+> and to prove that "MCP calls execute as the requesting user", and neither is
+> demonstrable against a server with no tools. The analysis, rendering, session and job
+> groups remain Phase 3 and 4. See `12-roadmap.md` for current status.
+
 | Group | Tools |
 |---|---|
 | Discovery | `webmap_list_projects`, `webmap_list_datasets`, `webmap_search_datasets`, `webmap_describe_dataset` |

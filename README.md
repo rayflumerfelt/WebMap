@@ -6,7 +6,8 @@ drive it conversationally.
 The differentiator is **fault-constrained interpolation** — gridding that correctly refuses to
 interpolate across a sealing fault, exposed through a conversational interface.
 
-**Status:** Phase 0 (foundations) in progress. See [`docs/12-roadmap.md`](docs/12-roadmap.md).
+**Status:** Phases 0 and 1 complete. Current state and
+known gaps are tracked in [`docs/12-roadmap.md`](docs/12-roadmap.md) under *Current status*.
 
 ---
 
@@ -80,15 +81,17 @@ editing to run the stack.
 
 ### What exists so far
 
+Phase-by-phase status, including what is deliberately empty and what is
+outstanding, lives in [`docs/12-roadmap.md`](docs/12-roadmap.md). In summary:
+
 | Area | State |
 |---|---|
 | Monorepo, boundary lint (both languages) | Working; each contract verified against a deliberate violation |
-| Schema migration, RLS policies | Applied and rolled back cleanly; 17 tables, 24 policies |
+| Schema, RLS policies, ownership trigger | Applied and rolled back cleanly; 17 tables, 24 policies |
 | Compose stack, container images | `docker compose up` verified from empty volumes |
-| Seed script | Working — 2,000 points, 20 faults, one grid, queryable via DuckDB and TiTiler |
-| `webmap_geo` | CRS, `AnalysisFrame`, Hilbert ordering, DuckDB data plane. Solvers are Phase 4 |
-| `webmap_core` | Models, permissions, settings, signing, quotas, jobs, versioning |
-| `webmap_io` | GeoParquet writer, COG writer, object storage |
-| `apps/api` | Boots, health endpoints, RLS startup assertions. Routes are Phase 1 |
-| `apps/mcp` | stdio transport and the authenticated client. Tools are Phases 1-4 |
-| `packages/*`, `apps/web` | Types and theme. Components are Phase 2 |
+| Seed script | 2,000 points, 20 faults, one grid, queryable via DuckDB and TiTiler |
+| Identity, permissions, audit | Working offline via the verifier seam ([ADR 0009](docs/adr/0009-offline-identity-seam.md)); OIDC and MSAL paths written but unrun |
+| Dataset and project REST, sharing | Working |
+| Upload, ingest, vector readers | Working for shapefile, GeoJSON, GeoPackage, CSV/XYZ |
+| `apps/mcp` | Four discovery tools over stdio, plus `webmap-mcp-install` for per-workstation registration |
+| `webmap_geo` solvers, `apps/render`, `packages/*` | Empty by design until Phases 2-4 |

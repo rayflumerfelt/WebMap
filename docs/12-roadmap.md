@@ -13,6 +13,56 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 
 ---
 
+## Current status
+
+Updated 2026-09-09. A phase is complete only when every criterion passes; a
+criterion met with a caveat says so rather than being ticked quietly.
+
+| Phase | State |
+|---|---|
+| 0 — Foundations | **Complete.** All criteria verified. |
+| 1 — Identity and data plane | **Complete.** Two caveats in "Carried forward" below. |
+| 2 — Display | Not started. Types and theme exist in `packages/*`; no components. |
+| 3 — Claude integration | Not started. `apps/render` has SSRF validation only. |
+| 4 — Gridding | Not started. `webmap_geo` solver modules are empty by design. |
+| 5 — Styling and editing | Not started. |
+| 6 — Aggregation and polish | Not started. |
+
+### Carried forward from Phase 1
+
+One item is genuinely untestable here and one is deliberately deferred.
+Neither blocks Phase 2; the first must be closed on deployment day.
+
+- **The MSAL broker call is untested and will stay so until a domain-joined
+  workstation.** `adr/0009-offline-identity-seam.md` confines the untested
+  surface to the acquisition call itself — everything downstream of it is the
+  same code the development path exercises — but that one call meets reality
+  cold on deployment day. The same is true of the OIDC authorization-code flow
+  in `apps/api/routes/auth.py`: written, reviewed, never run against a tenant.
+  The three things most likely to be wrong are the audience value, the groups
+  claim name, and whether groups arrive as object ids or display names.
+- **Ownership transfer is blocked, not implemented.** Migration `0002` installs
+  a trigger refusing ownership changes through an ordinary UPDATE, because the
+  RLS `WITH CHECK` did not catch them. Building the audited transfer operation
+  `03-auth-security.md` §3.3 describes means opening both that trigger and the
+  UPDATE policies — deliberately two decisions. Nobody has needed it yet.
+
+### Deliberately empty
+
+These modules exist so that import contracts and package boundaries have
+something to check, and are empty until their phase. They are not oversights:
+
+| Module | Phase |
+|---|---|
+| `webmap_geo.{interpolate,mesh,faults,variogram,contour,aggregate}` | 4 |
+| `webmap_core.style`, `packages/style-model` compilers | 2 |
+| `apps/render` beyond `security.py` | 3 |
+| `webmap_io.connectors` (file share, PostGIS) | 6 |
+| `webmap_io` readers for `.grd`, ZMAP+, KML, DXF | 6 |
+| Export and loss reporting (`11-file-io.md` §4.2, §7) | 6 |
+
+---
+
 ## Phase 0 — Foundations (2–3 weeks)
 
 Scaffolding. Boring, and skipping it costs triple later.
@@ -30,13 +80,15 @@ Scaffolding. Boring, and skipping it costs triple later.
 
 **Acceptance**
 
-- [ ] `docker compose up` gives a working stack from a clean clone
-- [ ] `make check` runs lint, typecheck, and tests across both languages
-- [ ] `import-linter` and `eslint-plugin-boundaries` contracts fail CI (verify each with a
+- [x] `docker compose up` gives a working stack from a clean clone
+- [x] `make check` runs lint, typecheck, and tests across both languages
+- [x] `import-linter` and `eslint-plugin-boundaries` contracts fail CI (verify each with a
       deliberate violation, including a `pyproj` import outside `webmap_geo.crs`)
-- [ ] Migrations apply and roll back cleanly
-- [ ] Seed data loads and is queryable
-- [ ] The ingest writer's Hilbert ordering prunes row groups on a tile-extent predicate,
+      — all seven checked against a deliberate violation, and the `pyproj` one has since
+      caught a real one in `webmap_io.read`
+- [x] Migrations apply and roll back cleanly
+- [x] Seed data loads and is queryable
+- [x] The ingest writer's Hilbert ordering prunes row groups on a tile-extent predicate,
       asserted against a layer large enough to produce many groups — 2,000 seed points is a
       single row group at the 128 MB target, so the seed cannot demonstrate this itself (see
       `11-file-io.md` §6.1 — an unsorted write silently defeats it)
@@ -65,19 +117,24 @@ solving it, which takes the largest schedule risk in the project off the board.
 
 **Acceptance**
 
-- [ ] A geologist logs in via SSO and lands with the correct team memberships
-- [ ] Uploading a shapefile with a `.prj` registers a dataset with correct CRS and bbox
-- [ ] Uploading a shapefile *without* a `.prj` fails with the message from `11-file-io.md` §3
-- [ ] User A cannot read User B's private dataset — verified at both application and RLS layer
-- [ ] The app DB role lacks `BYPASSRLS`; the assertion fires when it is granted
-- [ ] Every endpoint reading the data plane has an explicit permission check — RLS does not
-      cover object storage (`02-data-model.md` §4.1)
-- [ ] The local MCP server acquires a token silently and calls an authenticated tool, with no
-      prompt and no stored password
-- [ ] MCP calls execute as the requesting user (verify: two users, different results)
-- [ ] The local MCP server holds no database connection and no permission logic — verified by
-      inspection, and by confirming it still works with the database firewalled from it
-- [ ] All hostile fixtures from `11-file-io.md` §8 fail with actionable messages
+- [x] A geologist logs in via SSO and lands with the correct team memberships — through the development verifier (`adr/0009`); the OIDC path is written but unrun
+- [x] Uploading a shapefile with a `.prj` registers a dataset with correct CRS and bbox
+- [x] Uploading a shapefile *without* a `.prj` fails with the message from `11-file-io.md` §3
+- [x] User A cannot read User B's private dataset — verified at both application and RLS layer
+- [x] The app DB role lacks `BYPASSRLS`; the assertion fires when it is granted
+- [x] Every endpoint reading the data plane has an explicit permission check — RLS does not
+      cover object storage (`02-data-model.md` §4.1). `resolve_feature_object` and
+      `resolve_grid_object` are the only functions that return a storage key, and both
+      check first; grep for other readers of `parquet_key` when reviewing
+- [~] The local MCP server acquires a token silently and calls an authenticated tool, with no
+      prompt and no stored password — proven for the development token source; the MSAL
+      broker path is unrun (see "Carried forward")
+- [x] MCP calls execute as the requesting user (verify: two users, different results)
+- [x] The local MCP server holds no database connection and no permission logic — enforced by
+      an `import-linter` contract rather than by inspection, so it fails CI instead of
+      review. It also imports no `webmap_core`: that package depends on SQLAlchemy, and a
+      contract permitting the package that imports the driver permits the driver
+- [x] All hostile fixtures from `11-file-io.md` §8 fail with actionable messages
 
 **Risk.** Which directory backs the Windows credentials. Entra ID gives plain OIDC and silent
 token acquisition through MSAL's broker; pure on-prem AD means Kerberos for the browser and
