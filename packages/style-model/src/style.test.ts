@@ -318,3 +318,83 @@ describe('fonts', () => {
     expect('sprite' in style).toBe(false);
   });
 });
+
+describe('labels', () => {
+  // `08-styling-palettes.md` §2.4. Labels are held back to the end of the
+  // layer array so nothing an object layer draws can cover one. MapLibre
+  // paints in array order, so this is the whole mechanism.
+  const LABEL: Symbology = {
+    type: 'single',
+    symbol: {
+      geometry: 'label',
+      field: 'name',
+      size: 9,
+      sizeMode: { mode: 'fixed' },
+      color: '#1a1a1a',
+      haloColor: '#ffffff',
+      haloWidth: 0,
+      font: ['Oswald Regular'],
+      placement: 'point',
+      allowOverlap: true,
+    },
+  };
+
+  it('draws every label above every object layer, whatever the draw order', () => {
+    // The labelled layer sorts FIRST, so in draw order its label would be
+    // buried under the polygon that follows it.
+    const style = compileStyle({
+      layers: [
+        vectorLayer('sections', { symbology: LABEL, z: 0 }),
+        vectorLayer('leases', { symbology: POLYGON, z: 5 }),
+      ],
+      palettes: {},
+    });
+
+    const kinds = style.layers.map((layer) => layer.type);
+    const lastObject = kinds.lastIndexOf('fill');
+    const firstLabel = kinds.indexOf('symbol');
+
+    expect(firstLabel).toBeGreaterThan(lastObject);
+  });
+
+  it('keeps labels in draw order among themselves', () => {
+    const style = compileStyle({
+      layers: [
+        vectorLayer('townships', { symbology: LABEL, z: 9 }),
+        vectorLayer('sections', { symbology: LABEL, z: 1 }),
+      ],
+      palettes: {},
+    });
+
+    expect(style.layers.map((layer) => layer.id)).toEqual([
+      'sections-label',
+      'townships-label',
+    ]);
+  });
+
+  it('leaves the basemap alone', () => {
+    // A basemap's own place names must stay under the geologist's data. The
+    // basemap block is beneath everything by construction, and hoisting its
+    // symbol layers would put a town name on top of a filled grid.
+    const withPlaceNames: Basemap = {
+      ...BASEMAP,
+      layers: [
+        ...BASEMAP.layers,
+        { id: 'basemap-places', type: 'symbol', source: 'basemap' },
+      ],
+    };
+
+    const style = compileStyle({
+      layers: [vectorLayer('leases', { symbology: POLYGON })],
+      palettes: {},
+      basemap: withPlaceNames,
+    });
+
+    expect(style.layers.map((layer) => layer.id)).toEqual([
+      'basemap-raster',
+      'basemap-places',
+      'leases-fill',
+      'leases-outline',
+    ]);
+  });
+});

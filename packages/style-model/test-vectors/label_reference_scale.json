@@ -1,0 +1,51 @@
+{
+  "name": "label_reference_scale",
+  "description": "A label at a fixed GROUND size — a reference scale. 12 pt at zoom 12, doubling with every zoom level in and halving with every one out, so the text always covers the same distance. Compiled as an exponential-base-2 zoom interpolation, which is exact rather than approximate: MapLibre's factor is (2**(z-z0)-1)/(2**(z1-z0)-1), and stops a power of two apart reduce it to size * 2**(z - reference). The stops sit 24 zoom levels either side of the reference because interpolate CLAMPS outside its range instead of extrapolating, and because writing them relative to the reference keeps every multiplier an exact power of two -- the two compilers compare bytes.",
+  "symbology": {
+    "type": "single",
+    "symbol": {
+      "geometry": "label",
+      "field": "contour_ft",
+      "size": 12,
+      "sizeMode": { "mode": "scale-with-map", "referenceZoom": 12 },
+      "color": "#5c4033",
+      "haloColor": "#ffffff",
+      "haloWidth": 0,
+      "font": ["Oswald Regular"],
+      "placement": "line-center",
+      "allowOverlap": true
+    }
+  },
+  "palettes": {},
+  "source_id": "contours",
+  "expected_layers": [
+    {
+      "id": "contours-label",
+      "type": "symbol",
+      "source": "contours",
+      "layout": {
+        "text-field": ["get", "contour_ft"],
+        "text-size": [
+          "interpolate",
+          ["exponential", 2],
+          ["zoom"],
+          -12,
+          9.5367431640625e-7,
+          12,
+          16,
+          36,
+          268435456
+        ],
+        "text-font": ["Oswald Regular"],
+        "symbol-placement": "line-center",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      "paint": {
+        "text-color": "#5c4033",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 0
+      }
+    }
+  ]
+}

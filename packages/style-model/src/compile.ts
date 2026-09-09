@@ -207,7 +207,18 @@ function layersFor(
     case 'polygon':
       return polygonLayers(symbol, o, id, overrides);
     case 'label':
-      return [withSource({ id: `${id}-label`, type: 'symbol', ...labelSpec(symbol, overrides) }, o)];
+      return [
+        withSource(
+          {
+            id: `${id}-label`,
+            type: 'symbol',
+            ...(symbol.minZoom !== undefined ? { minzoom: symbol.minZoom } : {}),
+            ...(symbol.maxZoom !== undefined ? { maxzoom: symbol.maxZoom } : {}),
+            ...labelSpec(symbol, overrides),
+          },
+          o,
+        ),
+      ];
   }
 }
 
@@ -308,20 +319,82 @@ function polygonLayers(
   return layers;
 }
 
+/** CSS points to pixels. A cartographer specifies points; `text-size` is in
+ *  pixels, and the two differ by enough to matter at label sizes. */
+const PT_TO_PX = 96 / 72;
+
+/**
+ * How far a reference-scale ramp reaches either side of its reference zoom.
+ *
+ * `interpolate` **clamps** outside its stop range rather than extrapolating,
+ * so the span has to cover every zoom the map will ever reach; MapLibre's
+ * maximum is 24, so 24 levels either way can never be hit.
+ *
+ * The stops are written *relative to the reference zoom* so that every size
+ * multiplier is an exact power of two — `2**-24`, `1`, `2**24`. Computing them
+ * as `pow(2, stop - reference)` instead would put a non-integer exponent
+ * through libm in two languages, and the parity vectors compare bytes.
+ */
+const REFERENCE_SPAN = 24;
+
+/**
+ * `text-size` for a label, in pixels.
+ *
+ * Ground-constant text is an `interpolate` with `["exponential", 2]` on zoom,
+ * which is **exact** rather than an approximation: MapLibre's exponential
+ * factor is `(b**(z-z0) - 1) / (b**(z1-z0) - 1)`, and with `b = 2` and stops
+ * a power of two apart that reduces to `size * 2**(z - reference)` — measured
+ * to zero relative error at integer and fractional zooms alike.
+ */
+function textSize(s: LabelSymbol): number | unknown[] {
+  const px = s.size * PT_TO_PX;
+  if (s.sizeMode.mode === 'fixed') return px;
+  const reference = s.sizeMode.referenceZoom;
+  const factor = Math.pow(2, REFERENCE_SPAN);
+  return [
+    'interpolate',
+    ['exponential', 2],
+    ['zoom'],
+    reference - REFERENCE_SPAN,
+    px / factor,
+    reference,
+    px,
+    reference + REFERENCE_SPAN,
+    px * factor,
+  ];
+}
+
+/** `text-size` is a *layout* property. A graduated symbology varies size, and
+ *  routing that override into `paint` produces a style MapLibre rejects
+ *  outright — "unknown property text-size" — so the whole map fails to load. */
+const SYMBOL_LAYOUT_OVERRIDES = new Set(['text-size', 'text-font', 'text-field']);
+
 function labelSpec(s: LabelSymbol, overrides: Record<string, unknown>) {
+  const layoutOverrides: Record<string, unknown> = {};
+  const paintOverrides: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    (SYMBOL_LAYOUT_OVERRIDES.has(key) ? layoutOverrides : paintOverrides)[key] = value;
+  }
+
   return {
     layout: {
       'text-field': ['get', s.field],
-      'text-size': s.size,
+      'text-size': textSize(s),
       'text-font': s.font,
       'symbol-placement': s.placement,
+      // Both flags, deliberately. `text-allow-overlap` stops this layer's own
+      // labels being dropped; `text-ignore-placement` keeps them out of the
+      // collision index so they cannot displace another layer's. Setting only
+      // the first still lets a section grid delete the labels above it.
       'text-allow-overlap': s.allowOverlap,
+      'text-ignore-placement': s.allowOverlap,
+      ...layoutOverrides,
     },
     paint: {
       'text-color': s.color,
       'text-halo-color': s.haloColor,
       'text-halo-width': s.haloWidth,
-      ...overrides,
+      ...paintOverrides,
     },
   };
 }

@@ -237,6 +237,11 @@ const style = useMemo(
 a shared JSON schema and a Python port with a shared test-vector suite). If the two ever
 disagree, the visual regression tests catch it.
 
+It is almost a per-layer map, with one exception worth knowing about: **label layers are held
+back and appended after every object layer**, so nothing a later layer draws can cover a label
+(`08` §2.4). Draw order is preserved among the labels themselves, and the basemap is exempt —
+its place names stay beneath the geologist's data.
+
 ---
 
 ## 4. Visual design direction
@@ -507,12 +512,24 @@ comes from `GET /static/glyphs` so it reflects what this deployment actually bui
 italic control is disabled when the family has none** — Oswald — rather than offered and
 ignored.
 
+**Size mode** is the reference-scale control, and both behaviours are implemented (`08` §2.2):
+
+- **Fixed** — 12 pt stays 12 pt however far the map is zoomed. The default.
+- **Scale with map** — 12 pt *at a reference zoom*, doubling in and halving out, so the text
+  always covers the same distance on the ground. Picking this mode reveals the reference-zoom
+  control, which is meaningless without it.
+
+The preview has to zoom, not just render once: the difference between the two modes is
+invisible in a still.
+
 Sections the requirement did not name but the model needs, all already in `Symbology`:
 
 - **Size by column** — graduated symbols. Bubble size by production or thickness is core
   geological visualisation and `Graduated.vary` already carries `'size'`.
-- **Which column is labelled, and at what zooms.** Halo colour and width belong here too;
-  unhaloed text over a filled grid is unreadable.
+- **Which column is labelled, and at what zooms.** With collision detection off (`08` §2.4)
+  the zoom window is the *only* thinning control, so it is not an advanced option — it is how a
+  section grid stops being a wall of text. Halo colour and width belong here too, defaulting to
+  none per the labelling spec, and needed over a colour-filled grid.
 - **Null and no-data colour.** *Other* catches unlisted text. It does not catch a numeric null,
   a value outside the gradient range, or a blanked grid cell — and a well with no porosity
   reading is not zero.

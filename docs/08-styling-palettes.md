@@ -139,25 +139,42 @@ export interface PolygonSymbol {
   outlineDashArray?: number[];
 }
 
+/**
+ * How a label behaves as the map zooms. Both are expressible in MapLibre and
+ * neither is guessed — §2.2 records the measurements.
+ */
+export type LabelSizeMode =
+  /** The same size on **screen** at every zoom: 12 pt stays 12 pt. A constant
+   *  `text-size`, and MapLibre's own default. */
+  | { mode: 'fixed' }
+  /** The same size on the **ground** — a reference scale. `size` is the size
+   *  at `referenceZoom`; the label doubles with each zoom level in and halves
+   *  with each one out, so it always covers the same distance. */
+  | { mode: 'scale-with-map'; referenceZoom: number };
+
 export interface LabelSymbol {
   geometry: 'label';
   /** Which attribute is drawn. Without one there is nothing to label. */
   field: string;
-  /** Points. Compiled to pixels — see §2.2. */
+  /** **Points**, not pixels. MapLibre's `text-size` is in pixels, so the
+   *  compiler converts at 96/72 — and the render service scales again for its
+   *  2x output rather than baking a device ratio in here. */
   size: number;
-  /** How size behaves as the map zooms. See §2.2; neither is MapLibre's
-   *  default, which is fixed pixels regardless of scale. */
-  sizeMode: 'fixed' | 'scale-with-map';
+  sizeMode: LabelSizeMode;
   color: string;
-  /** Essential rather than decorative: unhaloed text over a filled grid is
-   *  unreadable at any size. */
+  /** Zero by default — see §2.4. Kept as a field because over a colour-filled
+   *  grid a halo is the only thing that keeps text legible. */
   haloColor: string;
   haloWidth: number;
   /** A MapLibre *font stack*, e.g. `['Oswald Bold']`. Bold and italic are
    *  separate stacks, not properties — see §2.3. */
   font: string[];
   placement: 'point' | 'line' | 'line-center';
+  /** Sets `text-allow-overlap` **and** `text-ignore-placement`. Both, or the
+   *  layer keeps its own labels but still displaces another layer's. */
   allowOverlap: boolean;
+  /** Zoom visibility, compiled to the layer's `minzoom`/`maxzoom`. With
+   *  collision off this is the user's only thinning control. */
   minZoom?: number;
   maxZoom?: number;
 }
@@ -166,10 +183,15 @@ export interface LabelSymbol {
 **No conditional fields.** A `PointSymbol` has no `fillColor` because points have no fill.
 The type system prevents the UI from offering it, which is more reliable than a runtime check.
 
-### 2.2 What MapLibre cannot do, and what we do instead
+### 2.2 Where MapLibre decides the model
 
-Four things the formatting model has to work around rather than express directly. Each was
-checked against the style spec and against a running MapLibre, not assumed.
+Four places the renderer, rather than the requirement, settles how a formatting option is
+modelled. Two are things it cannot do and the model works around; two are things it can do but
+only in a particular way, and the way is worth writing down because guessing it produces a map
+that is wrong without being broken.
+
+Each was checked against the style spec as data and against MapLibre's own expression engine
+and validator — not assumed, and in one case not what this document previously claimed.
 
 **Polygon outlines have no width.** `fill-outline-color` is always one pixel and takes no
 width property, so `PolygonSymbol.outlineWidth` compiles to a **companion `line` layer** above
@@ -182,16 +204,49 @@ and its units are multiples of line width, so a data-driven width makes the dash
 A layer that genuinely needs dash-by-category expresses it as `RuleBased`, which compiles to
 one MapLibre layer per pattern.
 
-**Text size is in screen pixels and fixed by default.** `LabelSymbol.size` is in *points*, so
-it compiles to pixels; `sizeMode` decides what happens as the map zooms:
+**Text size is in screen pixels, and points are ours.** `text-size` is in pixels;
+`LabelSymbol.size` is in *points*, because that is what a cartographer specifies. The compiler
+converts at 96/72, and the render service scales again for its 2x output rather than having a
+device ratio baked in at authoring time.
 
-- `fixed` — the same size on screen at every zoom. MapLibre's own default.
-- `scale-with-map` — the same size on the ground, compiled as an `interpolate` with
-  `["exponential", 2]` on zoom, which matches the doubling of scale per zoom level. It is an
-  approximation; nothing in the style spec does it exactly.
+Both size behaviours a reference-scale map needs are expressible, and this was checked against
+MapLibre's own expression engine rather than reasoned about:
 
-The render service outputs at 2x for slides, so the point-to-pixel conversion has to scale
-with the render, not be baked at authoring time.
+- **`fixed` — the same size on screen at every zoom.** 12 pt is 16 px at z6 and at z18. A
+  constant `text-size`, and MapLibre's own default.
+- **`scale-with-map` — the same size on the ground.** A reference scale: 12 pt at zoom 12
+  doubles with every zoom level in and halves with every one out, so the text always covers
+  the same distance. Compiled as an `interpolate` with `["exponential", 2]` on zoom.
+
+**The exponential ramp is exact, not an approximation.** MapLibre's exponential interpolation
+factor is `(b**(z - z0) - 1) / (b**(z1 - z0) - 1)`; with `b = 2` and stop values a power of two
+apart, `s0 + (s1 - s0) * t` reduces algebraically to `s0 * 2**(z - z0)`. Evaluated through
+`createPropertyExpression` at integer and fractional zooms, the relative error against ideal
+ground-constant size is **0.0** — bit-exact, not merely close.
+
+Two compilation details follow from how MapLibre reads that expression, and both are load-
+bearing rather than stylistic:
+
+- `interpolate` **clamps** outside its stop range instead of extrapolating, so the stops must
+  span every zoom the map can reach. They are written 24 levels either side of the reference
+  zoom — MapLibre's maximum zoom is 24, so the clamp can never be reached.
+- The stops are written *relative to the reference* (`ref-24`, `ref`, `ref+24`) so that every
+  size multiplier is an exact power of two. Computing them as `pow(2, stop - reference)`
+  instead would put a non-integer exponent through libm in two languages, and the parity
+  vectors of §3.1 compare bytes.
+
+**The 255 px ceiling applies only to data-driven size.** MapLibre packs a feature-dependent
+`text-size` into a vertex attribute capped at `MAX_GLYPH_ICON_SIZE = 255` px, and clamps
+silently past it. A zoom-only ramp is a *camera* expression and travels as a uniform, so
+ground-constant text keeps growing correctly however far you zoom in — which is the point of a
+reference scale. Size varied **by a column** *and* scaling with the map is a composite
+expression and does hit the cap. Glyphs are SDFs authored at a 24 px em, so text much beyond
+that softens before it clips.
+
+**`text-size` is a layout property, not a paint one.** Graduated symbology varies size, and an
+override routed into `paint` makes MapLibre reject the entire style — `unknown property
+text-size` — so the map does not load at all rather than the label being wrong. It did exactly
+that, undetected, because no test built a label.
 
 **Grids are not coloured by MapLibre at all.** See §5.2.
 
@@ -231,6 +286,66 @@ they are open-licensed outlines carrying no user data, and requiring a token wou
 isolated render worker needed one to draw a label. `GET /static/glyphs` lists what this
 deployment actually built, and the styling UI reads it rather than hard-coding a font list, so
 a font that failed to build is absent rather than offered and then blank.
+
+### 2.4 Labels
+
+**Label anchors are precomputed**, per polygon, into a per-layer point source: area centroid,
+falling back to a pole of inaccessibility (`polylabel`) when the centroid lands outside a
+concave or crescent-shaped polygon. Nothing about the label is decided at render time except
+its appearance.
+
+Not because MapLibre cannot place a polygon label — it can, and does — but because of *how*.
+`symbol_layout.ts` calls `findPoleOfInaccessibility(polygon, 16)` on the **tile-clipped**
+geometry, once per tile and once per ring group, at a precision of 2 pixels. Three consequences
+follow, and all three read as a rendering bug rather than as a placement policy:
+
+- A polygon crossing a tile boundary is a different shape in each tile, so it gets a different
+  anchor in each — and the label moves, or appears twice, as you pan.
+- The anchor is recomputed at every zoom against a differently-clipped polygon, so a label
+  drifts while zooming rather than staying put.
+- A multipolygon lease gets one label per part, including the slivers.
+
+A precomputed anchor is stable, is computed once against the whole geometry, and is a *dataset*
+— so it can be inspected, corrected by hand, and exported with the map. Computing it reads and
+writes geometry, so it belongs to `webmap_geo` and not to `style-model` (`adr/0004`); Shapely
+ships `polylabel`, so it costs no new dependency.
+
+For lines, `symbol-placement: 'line-center'` rather than a precomputed point. MapLibre anchors
+a `point`-placed line label at the line's **first vertex** — an end, not the middle — which is
+why contour labels drawn that way all cluster at the edge of the map.
+
+**All label layers are added after all object layers, so nothing draws over a label.** MapLibre
+paints in array order, so this is the entire mechanism: `compileStyle` holds symbol layers back
+and appends them, preserving draw order among themselves. The basemap is deliberately exempt —
+its own place names stay beneath the geologist's data, since hoisting them would put a town
+name on top of the map's subject.
+
+**Labels overlap on purpose; collision detection is off.** `text-allow-overlap` *and*
+`text-ignore-placement` are both set on every label layer. MapLibre's default would drop
+whichever label lost a collision, which on a township or section grid removes most of them and
+reads as "labels are broken" rather than as "the map is crowded". Both flags are needed: the
+first stops a layer's own labels being dropped, the second keeps them out of the collision
+index so they cannot displace another layer's. Thinning labels is the user's job, via the label
+column and the zoom-visibility window — which is why `minZoom`/`maxZoom` are on the symbol and
+compile to the layer's own `minzoom`/`maxzoom` rather than to a layout property.
+
+`text-allow-overlap` is the older spelling of what MapLibre now also exposes as
+`text-overlap: 'always'`. The style spec makes `text-allow-overlap` conditional on `text-overlap`
+being absent, so setting both is a validation error; the compiler emits the older pair, which
+every renderer in the deployment understands.
+
+#### Halos
+
+The imported labelling specification says **labels have no halo**, and that is the default:
+`haloWidth: 0`. Halos thicken text, muddy dense line work, and on a well-symbol map at survey
+density they turn a legible sheet into fog.
+
+> **Open point.** That rule came from a project without colour-filled grids. Over a viridis or
+> spectral ramp, unhaloed text is unreadable at any size — the glyph and the ground are the same
+> luminance somewhere in every ramp. The field is therefore kept and defaults to zero, so the
+> imported rule is what a new layer gets, and a grid-overlay label can still be made readable.
+> If halos should be absent unconditionally, the field comes out and the grid case has to be
+> answered another way.
 
 ---
 
@@ -689,24 +804,35 @@ which is the reason the render service screenshots the page rather than the canv
 // packages/style-model/src/compile.test.ts
 
 describe('compileSymbology', () => {
-  // Every vector in test-vectors/ runs in both TypeScript and Python.
-  it.each(loadTestVectors())('$name compiles to expected layers', (vector) => {
-    const layers = compileSymbology(
-      vector.symbology, 'src', undefined, vector.palettes
-    );
-    expect(layers).toEqual(vector.expectedLayers);
-  });
+  const vectors = loadVectors();
 
-  it('produces spec-valid output for every vector', () => {
-    for (const vector of loadTestVectors()) {
-      const layers = compileSymbology(vector.symbology, 'src', undefined, vector.palettes);
-      for (const layer of layers) {
-        expect(validateStyleLayer(layer)).toEqual([]);   // no spec errors
-      }
-    }
-  });
+  // Every vector in test-vectors/ runs in both TypeScript and Python.
+  it.each(vectors.map((v) => [v.name, v] as const))(
+    '%s compiles to the expected layers',
+    (_name, vector) => {
+      expect(compile(vector)).toEqual(vector.expected_layers);
+    },
+  );
+
+  it.each(vectors.map((v) => [v.name, v] as const))(
+    '%s compiles to something MapLibre accepts',
+    (_name, vector) => {
+      // Validated as a whole style rather than layer by layer, because that
+      // is how MapLibre loads one — and because a layer is only valid in the
+      // context of the source and the glyphs endpoint it references.
+      expect(validateStyleMin(styleAround(vector, compile(vector)))).toEqual([]);
+    },
+  );
 });
 ```
 
-Validating against the real style spec catches an entire class of bug — an expression that
-looks right but that MapLibre will reject at runtime, producing a silently blank layer.
+The two assertions catch different things, and the second is not redundant. The first compares
+the compiled JSON against what a human wrote down; the second compares it against the renderer.
+A layer can match its expected output exactly and still be rejected at load time — and MapLibre
+rejects the **whole style**, not the offending layer, so one bad property is a blank map rather
+than a wrong colour.
+
+A property emitted into the wrong block is the case that motivated it: `text-size` is *layout*,
+graduated symbology varies size, and the size override was written into `paint`. It read
+correctly, it survived review, and it made every map carrying a graduated label fail to load.
+Nothing caught it, because this test was specified here and never written.

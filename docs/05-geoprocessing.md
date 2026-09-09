@@ -619,6 +619,33 @@ def auto_levels(vmin: float, vmax: float, target_count: int = 15) -> np.ndarray:
 Contour output carries attributes: `value`, `is_index` (every Nth for heavier styling), and
 `closed`. Index contours drive label placement in the style.
 
+### 7.1 Label anchors
+
+Polygon label anchors are computed here rather than left to the renderer, because they are
+geometry (`adr/0004`) and because MapLibre's own placement is per-tile.
+
+```python
+# python/webmap_geo/label.py
+
+def label_anchors(polygons: gpd.GeoSeries, frame: AnalysisFrame) -> gpd.GeoSeries:
+    """One representative interior point per polygon.
+
+    Area centroid where it falls inside the polygon; otherwise the pole of
+    inaccessibility (Shapely's `polylabel`) — the centre of the largest
+    inscribed circle, the point furthest from any edge and so the one with the
+    most room for text. A crescent-shaped lease, or a township with a lake in
+    it, has its centroid outside itself, and a label there sits on open ground.
+
+    Computed against the whole geometry, once. MapLibre computes its own
+    against the *tile-clipped* polygon at 2px precision, per tile and per ring
+    group, so a polygon spanning a tile boundary gets a different anchor in
+    each tile — the label moves while panning and drifts while zooming.
+    """
+```
+
+The output is a point dataset in its own right, so an anchor can be inspected, moved by hand
+and exported with the map. `08-styling-palettes.md` §2.4 covers what the style does with it.
+
 ---
 
 ## 8. Spatial aggregation

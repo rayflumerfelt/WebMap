@@ -177,6 +177,13 @@ Contour labels are core to this product. A user comparing "the map Claude showed
 "the map I just opened" would see differences we could not explain. Playwright makes parity
 exact by construction.
 
+Since this was decided, the label design has narrowed that specific risk: collision detection
+is off on every label layer and polygon anchors are precomputed rather than derived per tile
+(`08` §2.4), so the two implementations have less left to disagree about. It does not reverse
+the decision — the parity argument was never only about labels, and `page.route()` remains our
+SSRF control with no equivalent in MapLibre Native — but a future revisit should measure the
+gap rather than inherit this paragraph's estimate of it.
+
 Playwright also gives us HTML overlays for free — `page.screenshot()` captures the rendered
 page, not just the WebGL canvas, so legends and scale bars are the app's own React components
 rendered in the shell. One legend implementation, guaranteed identical in both contexts.

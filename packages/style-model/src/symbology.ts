@@ -68,16 +68,45 @@ export interface PolygonSymbol {
   outlineDashArray?: number[];
 }
 
+/**
+ * How a label behaves as the map zooms. Both are expressible in MapLibre and
+ * neither is guessed — `08` §2.2 records the measurements.
+ */
+export type LabelSizeMode =
+  /** The same size on **screen** at every zoom: 12 pt stays 12 pt. A constant
+   *  `text-size`, and MapLibre's own default. */
+  | { mode: 'fixed' }
+  /** The same size on the **ground** — a reference scale. `size` is the size
+   *  at `referenceZoom`; the label doubles with each zoom level in and halves
+   *  with each one out, so it always covers the same distance. */
+  | { mode: 'scale-with-map'; referenceZoom: number };
+
 export interface LabelSymbol {
   geometry: 'label';
+  /** Which attribute is drawn. Without one there is nothing to label. */
   field: string;
+  /** **Points**, not pixels. MapLibre's `text-size` is in pixels, so the
+   *  compiler converts at 96/72 — and the render service scales again for its
+   *  2x output rather than baking a device ratio in here. */
   size: number;
+  sizeMode: LabelSizeMode;
   color: string;
+  /** Zero by default: halos muddy dense line work, and the imported labelling
+   *  spec calls for none. Kept as a field because over a colour-filled grid a
+   *  halo is the only thing that keeps text legible. See `08` §2.4. */
   haloColor: string;
   haloWidth: number;
+  /** A MapLibre *font stack*, e.g. `['Oswald Bold']`. Bold and italic are
+   *  separate stacks, not properties — see `08` §2.3. */
   font: string[];
   placement: 'point' | 'line' | 'line-center';
+  /** Sets `text-allow-overlap` **and** `text-ignore-placement`. Both, or the
+   *  layer keeps its own labels but still displaces another layer's. */
   allowOverlap: boolean;
+  /** Zoom visibility, compiled to the layer's `minzoom`/`maxzoom`. With
+   *  collision off this is the user's only thinning control. */
+  minZoom?: number;
+  maxZoom?: number;
 }
 
 export type SymbolSpec = PointSymbol | LineSymbol | PolygonSymbol | LabelSymbol;

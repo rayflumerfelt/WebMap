@@ -97,6 +97,15 @@ export function compileStyle(options: CompileStyleOptions): CompiledStyle {
 
   const ordered = [...options.layers].sort(byDrawOrder);
 
+  // Labels are held back and appended after every object layer, so nothing a
+  // later layer draws can cover a label. Within the group they keep draw
+  // order, so a label still sits above its own layer's neighbours.
+  //
+  // The basemap is deliberately excluded: its layers are already beneath
+  // everything, and hoisting its place names above a geologist's filled grid
+  // would put a town name on top of the map's subject.
+  const labelLayers: CompiledLayer[] = [];
+
   for (const layer of ordered) {
     if (layer.visible === false) {
       // Omitted entirely rather than emitted with `visibility: none`. A hidden
@@ -116,9 +125,12 @@ export function compileStyle(options: CompileStyleOptions): CompiledStyle {
     });
 
     for (const compiledLayer of compiled) {
-      layers.push(withLayerOverrides(compiledLayer, layer));
+      const withOverrides = withLayerOverrides(compiledLayer, layer);
+      (withOverrides.type === 'symbol' ? labelLayers : layers).push(withOverrides);
     }
   }
+
+  layers.push(...labelLayers);
 
   return {
     version: 8,

@@ -232,31 +232,113 @@ def _layers_for(
     if geometry == "polygon":
         return _polygon_layers(symbol, o, layer_id, overrides)
     if geometry == "label":
-        return [
-            _with_source(
-                {
-                    "id": f"{layer_id}-label",
-                    "type": "symbol",
-                    "layout": {
-                        "text-field": ["get", symbol["field"]],
-                        "text-size": symbol["size"],
-                        "text-font": symbol["font"],
-                        "symbol-placement": symbol["placement"],
-                        "text-allow-overlap": symbol["allowOverlap"],
-                    },
-                    "paint": {
-                        "text-color": symbol["color"],
-                        "text-halo-color": symbol["haloColor"],
-                        "text-halo-width": symbol["haloWidth"],
-                        **overrides,
-                    },
-                },
-                o,
-            )
-        ]
+        return [_with_source(_label_layer(symbol, layer_id, overrides), o)]
     raise InvalidSymbology(
         f"Unknown symbol geometry {geometry!r}. Expected point, line, polygon or label."
     )
+
+
+#: CSS points to pixels. A cartographer specifies points; `text-size` is in
+#: pixels, and the two differ by enough to matter at label sizes.
+PT_TO_PX = 96 / 72
+
+#: How far a reference-scale ramp reaches either side of its reference zoom.
+#: `interpolate` clamps outside its stop range rather than extrapolating, so
+#: the span has to cover every zoom the map will reach; MapLibre's maximum is
+#: 24, so 24 levels either way can never be hit.
+#:
+#: The stops are written *relative to the reference zoom* so every multiplier
+#: is an exact power of two. Computing them as `2 ** (stop - reference)` would
+#: put a non-integer exponent through libm in two languages, and the parity
+#: vectors compare bytes.
+REFERENCE_SPAN = 24
+
+#: `text-size` is a *layout* property. A graduated symbology varies size, and
+#: routing that override into `paint` produces a style MapLibre rejects
+#: outright — "unknown property text-size" — so the whole map fails to load.
+SYMBOL_LAYOUT_OVERRIDES = frozenset({"text-size", "text-font", "text-field"})
+
+
+def _text_size(symbol: dict[str, Any]) -> Any:
+    """`text-size` for a label, in pixels.
+
+    Ground-constant text is an `interpolate` with `["exponential", 2]` on
+    zoom, which is **exact** rather than an approximation: MapLibre's
+    exponential factor is `(b**(z-z0) - 1) / (b**(z1-z0) - 1)`, and with
+    `b = 2` and stops a power of two apart that reduces to
+    `size * 2**(z - reference)` — measured to zero relative error at integer
+    and fractional zooms alike.
+    """
+    px = symbol["size"] * PT_TO_PX
+    mode = symbol.get("sizeMode")
+    if not isinstance(mode, dict) or "mode" not in mode:
+        raise InvalidSymbology(
+            "A label needs a sizeMode saying how it behaves as the map zooms: "
+            "{'mode': 'fixed'} holds it at one size on screen, "
+            "{'mode': 'scale-with-map', 'referenceZoom': 12} holds it at one "
+            "size on the ground."
+        )
+    if mode["mode"] == "fixed":
+        return px
+    if mode["mode"] != "scale-with-map":
+        raise InvalidSymbology(
+            f"Unknown label sizeMode {mode['mode']!r}. Expected 'fixed', which "
+            f"holds the label at one size on screen, or 'scale-with-map', "
+            f"which holds it at one size on the ground."
+        )
+    if "referenceZoom" not in mode:
+        raise InvalidSymbology(
+            "A 'scale-with-map' label needs a referenceZoom — the zoom at "
+            "which its size is the size given. Without one there is nothing "
+            "to hold the ground size against."
+        )
+    reference = mode["referenceZoom"]
+    factor = 2.0**REFERENCE_SPAN
+    return [
+        "interpolate",
+        ["exponential", 2],
+        ["zoom"],
+        reference - REFERENCE_SPAN,
+        px / factor,
+        reference,
+        px,
+        reference + REFERENCE_SPAN,
+        px * factor,
+    ]
+
+
+def _label_layer(
+    symbol: dict[str, Any], layer_id: str, overrides: dict[str, Any]
+) -> dict[str, Any]:
+    layout_overrides = {k: v for k, v in overrides.items() if k in SYMBOL_LAYOUT_OVERRIDES}
+    paint_overrides = {k: v for k, v in overrides.items() if k not in SYMBOL_LAYOUT_OVERRIDES}
+
+    layer: dict[str, Any] = {"id": f"{layer_id}-label", "type": "symbol"}
+    if symbol.get("minZoom") is not None:
+        layer["minzoom"] = symbol["minZoom"]
+    if symbol.get("maxZoom") is not None:
+        layer["maxzoom"] = symbol["maxZoom"]
+
+    layer["layout"] = {
+        "text-field": ["get", symbol["field"]],
+        "text-size": _text_size(symbol),
+        "text-font": symbol["font"],
+        "symbol-placement": symbol["placement"],
+        # Both flags, deliberately. `text-allow-overlap` stops this layer's own
+        # labels being dropped; `text-ignore-placement` keeps them out of the
+        # collision index so they cannot displace another layer's. Setting only
+        # the first still lets a section grid delete the labels above it.
+        "text-allow-overlap": symbol["allowOverlap"],
+        "text-ignore-placement": symbol["allowOverlap"],
+        **layout_overrides,
+    }
+    layer["paint"] = {
+        "text-color": symbol["color"],
+        "text-halo-color": symbol["haloColor"],
+        "text-halo-width": symbol["haloWidth"],
+        **paint_overrides,
+    }
+    return layer
 
 
 def _line_layers(

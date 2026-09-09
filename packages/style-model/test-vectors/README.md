@@ -30,10 +30,10 @@ difference between a road casing and a hairline outline is which one is on top.
 
 ## Rules a hand-written vector depends on
 
-Two decisions are invisible in the specification but decide the last bit of a
-colour. They are recorded here because a vector cannot be written by hand
-without them, and because they are the two places the two languages would
-otherwise differ silently.
+Three decisions are invisible in the specification but decide the last bit of a
+number. They are recorded here because a vector cannot be written by hand
+without them, and because they are the places the two languages would otherwise
+differ silently.
 
 **Channel rounding is half away from zero.** Interpolating between stops whose
 channels differ by an odd number produces exact `.5` ties — two of the five
@@ -49,3 +49,16 @@ otherwise continuous ramp, and this rule makes the break sharp: values at and
 above it take the upper colour. It matches the `discrete` interpolation rule
 rather than contradicting it, and it removes any divide-by-zero case from the
 interpolation path.
+
+**A reference-scale label's size stops are exact powers of two.**
+`label_reference_scale` writes its stops *relative to the reference zoom* —
+`ref-24`, `ref`, `ref+24` — so the three size values are `size/2**24`, `size`
+and `size*2**24`. Every multiplier is exactly representable, and both languages
+produce identical doubles.
+
+Computing the stops as `pow(2, stop - reference)` would look equivalent and is
+not: a non-integer exponent goes through each language's `libm`, which is not
+required to round identically, and these vectors compare bytes. The span is 24
+because `interpolate` clamps outside its stop range instead of extrapolating
+and MapLibre's maximum zoom is 24, so the clamp is unreachable from any
+reference zoom.

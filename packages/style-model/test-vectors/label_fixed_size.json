@@ -1,0 +1,45 @@
+{
+  "name": "label_fixed_size",
+  "description": "A label at a fixed screen size — 9 pt stays 9 pt at every zoom, which is MapLibre's own default. Three things this pins: size is in POINTS and compiles to pixels at 96/72 (9 pt -> 12 px); allowOverlap sets BOTH text-allow-overlap and text-ignore-placement, because the first alone still lets this layer's labels displace another layer's; and the zoom window compiles to the layer's minzoom, not to a layout property.",
+  "symbology": {
+    "type": "single",
+    "symbol": {
+      "geometry": "label",
+      "field": "well_name",
+      "size": 9,
+      "sizeMode": { "mode": "fixed" },
+      "color": "#1a1a1a",
+      "haloColor": "#ffffff",
+      "haloWidth": 0,
+      "font": ["Oswald Regular"],
+      "placement": "point",
+      "allowOverlap": true,
+      "minZoom": 11
+    }
+  },
+  "palettes": {},
+  "source_id": "wells",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "wells-label",
+      "type": "symbol",
+      "source": "wells",
+      "source-layer": "features",
+      "minzoom": 11,
+      "layout": {
+        "text-field": ["get", "well_name"],
+        "text-size": 12,
+        "text-font": ["Oswald Regular"],
+        "symbol-placement": "point",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      "paint": {
+        "text-color": "#1a1a1a",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 0
+      }
+    }
+  ]
+}

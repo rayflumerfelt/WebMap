@@ -254,3 +254,68 @@ def test_a_missing_palette_is_named_rather_than_rendered_grey() -> None:
 
     with pytest.raises(InvalidSymbology, match="palette 'absent'"):
         compile_symbology(symbology, source_id="s", palettes={})
+
+
+# --- labels -----------------------------------------------------------------
+
+
+LABEL: dict[str, Any] = {
+    "geometry": "label",
+    "field": "well_name",
+    "size": 9,
+    "sizeMode": {"mode": "fixed"},
+    "color": "#1a1a1a",
+    "haloColor": "#ffffff",
+    "haloWidth": 0,
+    "font": ["Oswald Regular"],
+    "placement": "point",
+    "allowOverlap": True,
+}
+
+
+def test_a_label_without_a_size_mode_says_what_the_two_modes_mean() -> None:
+    """`CLAUDE.md` §8. A label is either fixed on screen or fixed on the
+    ground, and the difference is invisible in a still — so the error has to
+    say what each mode does rather than name the missing key."""
+    symbology = {
+        "type": "single",
+        "symbol": {k: v for k, v in LABEL.items() if k != "sizeMode"},
+    }
+
+    with pytest.raises(InvalidSymbology, match="one size on the ground"):
+        compile_symbology(symbology, source_id="s", palettes={})
+
+
+def test_a_ground_scaled_label_without_a_reference_zoom_is_refused() -> None:
+    """Without one there is no scale to hold the size against, and defaulting
+    to some zoom would produce text that is the wrong size everywhere while
+    looking deliberate."""
+    symbology = {
+        "type": "single",
+        "symbol": {**LABEL, "sizeMode": {"mode": "scale-with-map"}},
+    }
+
+    with pytest.raises(InvalidSymbology, match="referenceZoom"):
+        compile_symbology(symbology, source_id="s", palettes={})
+
+
+def test_varying_label_size_writes_to_layout_not_paint() -> None:
+    """`text-size` is a layout property. Routed into `paint` it makes MapLibre
+    reject the whole style — "unknown property text-size" — so the map does not
+    load at all, and the two compilers have to agree about that."""
+    symbology = {
+        "type": "graduated",
+        "field": "depth_ft",
+        "method": "equal_interval",
+        "classCount": 2,
+        "breaks": [1000],
+        "paletteId": "p",
+        "vary": "size",
+        "baseSymbol": LABEL,
+        "sizeRange": [8, 20],
+    }
+
+    layers = compile_symbology(symbology, source_id="s", palettes={"p": FLAT})
+
+    assert "text-size" in layers[0]["layout"]
+    assert "text-size" not in layers[0]["paint"]

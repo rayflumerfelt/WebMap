@@ -18,8 +18,8 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 Updated 2026-09-09 (Phase 4 in progress). A phase is complete only when every criterion
 passes; a criterion met with a caveat says so rather than being ticked quietly.
 
-Verified on this date against a live stack: 810 Python tests including the full integration
-suite, 295 TypeScript tests, and lint, formatting, typechecking and the package-boundary
+Verified on this date against a live stack: 861 Python tests including the full integration
+suite, 319 TypeScript tests, and lint, formatting, typechecking and the package-boundary
 contracts clean in both languages.
 
 | Phase | State |
@@ -317,9 +317,11 @@ fault is gridded with it.
 **Still owed by Phase 4:** universal kriging and cubic spline (`Method` has four members:
 ordinary kriging, minimum curvature, IDW, nearest); breakline-aware interpolation;
 **filled contour bands** — polygons between levels, for exporting and attributing the bands
-that a colour-filled grid only renders (`08` §5.2); `webmap_aggregate` and
-`webmap_fit_variogram`; the `aggregate` package, which is still an empty placeholder; and the
-worker's ingest, sync and export tasks.
+that a colour-filled grid only renders (`08` §5.2); **label anchors** — a per-layer point
+dataset of area centroids with a `polylabel` fallback, so a polygon's label stops moving
+between tiles and zooms (`08` §2.4); `webmap_aggregate` and `webmap_fit_variogram`; the
+`aggregate` package, which is still an empty placeholder; and the worker's ingest, sync and
+export tasks.
 
 **Risk.** Minimum curvature is now the only fault-aware interpolator, so a geologist who wants
 a kriged surface of a faulted field cannot have one. Mitigated by saying so at the point of
@@ -352,6 +354,9 @@ produces the same wrong surface with nothing said about it.
 - **Default basemaps** across the user / team / global tiers, keyed on presentation
 - **Formatting dialogs and shared controls** (`07` §6.2-6.3): colour modes, line, text,
   size-by-column, null colour, index-contour rules, live legend preview
+- **Label formatting** (`08` §2.4): the size-mode control and its reference zoom, the zoom
+  window that is the only thinning control once collision detection is off, and consuming the
+  precomputed anchor source Phase 4 produces
 - **Grid colouring** (`08` §5.2): interval bands snapped to the contour interval, gradient
   over a P5-P95 display range, and clip-to-polygon
 - **Ownership transfer** for a deactivated user's objects — the audited operation
@@ -372,6 +377,11 @@ produces the same wrong surface with nothing said about it.
 - [ ] An interval palette renders the exact colours it names, and a value outside every band
       clamps to an end colour rather than rendering transparent
 - [ ] The italic control is disabled for a family that has no italic
+- [ ] A reference-scale label covers the same ground distance at every zoom, and a fixed label
+      the same screen size — measured against MapLibre's expression engine, not eyeballed
+- [ ] Every label draws above every object layer, whatever the layer draw order
+- [ ] A polygon spanning a tile boundary keeps one label in one place while panning and
+      zooming — the failure precomputed anchors exist to prevent
 - [ ] Two basemaps share one layer; editing the layer changes both, and soft-deleting it is
       refused with both basemaps named
 - [ ] Duplicating a layer copies the row and references the same object — verified by storage

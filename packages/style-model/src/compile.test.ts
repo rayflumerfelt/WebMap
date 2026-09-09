@@ -13,10 +13,11 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { createPropertyExpression, validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 import { compileSymbology } from './compile.js';
 import type { CompiledLayer } from './compile.js';
 import { colourAt, sampleRamp } from './palette.js';
-import type { Palette, Symbology } from './symbology.js';
+import type { LabelSymbol, Palette, Symbology } from './symbology.js';
 
 interface Vector {
   name: string;
@@ -35,6 +36,32 @@ function loadVectors(): Vector[] {
     .filter((name) => name.endsWith('.json'))
     .sort()
     .map((name) => JSON.parse(readFileSync(join(VECTOR_DIR, name), 'utf-8')) as Vector);
+}
+
+/**
+ * The smallest valid style that can carry a vector's layers.
+ *
+ * The source type is inferred from what the layers ask for rather than
+ * declared in the vector: a raster layer needs a raster source, and a
+ * `source-layer` reference is only legal against a vector one. Declaring the
+ * wrong kind produces validation errors about the source that would be read as
+ * failures of the layers.
+ */
+function styleAround(vector: Vector, layers: CompiledLayer[]) {
+  const source = layers.some((layer) => layer.type === 'raster')
+    ? { type: 'raster' as const, tiles: ['https://tiles.test/{z}/{x}/{y}.png'], tileSize: 256 }
+    : vector.source_layer
+      ? { type: 'vector' as const, tiles: ['https://tiles.test/{z}/{x}/{y}.mvt'] }
+      : { type: 'geojson' as const, data: { type: 'FeatureCollection', features: [] } };
+
+  return {
+    version: 8 as const,
+    // Without this every symbol layer is a validation error, and labels are
+    // the thing most worth validating.
+    glyphs: 'https://webmap.test/glyphs/{fontstack}/{range}.pbf',
+    sources: { [vector.source_id]: source },
+    layers,
+  };
 }
 
 describe('compileSymbology', () => {
@@ -56,6 +83,28 @@ describe('compileSymbology', () => {
       });
 
       expect(layers).toEqual(vector.expected_layers);
+    },
+  );
+
+  it.each(vectors.map((v) => [v.name, v] as const))(
+    '%s compiles to something MapLibre accepts',
+    (_name, vector) => {
+      // `08-styling-palettes.md` §9. The vectors above check the compiled JSON
+      // against what a human wrote down; this checks it against the renderer.
+      // They catch different things: a layer can match its expected output
+      // exactly and still be rejected at load time, and MapLibre rejects a
+      // whole *style* rather than the offending layer — so one bad property
+      // means a blank map, not a wrong colour.
+      //
+      // A property in the wrong block is the case that motivated this. It
+      // reads correctly, survives review, and MapLibre refuses the style.
+      const layers = compileSymbology(vector.symbology, {
+        sourceId: vector.source_id,
+        ...(vector.source_layer ? { sourceLayer: vector.source_layer } : {}),
+        palettes: vector.palettes,
+      });
+
+      expect(validateStyleMin(styleAround(vector, layers) as never)).toEqual([]);
     },
   );
 
@@ -249,5 +298,124 @@ describe('graduated guards', () => {
     expect(() => compileSymbology(symbology, { sourceId: 's', palettes: {} })).toThrow(
       /palette 'absent'/,
     );
+  });
+});
+
+/**
+ * Labels, checked against MapLibre's own machinery. `08-styling-palettes.md` §2.2.
+ *
+ * The shared vectors above pin the compiled JSON. These pin what MapLibre
+ * does with it — the two label failures that produce no error message: a
+ * layout property emitted into `paint`, which invalidates the whole style,
+ * and a size ramp that is subtly not ground-constant, which nobody can see.
+ */
+describe('labels', () => {
+  const label = (overrides: Partial<LabelSymbol> = {}): LabelSymbol => ({
+    geometry: 'label',
+    field: 'name',
+    size: 12,
+    sizeMode: { mode: 'fixed' },
+    color: '#1a1a1a',
+    haloColor: '#ffffff',
+    haloWidth: 0,
+    font: ['Oswald Regular'],
+    placement: 'point',
+    allowOverlap: true,
+    ...overrides,
+  });
+
+  const RAMP: Palette = {
+    id: 'viridis',
+    name: 'Viridis',
+    isContinuous: true,
+    interpolation: 'linear',
+    stops: [
+      { position: 0, color: '#440154' },
+      { position: 1, color: '#fde725' },
+    ],
+  };
+
+  const styleAround = (layers: CompiledLayer[]) => ({
+    version: 8 as const,
+    glyphs: 'https://webmap.test/glyphs/{fontstack}/{range}.pbf',
+    sources: {
+      wells: { type: 'geojson' as const, data: { type: 'FeatureCollection', features: [] } },
+    },
+    layers,
+  });
+
+  it('emits a style MapLibre accepts', () => {
+    const layers = compileSymbology(
+      { type: 'single', symbol: label({ sizeMode: { mode: 'scale-with-map', referenceZoom: 12 } }) },
+      { sourceId: 'wells', palettes: {} },
+    );
+
+    expect(validateStyleMin(styleAround(layers) as never)).toEqual([]);
+  });
+
+  it('varies size through layout, not paint', () => {
+    // `text-size` is a LAYOUT property. Graduated symbology varies size, and
+    // an override routed into `paint` makes MapLibre reject the entire style
+    // — "unknown property text-size" — so the map does not load at all. It
+    // did exactly that, because no test built a label.
+    const layers = compileSymbology(
+      {
+        type: 'graduated',
+        field: 'depth_ft',
+        paletteId: 'viridis',
+        classCount: 3,
+        method: 'equal-interval',
+        breaks: [1000, 2000],
+        vary: 'size',
+        baseSymbol: label(),
+        sizeRange: [8, 20],
+      },
+      { sourceId: 'wells', palettes: { viridis: RAMP } },
+    );
+
+    const [layer] = layers;
+    expect(layer?.layout?.['text-size']).toBeDefined();
+    expect(layer?.paint?.['text-size']).toBeUndefined();
+    expect(validateStyleMin(styleAround(layers) as never)).toEqual([]);
+  });
+
+  it('holds a reference-scale label at a constant size on the ground', () => {
+    // The user-visible promise: 12 pt at zoom 12 means the text covers the
+    // same distance at every zoom. Evaluated through MapLibre's own
+    // expression engine rather than re-implementing the interpolation here,
+    // because the thing under test is agreement with MapLibre.
+    const [layer] = compileSymbology(
+      {
+        type: 'single',
+        symbol: label({ size: 12, sizeMode: { mode: 'scale-with-map', referenceZoom: 12 } }),
+      },
+      { sourceId: 'wells', palettes: {} },
+    );
+
+    const expression = createPropertyExpression(layer?.layout?.['text-size'], {
+      type: 'number',
+      'property-type': 'data-driven',
+      expression: { interpolated: true, parameters: ['zoom', 'feature'] },
+    } as never);
+    if (expression.result !== 'success') throw new Error('text-size is not a valid expression');
+
+    // 12 pt is 16 px at 96/72, and one zoom level is a factor of two.
+    for (const zoom of [4, 11, 12, 12.5, 13, 20]) {
+      expect(expression.value.evaluate({ zoom }, undefined as never)).toBeCloseTo(
+        16 * Math.pow(2, zoom - 12),
+        10,
+      );
+    }
+  });
+
+  it('holds a fixed label at a constant size on screen', () => {
+    const [layer] = compileSymbology(
+      { type: 'single', symbol: label({ size: 12 }) },
+      { sourceId: 'wells', palettes: {} },
+    );
+
+    // A plain number, not an expression: nothing to evaluate and nothing to
+    // drift. 12 pt at 96/72 is 16 px, at every zoom.
+    expect(layer?.layout?.['text-size']).toBe(16);
   });
 });
