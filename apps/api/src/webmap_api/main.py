@@ -19,6 +19,7 @@ from webmap_api.db import assert_rls_enforced, create_engine
 from webmap_api.db.session import assert_policies_present, unscoped_session
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
+from webmap_api.routes.projects import router as projects_router
 from webmap_api.routes.uploads import router as uploads_router
 from webmap_core.exceptions import (
     LimitExceeded,
@@ -159,6 +160,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ready"}
 
     app.include_router(auth_router)
+    app.include_router(projects_router)
     app.include_router(uploads_router)
     app.include_router(datasets_router)
 

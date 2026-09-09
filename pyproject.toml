@@ -94,6 +94,14 @@ ignore = [
     "N818",
 ]
 
+# RUF001 flags characters that resemble ASCII. These four are deliberate
+# typography in strings a geologist reads: an en dash for a range, the
+# multiplication sign for grid dimensions, an em dash for absence, and an
+# ellipsis for truncation. `04-mcp-server.md` §4.1's own example response
+# uses 'showing 1–12'. Substituting ASCII would make the output worse to
+# read in order to satisfy a rule aimed at homoglyph attacks in identifiers.
+allowed-confusables = ["–", "×", "—", "…"]
+
 [tool.ruff.lint.isort]
 # Without this, isort files our own packages under third-party and the import
 # blocks churn every time someone runs --fix.
@@ -145,7 +153,7 @@ files = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["triangle.*", "pyamg.*", "gstools.*", "skgstat.*"]
+module = ["triangle.*", "pyamg.*", "gstools.*", "skgstat.*", "msal.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
