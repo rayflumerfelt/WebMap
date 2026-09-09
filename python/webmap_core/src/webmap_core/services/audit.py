@@ -8,6 +8,7 @@ and with several users, *whose* Claude. It comes from the request channel, not
 from anything the caller asserts about itself.
 """
 
+import json
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -74,8 +75,6 @@ async def record(
     happened. It participates in the caller's transaction, so an action whose
     audit cannot be written is not committed either.
     """
-    from psycopg.types.json import Jsonb  # local: only this module needs it
-
     user_id = actor_user_id if principal is None else principal.user_id
     channel = actor_channel if principal is None else principal.channel.value
     if channel is None:
@@ -101,7 +100,10 @@ async def record(
             "action": action.value,
             "object_type": object_type,
             "object_id": object_id,
-            "detail": Jsonb(detail) if detail is not None else None,
+            # Serialised here and cast in SQL rather than handed over as a
+            # dict: asyncpg wants a string for jsonb, psycopg wants its own
+            # Jsonb wrapper, and this is the one form both accept.
+            "detail": json.dumps(detail) if detail is not None else None,
             "ip": ip_address,
         },
     )

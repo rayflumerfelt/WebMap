@@ -23,7 +23,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().migration_database_url)
+# A caller that has already set the URL wins — the integration test fixture
+# builds a throwaway database and points Alembic at it. Otherwise fall back to
+# settings, which is every ordinary invocation.
+if not config.get_main_option("sqlalchemy.url", None):
+    config.set_main_option("sqlalchemy.url", get_settings().migration_database_url)
 
 target_metadata = None
 

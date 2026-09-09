@@ -10,6 +10,7 @@ registry row; it has no reach into object storage (`02` §4.1), so
 and must never be bypassed by reading `parquet_key` off a row directly.
 """
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -268,8 +269,6 @@ async def create_dataset(
     at the database too, so a request that tries to create an object owned by
     someone else fails twice.
     """
-    from psycopg.types.json import Jsonb
-
     result = await conn.execute(
         text(
             """
@@ -283,7 +282,7 @@ async def create_dataset(
                 :project_id, :name, :description, :kind, :geometry_kind,
                 :connector, :source_uri, :source_checksum, 'ready',
                 :storage_srid, :bbox_4326, :parquet_key, 1, :feature_count,
-                :attribute_schema, :cog_key, :caption,
+                CAST(:attribute_schema AS jsonb), :cog_key, :caption,
                 :owner_user_id, :owner_team_id, :visibility)
             RETURNING id
             """
@@ -301,7 +300,7 @@ async def create_dataset(
             "bbox_4326": bbox_4326,
             "parquet_key": parquet_key,
             "feature_count": feature_count,
-            "attribute_schema": Jsonb(attribute_schema) if attribute_schema else None,
+            "attribute_schema": (json.dumps(attribute_schema) if attribute_schema else None),
             "cog_key": cog_key,
             "caption": caption,
             "owner_user_id": principal.user_id,

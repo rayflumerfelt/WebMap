@@ -31,6 +31,10 @@ jobs:
       WEBMAP_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/webmap
       WEBMAP_MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/webmap
       WEBMAP_REDIS_URL: redis://localhost:6379/0
+      # The integration suite builds its own throwaway database and the two
+      # roles production uses. Without this it would silently *skip* in CI —
+      # the one place the RLS tests most need to run.
+      WEBMAP_TEST_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -41,6 +45,9 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest -m "not slow" --cov
+      # Fail rather than skip if the integration tests did not run: a
+      # skipped RLS suite looks identical to a passing one in the summary.
+      - run: uv run pytest -m integration -q --no-header -p no:randomly
       # Phase 0 acceptance: migrations apply *and roll back* cleanly. The
       # round trip is the test — a one-way migration is discovered at the
       # worst possible moment.
