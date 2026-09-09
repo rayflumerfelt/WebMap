@@ -152,27 +152,43 @@ export function useTileToken(api: ApiClient, datasetId: string | null) {
   });
 }
 
-export interface FeatureCollection {
-  type: 'FeatureCollection';
-  features: Array<{ properties: Record<string, unknown> | null }>;
+export interface AttributePage {
+  items: Array<Record<string, unknown>>;
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
 }
 
 /**
- * A layer's attributes, for the attribute table.
+ * A page of a layer's attributes, without geometry.
  *
- * Uses the GeoJSON endpoint, which **refuses** above the switch threshold
- * rather than truncating (`06-rendering.md` §7.1). That refusal is honoured
- * here rather than worked around: a table showing the first 5,000 of 500,000
- * features silently would be a table someone draws a conclusion from. Above
- * the threshold the panel says so instead, and paging comes with the server
- * support for it.
+ * Not the GeoJSON endpoint: that refuses above the switch threshold rather
+ * than truncating (06-rendering.md §7.1), which is right for a map source and
+ * left a 500k-feature layer with no attribute view at all. This pages, and
+ * reads no geometry — a column of porosities costs a column of porosities
+ * rather than megabytes of coordinates.
  */
-export function useFeatures(api: ApiClient, datasetId: string | null, enabled: boolean) {
+export function useAttributes(
+  api: ApiClient,
+  datasetId: string | null,
+  options: { offset?: number; limit?: number; orderBy?: string; descending?: boolean } = {},
+) {
+  const { offset = 0, limit = 500, orderBy, descending } = options;
+
   return useQuery({
-    queryKey: ['features', datasetId],
-    queryFn: () => api.get<FeatureCollection>(`/features/${datasetId}.geojson`),
-    enabled: Boolean(datasetId) && enabled,
-    // Feature data is large and does not change unless the layer is edited.
+    queryKey: ['attributes', datasetId, offset, limit, orderBy, descending],
+    queryFn: () =>
+      api.get<AttributePage>(`/features/${datasetId}/attributes`, {
+        offset,
+        limit,
+        ...(orderBy ? { order_by: orderBy } : {}),
+        ...(descending ? { descending: 'true' } : {}),
+      }),
+    enabled: Boolean(datasetId),
+    // Keeps the previous page on screen while the next loads, so paging does
+    // not flash an empty table between pages.
+    placeholderData: (previous) => previous,
     staleTime: 5 * 60_000,
     retry: false,
   });

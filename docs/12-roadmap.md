@@ -69,10 +69,9 @@ Outstanding:
   and layer tree + symbology + attribute table all usable at 1920x1080 without
   occluding the map. Both need Playwright and real data; neither is assertable
   from a unit test.
-- Attribute paging. The GeoJSON endpoint refuses above 5,000 features rather
-  than truncating (`06` §7.1), and the panel passes that refusal on rather
-  than working around it — so a large layer currently has no table at all.
-  Paging needs server support that is not written.
+- Nothing else. Attribute paging landed as `GET /features/{id}/attributes`,
+  which reads no geometry and orders totally, so a 500k-feature layer has a
+  usable table.
 
 ### Deliberately empty
 

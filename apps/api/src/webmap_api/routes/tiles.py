@@ -247,6 +247,55 @@ async def feature_collection(
     )
 
 
+@router.get("/features/{dataset_id}/attributes")
+async def feature_attributes(
+    request: Request,
+    settings: AppSettings,
+    dataset_id: UUID,
+    principal: Annotated[Principal, Depends(tile_principal)],
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 500,
+    order_by: Annotated[str | None, Query(description="Attribute to sort by")] = None,
+    descending: bool = False,
+) -> dict[str, Any]:
+    """A page of a layer's attributes, without geometry.
+
+    The GeoJSON endpoint refuses above the switch threshold rather than
+    truncating, which is right for a map source and useless for a table — it
+    left a 500k-feature layer with no attribute view at all. This pages
+    instead, and reads no geometry, so a column of porosities costs a column of
+    porosities rather than megabytes of coordinates.
+    """
+    from webmap_geo.attributes import feature_attributes as read_attributes
+    from webmap_geo.dataplane import ObjectStore
+
+    async with principal_session(request.app.state.engine, principal) as conn:
+        key, _ = await service.resolve_feature_object(conn, principal, dataset_id)
+
+    store = ObjectStore(
+        endpoint=settings.s3_endpoint.removeprefix("http://").removeprefix("https://"),
+        access_key=settings.s3_access_key.get_secret_value(),
+        secret_key=settings.s3_secret_key.get_secret_value(),
+        region=settings.s3_region,
+        use_ssl=settings.s3_use_ssl,
+    )
+    page = read_attributes(
+        f"s3://{settings.s3_bucket}/{key}",
+        store,
+        offset=offset,
+        limit=limit,
+        order_by=order_by,
+        descending=descending,
+    )
+    return {
+        "items": page.items,
+        "total": page.total,
+        "offset": page.offset,
+        "limit": page.limit,
+        "has_more": page.has_more,
+    }
+
+
 @router.get("/cog/{dataset_id}/{z}/{x}/{y}.png")
 async def raster_tile(
     request: Request,
