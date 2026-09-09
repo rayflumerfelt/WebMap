@@ -14,6 +14,7 @@ dataset, reachable by anything that could make it render.
 from __future__ import annotations
 
 import base64
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -69,9 +70,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = BrowserPool()
     await pool.start()
     app.state.pool = pool
-    app.state.allowed_hosts = DEFAULT_ALLOWED_HOSTS
+    # Read from the environment so a deployment can name its own hosts, and
+    # defaulted to the internal names so one that forgets fetches nothing
+    # rather than everything.
+    configured = os.environ.get("WEBMAP_RENDER_ALLOWED_HOSTS", "").strip()
+    app.state.allowed_hosts = (
+        frozenset(h.strip() for h in configured.split(",") if h.strip())
+        if configured
+        else DEFAULT_ALLOWED_HOSTS
+    )
     app.state.shell_url = SHELL_PATH.as_uri()
-    log.info("render_service_ready", shell=str(SHELL_PATH))
+    log.info(
+        "render_service_ready",
+        shell=str(SHELL_PATH),
+        allowed_hosts=sorted(app.state.allowed_hosts),
+    )
     try:
         yield
     finally:

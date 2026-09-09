@@ -132,7 +132,13 @@ async def render(
         await install_guards(page, allowed_hosts, auth_token, failed)
         await page.goto(shell_url)
 
-        await page.evaluate("(s) => window.renderMap(s)", spec.to_page_spec())
+        # **Started, not awaited.** `renderMap` returns a promise that resolves
+        # when the map settles; awaiting it here would block `page.evaluate`
+        # indefinitely for a map that never settles — before the bounded wait
+        # below ever runs. That turned a thirty-second timeout into an
+        # unbounded hang, which presents as a render request that never
+        # returns. The braces are what discard the promise.
+        await page.evaluate("(s) => { window.renderMap(s); }", spec.to_page_spec())
 
         try:
             await page.wait_for_function(

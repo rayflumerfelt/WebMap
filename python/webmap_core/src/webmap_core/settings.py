@@ -64,9 +64,22 @@ class Settings(BaseSettings):
     internal_api_base: str = "http://api:8000"
     titiler_url: str = "http://localhost:8001"
     render_url: str = "http://localhost:8002"
+    #: Hosts the render browser may fetch from (`03-auth-security.md` §7.1).
+    #: Configurable because the names differ per deployment — but the *default*
+    #: is the internal names, so a deployment that forgets to set it fetches
+    #: nothing rather than everything.
+    render_allowed_hosts: str = (
+        "tiles.webmap.internal,titiler.webmap.internal,static.webmap.internal"
+    )
     # Glyphs and sprites for the render shell. Must be an allowlisted host in
     # `apps/render/security.py` or every label renders as a box.
-    internal_static: str = "http://localhost:8000/static"
+    #
+    # **Empty by default, and that is deliberate.** Naming an endpoint that
+    # does not serve glyphs makes every render record a failed request, which
+    # reads as "part of this map may be incomplete" when nothing is. A
+    # deployment that wants labels sets this; one that does not gets no labels
+    # and no phantom warnings.
+    internal_static: str = ""
 
     # --- Identity -----------------------------------------------------------
     #

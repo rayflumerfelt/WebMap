@@ -18,7 +18,9 @@ from the dataset registry at render time, never inferred.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 from sqlalchemy import text
@@ -40,6 +42,8 @@ async def create_render(
     height: int,
     scale_factor: int,
     size_preset: str,
+    style: dict[str, Any],
+    extent_4326: tuple[float, float, float, float],
     metadata: dict[str, Any],
     session_id: UUID | None = None,
     job_id: UUID | None = None,
@@ -49,6 +53,16 @@ async def create_render(
     visibility: Visibility = Visibility.TEAM,
 ) -> UUID:
     """Record a render.
+
+    `style_json` is stored because it is what makes a render reproducible: six
+    months later, "why does this map look like that" is answerable only if the
+    style that produced it survived.
+
+    **With its credentials removed.** The assembled style carries a scoped tile
+    token per layer, and a token is a credential — short-lived, but this row is
+    not, and it is readable by everyone with viewer access to the render, which
+    is a wider audience than the token's holder. `redact_style` strips them;
+    what remains still names every layer, source and paint property.
 
     `failed_requests` is stored rather than logged and forgotten
     (`06-rendering.md` §5.1): a map with a hole in it looks like sparse data,
@@ -62,12 +76,14 @@ async def create_render(
             """
             INSERT INTO render (
                 session_id, job_id, image_key, width, height, scale_factor,
-                size_preset, metadata, caption, owner_user_id, owner_team_id,
-                visibility)
+                size_preset, style_json, extent_4326, metadata, caption,
+                failed_requests, owner_user_id, owner_team_id, visibility)
             VALUES (
                 :session_id, :job_id, :image_key, :width, :height,
-                :scale_factor, :size_preset, CAST(:metadata AS jsonb), :caption,
-                :owner_user_id, :owner_team_id, CAST(:visibility AS visibility_t))
+                :scale_factor, :size_preset, CAST(:style_json AS jsonb),
+                :extent_4326, CAST(:metadata AS jsonb), :caption,
+                CAST(:failed_requests AS jsonb), :owner_user_id, :owner_team_id,
+                CAST(:visibility AS visibility_t))
             RETURNING id
             """
         ),
@@ -79,14 +95,11 @@ async def create_render(
             "height": height,
             "scale_factor": scale_factor,
             "size_preset": size_preset,
-            "metadata": json.dumps(
-                {
-                    **metadata,
-                    "preview_key": preview_key,
-                    "failed_requests": failed_requests or [],
-                }
-            ),
+            "style_json": json.dumps(redact_style(style)),
+            "extent_4326": list(extent_4326),
+            "metadata": json.dumps({**metadata, "preview_key": preview_key}),
             "caption": caption,
+            "failed_requests": json.dumps(failed_requests or []),
             "owner_user_id": principal.user_id,
             "owner_team_id": owner_team_id,
             "visibility": visibility.value,
@@ -109,6 +122,42 @@ async def create_render(
     return render_id
 
 
+def redact_style(style: dict[str, Any]) -> dict[str, Any]:
+    """A copy of the style with credentials removed.
+
+    Scoped tile tokens ride in the query string of every source URL. They are
+    short-lived; the row is not, and it outlives them by years. What is left
+    still names every source, layer and paint property — enough to answer "why
+    does this map look like that" without leaving a credential in a table.
+    """
+    redacted = deepcopy(style)
+    for source in redacted.get("sources", {}).values():
+        if not isinstance(source, dict):
+            continue
+        for key in ("url", "data"):
+            if isinstance(source.get(key), str):
+                source[key] = _strip_token(source[key])
+        if isinstance(source.get("tiles"), list):
+            source["tiles"] = [
+                _strip_token(url) if isinstance(url, str) else url for url in source["tiles"]
+            ]
+    return redacted
+
+
+def _strip_token(url: str) -> str:
+    parsed = urlsplit(url)
+    if not parsed.query:
+        return url
+    # `keep_blank_values` so a parameter that carried an empty value survives
+    # as itself rather than vanishing, which would change the URL's shape.
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key != "token"
+    ]
+    return urlunsplit(parsed._replace(query=urlencode(kept)))
+
+
 async def get_render(
     conn: AsyncConnection, principal: Principal, render_id: UUID
 ) -> dict[str, Any]:
@@ -119,7 +168,8 @@ async def get_render(
         text(
             """
             SELECT id, session_id, job_id, image_key, width, height,
-                   scale_factor, size_preset, metadata, caption, created_at
+                   scale_factor, size_preset, style_json, extent_4326, metadata,
+                   caption, failed_requests, created_at
             FROM render WHERE id = :id AND deleted_at IS NULL
             """
         ),
@@ -138,7 +188,9 @@ async def get_render(
         metadata = json.loads(metadata)
     detail["metadata"] = metadata
     detail["preview_key"] = metadata.get("preview_key")
-    detail["failed_requests"] = metadata.get("failed_requests", [])
+    for key in ("style_json", "failed_requests"):
+        if isinstance(detail.get(key), str):
+            detail[key] = json.loads(detail[key])
     return detail
 
 
@@ -206,4 +258,4 @@ def caption_for(metadata: dict[str, Any]) -> str:
     return sentence
 
 
-__all__ = ["caption_for", "create_render", "get_render", "list_renders"]
+__all__ = ["caption_for", "create_render", "get_render", "list_renders", "redact_style"]

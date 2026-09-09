@@ -66,13 +66,29 @@ window.renderMap = async function renderMap(spec) {
     // rendering is queued. Screenshotting before it yields a half-drawn map,
     // and the failure is *intermittent*, which makes it miserable to debug.
     // Do not substitute 'load'.
-    await new Promise((resolve) => {
+    //
+    // The race against a timer is not belt-and-braces. A source that fails
+    // outright can leave the map never reaching idle at all, and without this
+    // the shell would sit there while the service waited on a flag that never
+    // gets set — a partial map with a recorded reason is far more useful than
+    // a request that never returns.
+    const settled = new Promise((resolve) => {
       if (map.loaded() && map.areTilesLoaded()) {
-        resolve();
+        resolve('idle');
         return;
       }
-      map.once('idle', resolve);
+      map.once('idle', () => resolve('idle'));
     });
+    const expired = new Promise((resolve) =>
+      setTimeout(() => resolve('timeout'), spec.settleTimeoutMs || 20000),
+    );
+    if ((await Promise.race([settled, expired])) === 'timeout') {
+      window.__failedRequests.push({
+        url: null,
+        reason: 'settle_timeout',
+        message: 'The map did not reach a settled state; the image may be incomplete.',
+      });
+    }
 
     // The overlay's fonts must be settled too. A legend screenshotted
     // mid-font-swap renders in a fallback face, which is a large enough

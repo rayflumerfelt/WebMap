@@ -62,13 +62,22 @@ async def build_style(
     style: dict[str, Any] = {
         "version": 8,
         "name": "webmap-render",
-        # MapLibre renders no label at all without glyphs, and says nothing
-        # about why — the labels are simply absent.
-        "glyphs": f"{static_base}/glyphs/{{fontstack}}/{{range}}.pbf",
-        "sprite": f"{static_base}/sprite",
         "sources": {},
         "layers": [],
     }
+
+    # **Named only when a static endpoint is configured.** Pointing at one that
+    # does not exist makes MapLibre fetch it, fail, and record the failure —
+    # which then reads to a geologist as "part of this map may be incomplete"
+    # when nothing is missing at all. A phantom warning is worse than no
+    # warning, because it trains people to ignore the real ones.
+    #
+    # MapLibre renders no label without glyphs and says nothing about why, so a
+    # symbology with labels needs this set. That is a deployment requirement,
+    # not something this function can paper over.
+    if static_base:
+        style["glyphs"] = f"{static_base}/glyphs/{{fontstack}}/{{range}}.pbf"
+        style["sprite"] = f"{static_base}/sprite"
 
     if basemap:
         # Beneath everything. Not a layer in the caller's list, so it cannot be

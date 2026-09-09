@@ -26,11 +26,13 @@ x-app-env: &app-env
   WEBMAP_S3_ACCESS_KEY: minioadmin
   WEBMAP_S3_SECRET_KEY: minioadmin
   WEBMAP_TITILER_URL: http://titiler
-  WEBMAP_RENDER_URL: http://render:8002
+  # Interpolable so a developer running the render service on the host can
+  # point at it from .env, the same pattern the port bindings use.
+  WEBMAP_RENDER_URL: ${WEBMAP_RENDER_URL:-http://render:8002}
   # Where the render container's browser reaches this API. Not the public URL:
   # the browser resolves internal names, and the public host may not even be
   # reachable from inside the network.
-  WEBMAP_INTERNAL_API_BASE: http://api:8000
+  WEBMAP_INTERNAL_API_BASE: ${WEBMAP_INTERNAL_API_BASE:-http://api:8000}
   WEBMAP_LOG_LEVEL: INFO
 
 services:
@@ -148,6 +150,12 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    extra_hosts:
+      # Lets the API reach a service running on the developer's own machine —
+      # the render container is behind a profile and is ~2 GB, so running it
+      # on the host is the ordinary way to work on it. Docker Desktop provides
+      # this name already; declaring it makes a Linux host behave the same.
+      - "host.docker.internal:host-gateway"
 
   worker:
     build:

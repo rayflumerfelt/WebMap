@@ -100,7 +100,11 @@ async def create_render(
         token_for=token_for,
     )
 
-    bounds = tuple(body.bbox) if body.bbox else bounds_of(details)
+    bounds: tuple[float, float, float, float] | None = (
+        (body.bbox[0], body.bbox[1], body.bbox[2], body.bbox[3])
+        if body.bbox
+        else bounds_of(details)
+    )
     if bounds is None:
         raise NotFound(
             "None of these datasets has a known extent, so there is nowhere to "
@@ -154,6 +158,8 @@ async def create_render(
         height=result["height"],
         scale_factor=2 if body.size != "thumbnail" else 1,
         size_preset=body.size,
+        style=style,
+        extent_4326=bounds,
         metadata=metadata,
         session_id=body.session_id,
         caption=render_service.caption_for(metadata),
