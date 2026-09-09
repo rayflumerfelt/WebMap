@@ -13,12 +13,18 @@ from webmap_geo.interpolate.kriging import (
     cross_validate,
     ordinary_kriging,
 )
+from webmap_geo.interpolate.minimum_curvature import (
+    MinimumCurvatureResult,
+    minimum_curvature,
+)
 
 __all__ = [
     "DEFAULT_NEIGHBORS",
     "SOFT_CELL_LIMIT",
     "GridDefinition",
     "KrigingResult",
+    "MinimumCurvatureResult",
     "cross_validate",
+    "minimum_curvature",
     "ordinary_kriging",
 ]
