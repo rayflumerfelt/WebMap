@@ -9,7 +9,6 @@ duplicate and skip — and a reader paging through a table has no way to tell.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -194,7 +193,12 @@ def test_a_layer_with_no_attributes_pages_without_failing(
     """Geometry-only layers exist — a fault trace with nothing but a line."""
     path = tmp_path_factory.mktemp("bare") / "features.parquet"
     pq.write_table(
-        pa.table({"id": pa.array([1, 2], type=pa.int64()), "props": pa.array([None, None], type=pa.string())}),
+        pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "props": pa.array([None, None], type=pa.string()),
+            }
+        ),
         path,
     )
 

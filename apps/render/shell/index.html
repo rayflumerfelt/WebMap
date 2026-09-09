@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WebMap render shell</title>
+  <!--
+    `06-rendering.md` §4. A minimal local page, **never fetched from the
+    network**. Every asset here is beside this file, because the SSRF guards in
+    `03-auth-security.md` §7 assume the shell loads nothing of its own — a
+    stylesheet from a CDN would be a hole in that assumption that no validator
+    would see, since it never appears in a style document.
+  -->
+  <link rel="stylesheet" href="./maplibre-gl.css">
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; }
+    #root { position: relative; width: 100vw; height: 100vh; }
+    #map  { position: absolute; inset: 0; }
+    #overlay { position: absolute; inset: 0; pointer-events: none; }
+    /* No animation anywhere. A screenshot taken mid-transition is a
+       different image every run, which fails a visual golden for a reason
+       that has nothing to do with the map. */
+    * { transition: none !important; animation: none !important; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="map"></div>
+    <div id="overlay"></div>
+  </div>
+  <script src="./maplibre-gl.js"></script>
+  <script src="./overlay.js"></script>
+  <script src="./render.js"></script>
+</body>
+</html>
