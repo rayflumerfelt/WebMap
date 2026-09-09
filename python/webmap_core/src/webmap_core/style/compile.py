@@ -128,6 +128,20 @@ def _compile_graduated(s: dict[str, Any], o: _Options) -> list[CompiledLayer]:
             f"(08-styling-palettes.md §8)."
         )
 
+    out_of_order = next((i for i in range(1, len(breaks)) if breaks[i] <= breaks[i - 1]), 0)
+    if out_of_order:
+        # Breaks reach here from `classify()`, which already guarantees this —
+        # but also from a geologist typing them into the class table, which
+        # does not. A `step` expression with non-ascending stops is rejected by
+        # MapLibre outright, so the layer disappears instead of rendering
+        # wrongly, and nothing on screen says why.
+        raise InvalidSymbology(
+            f"Graduated breaks must ascend strictly; break {out_of_order} "
+            f"({breaks[out_of_order]:g}) is not above the one before it "
+            f"({breaks[out_of_order - 1]:g}). Edit the class table so each break "
+            f"is larger than the last."
+        )
+
     base = s["baseSymbol"]
     overrides: dict[str, Any] = {}
     vary = s.get("vary", "color")

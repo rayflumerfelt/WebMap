@@ -123,6 +123,21 @@ function compileGraduated(s: Graduated, o: CompileOptions): CompiledLayer[] {
     );
   }
 
+  const outOfOrder = s.breaks.findIndex((brk, i) => i > 0 && brk <= s.breaks[i - 1]!);
+  if (outOfOrder > 0) {
+    // Breaks reach here from `classify()`, which already guarantees this — but
+    // also from a geologist typing them into the class table, which does not.
+    // A `step` expression with non-ascending stops is rejected by MapLibre
+    // outright, so the layer disappears instead of rendering wrongly, and
+    // nothing on screen says why.
+    throw new Error(
+      `Graduated breaks must ascend strictly; break ${outOfOrder} ` +
+        `(${s.breaks[outOfOrder]}) is not above the one before it ` +
+        `(${s.breaks[outOfOrder - 1]}). Edit the class table so each break is ` +
+        `larger than the last.`,
+    );
+  }
+
   const overrides: Record<string, unknown[]> = {};
 
   if (s.vary === 'color' || s.vary === 'both') {

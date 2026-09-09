@@ -201,6 +201,33 @@ describe('graduated guards', () => {
     );
   });
 
+  it('refuses breaks that do not ascend', () => {
+    // Breaks reach the compiler from classify(), which guarantees this — and
+    // from a geologist typing them into the class table, which does not.
+    // MapLibre rejects a `step` with non-ascending stops outright, so the
+    // layer vanishes and nothing on screen says why.
+    const symbology: Symbology = {
+      type: 'graduated',
+      field: 'porosity',
+      method: 'manual',
+      classCount: 4,
+      breaks: [5, 15, 10],
+      paletteId: 'p',
+      vary: 'color',
+      baseSymbol: {
+        geometry: 'polygon',
+        fillColor: '#ccc',
+        fillOpacity: 1,
+        outlineColor: '#000',
+        outlineWidth: 0,
+      },
+    };
+
+    expect(() => compileSymbology(symbology, { sourceId: 's', palettes: { p: base } })).toThrow(
+      /must ascend strictly; break 2 \(10\)/,
+    );
+  });
+
   it('names the missing palette rather than rendering grey', () => {
     const symbology: Symbology = {
       type: 'graduated',

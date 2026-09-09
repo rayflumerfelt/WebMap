@@ -23,3 +23,15 @@ export type {
   Symbology,
 } from './symbology.js';
 export { entryCount } from './symbology.js';
+export { compileSymbology } from './compile.js';
+export type { CompiledLayer, CompileOptions } from './compile.js';
+export { colourAt, parseHex, sampleRamp, toHex } from './palette.js';
+export type { Hex } from './palette.js';
+export { classLabel, deriveLegend, legendEntryCount, prettyTicks } from './legend.js';
+export type {
+  ClassesLegend,
+  ColorbarLegend,
+  LayerMetadata,
+  LegendEntry,
+  LegendSpec,
+} from './legend.js';

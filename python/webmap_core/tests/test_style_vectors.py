@@ -220,6 +220,26 @@ def test_a_break_count_disagreeing_with_the_class_count_is_refused() -> None:
         compile_symbology(symbology, source_id="s", palettes={"p": FLAT})
 
 
+def test_breaks_that_do_not_ascend_are_refused() -> None:
+    """Breaks reach the compiler from classify(), which guarantees this — and
+    from a geologist typing them into the class table, which does not. MapLibre
+    rejects a `step` with non-ascending stops outright, so the layer vanishes
+    and nothing on screen says why."""
+    symbology = {
+        "type": "graduated",
+        "field": "porosity",
+        "method": "manual",
+        "classCount": 4,
+        "breaks": [5, 15, 10],
+        "paletteId": "p",
+        "vary": "color",
+        "baseSymbol": POLYGON,
+    }
+
+    with pytest.raises(InvalidSymbology, match=r"must ascend strictly; break 2 \(10\)"):
+        compile_symbology(symbology, source_id="s", palettes={"p": FLAT})
+
+
 def test_a_missing_palette_is_named_rather_than_rendered_grey() -> None:
     symbology = {
         "type": "graduated",

@@ -12,6 +12,14 @@ in `adr/0004-geoprocessing-owns-geometry.md`, and it is why this lives here
 rather than in `webmap_geo`.
 """
 
+from webmap_core.style.classify import (
+    METHODS,
+    ClassificationError,
+    classify,
+    jenks_breaks,
+    pretty_breaks,
+    std_dev_breaks,
+)
 from webmap_core.style.compile import CompiledLayer, InvalidSymbology, compile_symbology
 from webmap_core.style.palette import (
     InvalidPalette,
@@ -24,14 +32,20 @@ from webmap_core.style.palette import (
 )
 
 __all__ = [
+    "METHODS",
+    "ClassificationError",
     "CompiledLayer",
     "InvalidPalette",
     "InvalidSymbology",
     "Palette",
     "Stop",
+    "classify",
     "colour_at",
     "compile_symbology",
+    "jenks_breaks",
     "parse_hex",
+    "pretty_breaks",
     "sample_ramp",
+    "std_dev_breaks",
     "to_hex",
 ]
