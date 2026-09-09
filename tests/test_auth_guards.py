@@ -81,7 +81,7 @@ def test_build_verifier_selects_oidc_in_prod() -> None:
 def test_build_verifier_selects_dev_locally() -> None:
     from webmap_api.auth import build_verifier
 
-    verifier = build_verifier(Settings(environment="local", auth_mode="dev"))  # type: ignore[arg-type]
+    verifier = build_verifier(Settings(environment="local", auth_mode="dev"))
 
     assert verifier.mode == "dev"
 
@@ -95,7 +95,7 @@ def test_oidc_mode_without_a_discovery_url_refuses_to_start() -> None:
     """
     from webmap_api.auth.oidc import OidcTokenVerifier
 
-    settings = Settings(environment="local", auth_mode="oidc")  # type: ignore[arg-type]
+    settings = Settings(environment="local", auth_mode="oidc")
 
     with pytest.raises(ValueError) as excinfo:
         OidcTokenVerifier(settings)

@@ -26,9 +26,13 @@ EXTENT = (1_500_000.0, 10_400_000.0, 2_060_000.0, 10_800_000.0)
 
 def _points(n: int, seed: int = 7) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    return shapely.points(
+    # shapely.points returns a scalar Point for scalar input and an array
+    # otherwise. Only the array branch is reachable with array arguments, and
+    # narrowing it here is what keeps this helper's return type honest.
+    points = shapely.points(
         rng.uniform(EXTENT[0], EXTENT[2], n), rng.uniform(EXTENT[1], EXTENT[3], n)
     )
+    return np.asarray(points, dtype=object)
 
 
 def _write(

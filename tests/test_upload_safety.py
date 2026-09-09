@@ -209,7 +209,7 @@ def test_multiple_shapefiles_are_reported_rather_than_silently_dropped(
     tmp_path: Path,
 ) -> None:
     """Reading one of several without saying so loses data invisibly."""
-    entries = {}
+    entries: dict[str, bytes] = {}
     for stem in ("a", "b"):
         entries |= {f"{stem}.shp": b"1", f"{stem}.shx": b"2", f"{stem}.dbf": b"3"}
     archive = make_zip(tmp_path / "two.zip", entries)

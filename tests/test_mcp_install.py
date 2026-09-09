@@ -11,6 +11,7 @@ No database, no network, no client installed.
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,8 +22,8 @@ def target_for(tmp_path: Path) -> ClientTarget:
     return ClientTarget("test", tmp_path / "claude_config.json", "Test Client")
 
 
-def entry(**overrides: object) -> dict[str, object]:
-    kwargs: dict[str, object] = {
+def entry(**overrides: Any) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
         "api_url": "https://webmap.corp",
         "auth_mode": "broker",
         "client_id": "00000000-0000-0000-0000-000000000000",
@@ -31,7 +32,7 @@ def entry(**overrides: object) -> dict[str, object]:
         "executable": "/usr/local/bin/webmap-mcp",
     }
     kwargs.update(overrides)
-    return server_entry(**kwargs)  # type: ignore[arg-type]
+    return server_entry(**kwargs)
 
 
 # --- what the entry contains ------------------------------------------------

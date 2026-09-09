@@ -374,9 +374,11 @@ async def test_the_feature_object_is_readable_back_through_duckdb(
         use_ssl=False,
     )
     with connect(store) as duck:
-        count = duck.execute(
+        counted = duck.execute(
             f"SELECT count(*) FROM read_parquet('s3://{BUCKET}/{key}')"
-        ).fetchone()[0]
+        ).fetchone()
+    assert counted is not None, f"could not read s3://{BUCKET}/{key} back"
+    count = counted[0]
 
     assert count == result.feature_count == 50
 
