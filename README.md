@@ -67,6 +67,63 @@ make seed       # load synthetic Midland Basin data in EPSG:2277
 make check      # lint + typecheck + test, both languages
 ```
 
+### Running the application
+
+The stack in `make dev` is the backend. **The web application is not in Compose**
+— it runs from Vite, which proxies `/api` and `/auth` to the API on :8000:
+
+```bash
+pnpm --filter @webmap/web dev     # http://localhost:5173
+```
+
+Open `http://localhost:5173` and it renders the empty shell: panels, toolbar,
+status bar, no data. That is correct — the application is
+*session-oriented*, and the route that shows a map is `/s/<short_code>`, the
+link Claude hands out (`07-frontend.md` §8).
+
+To get one, sign in and create a session. Sign-in is a POST, so it cannot be
+reached by typing a URL; from the browser console at :5173:
+
+```js
+await fetch('/auth/dev/login?user=ada', { method: 'POST' });
+```
+
+That sets the `webmap_session` cookie. `ada`, `grace` and `alan` are the
+development roster (`apps/api/auth/dev.py`); Ada and Grace are on the team
+owning the seeded data and Alan is not, which is how the permission model is
+demonstrated rather than asserted.
+
+Then create a session over the three seeded layers and open the link it
+returns:
+
+```js
+const datasets = await (await fetch('/api/v1/datasets')).json();
+const session = await (await fetch('/api/v1/sessions', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    layers: datasets.items.map((d) => ({ dataset_id: d.id })),
+    view: { bbox: [-102.91, 31.17, -101.09, 32.30] },   // the seeded extent
+    name: 'Walkthrough',
+  }),
+})).json();
+location.href = `/s/${session.short_code}`;
+```
+
+The other way in is Claude: `webmap_open_session` returns the same link, which
+is the path the system is designed around. See
+[`docs/04-mcp-server.md`](docs/04-mcp-server.md) and `webmap-mcp-install` for
+registering the MCP server with a Claude client.
+
+**On a network that blocks `extensions.duckdb.org`** — a captive portal will —
+the API and worker refuse to start, because they cannot load the DuckDB
+extensions that read geometry. Cache them on the host and mount them in:
+
+```bash
+make duckdb-extensions
+docker compose -f infra/compose.yaml -f infra/compose.offline.yaml up -d
+```
+
 `make check` is the gate. It runs ruff, mypy, `import-linter`, eslint, `tsc`,
 pytest and vitest — including the package boundary contracts, which are
 enforced rather than advisory (`CLAUDE.md` §3.5).
@@ -93,5 +150,18 @@ outstanding, lives in [`docs/12-roadmap.md`](docs/12-roadmap.md). In summary:
 | Identity, permissions, audit | Working offline via the verifier seam ([ADR 0009](docs/adr/0009-offline-identity-seam.md)); OIDC and MSAL paths written but unrun |
 | Dataset and project REST, sharing | Working |
 | Upload, ingest, vector readers | Working for shapefile, GeoJSON, GeoPackage, CSV/XYZ |
-| `apps/mcp` | Four discovery tools over stdio, plus `webmap-mcp-install` for per-workstation registration |
-| `webmap_geo` solvers, `apps/render`, `packages/*` | Empty by design until Phases 2-4 |
+| Tiles, style compilation, sessions | MVT from GeoParquet, TiTiler COG proxy, scoped tokens; TS and Python compilers agree on shared vectors |
+| Web application | Layer tree, symbology, attribute table, docked shell, session route and autosave |
+| `apps/render` | Playwright pool, SwiftShader, three-layer SSRF defence, render persistence and captions |
+| `apps/mcp` | 13 tools over stdio — discovery, analysis, jobs, render, session — plus `webmap-mcp-install` |
+| `webmap_geo` | Variograms, ordinary kriging, minimum curvature with fault-aware stencils, contouring, fault validation, constrained triangulation |
+| Jobs | arq worker with progress, cooperative cancellation, quotas, idempotency; gridding and contouring end to end with lineage |
+| `webmap_geo.aggregate`, editing, connectors, export | Empty by design until Phases 5–6 |
+
+Verified against a live stack: 826 Python tests including the full integration
+suite, 295 TypeScript, lint and typecheck clean in both languages.
+
+What is **not** demonstrated is as important: `tests/visual/golden/` and
+`tests/e2e/` are still empty, and no test carries the `reference` marker, so
+every browser-, image- and reference-comparison criterion is unmet. The
+roadmap says which.

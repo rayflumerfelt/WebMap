@@ -174,6 +174,11 @@ def purge_mcp_artefacts(base_url: str) -> None:
     layer no longer appears on the first page of a listing — at which point
     tests that look for it fail on litter rather than on anything real. That
     happened, and this is the fix.
+
+    A contour layer is named after the grid it came from, so it carries the
+    run token too — but only once the worker has created it. Any test that
+    submits a job has to wait for it, or the teardown runs first and the
+    layer outlives the run.
     """
     import httpx
 
@@ -450,6 +455,19 @@ async def test_a_grid_can_be_made_and_polled_entirely_through_the_tools(
 
     contoured = await ada.webmap_contour(dataset_id=grid_id)
     assert "Contouring job queued" in contoured
+
+    # **Waited for, not fired and forgotten.** The contour layer is created by
+    # the worker, so returning here would let the module's teardown run before
+    # the dataset exists — and it would then survive as litter in the shared
+    # dev stack, which is the thing the teardown was added to stop. Found by
+    # noticing a stray "… contours" layer after a clean run.
+    contour_job = uuid.UUID(re.findall(r"`([0-9a-f-]{36})`", contoured)[0])
+    for _ in range(60):
+        status = await ada.webmap_get_job(job_id=contour_job)
+        if "succeeded" in status or "failed" in status:
+            break
+        await asyncio.sleep(2)
+    assert "succeeded" in status, status
 
 
 async def test_cancelling_requires_confirmation(api_base_url: str) -> None:
