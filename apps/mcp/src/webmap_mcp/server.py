@@ -32,7 +32,14 @@ from pydantic import Field
 
 from webmap_mcp import __version__
 from webmap_mcp.errors import describe_http_error
-from webmap_mcp.format import dataset_detail, dataset_table, search_results
+from webmap_mcp.format import (
+    dataset_detail,
+    dataset_table,
+    render_summary,
+    search_results,
+    session_detail,
+    session_summary,
+)
 from webmap_mcp.settings import McpSettings
 from webmap_mcp.tokens import build_token_source
 
@@ -100,6 +107,36 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> Any:
     if response.status_code >= 400:
         raise RuntimeError(describe_http_error(response))
     return response.json()
+
+
+async def _post(path: str, body: dict[str, Any] | None = None) -> Any:
+    """One write, with errors translated the same way reads are.
+
+    Separate from `_get` only because the body goes somewhere different — the
+    error handling has to be identical, since a permission failure on a write
+    carries the same message naming the owner (`03-auth-security.md` §3.2).
+    """
+    async with api() as client:
+        response = await client.post(path, json=body or {})
+    if response.status_code >= 400:
+        raise RuntimeError(describe_http_error(response))
+    return response.json()
+
+
+async def _get_bytes(path: str, params: dict[str, Any] | None = None) -> str:
+    """Fetch binary content, base64 for an ImageContent block.
+
+    The MCP response body is the only path by which image bytes reach Claude:
+    `00-overview.md` §7 puts this system on an internal network, so claude.ai
+    cannot fetch a webmap.corp URL (`04` §6.1).
+    """
+    import base64
+
+    async with api() as client:
+        response = await client.get(path, params=_clean_params(params or {}))
+    if response.status_code >= 400:
+        raise RuntimeError(describe_http_error(response))
+    return base64.b64encode(response.content).decode()
 
 
 def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -234,3 +271,221 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# --- Rendering --------------------------------------------------------------
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        # Not read-only: a render is persisted and gets an id. Not
+        # destructive either — nothing is overwritten — and not idempotent,
+        # because calling twice produces two rows.
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    )
+)
+async def webmap_render_map(
+    layers: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description=(
+                "Ordered list, bottom to top. Each entry: {dataset_id: UUID, "
+                "opacity?: float, colormap?: str}. The user's default basemap "
+                "layers are added beneath these automatically."
+            )
+        ),
+    ],
+    title: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "Map title, rendered in the image. Write something a geologist "
+                "would recognise, e.g. 'Wolfcamp A Porosity - Midland Basin'."
+            ),
+        ),
+    ] = None,
+    bbox: Annotated[
+        list[float] | None,
+        Field(
+            None,
+            min_length=4,
+            max_length=4,
+            description=(
+                "Extent [west, south, east, north] in EPSG:4326. Omit to fit "
+                "all layers with a small margin."
+            ),
+        ),
+    ] = None,
+    size: Annotated[
+        Literal["slide_full", "slide_half", "slide_quarter", "square", "thumbnail"],
+        Field(
+            "slide_full",
+            description=(
+                "Dimensions of the STORED master image, not of the preview "
+                "returned inline. slide_full is 16:9 at 2560x1440, sized for a "
+                "full-bleed slide. Use consistent sizes across a deck. Choosing "
+                "a smaller preset does not reduce the response size - the "
+                "inline preview is always about 1600 px - it reduces the "
+                "quality of the artifact you will put on the slide."
+            ),
+        ),
+    ] = "slide_full",
+    show_legend: Annotated[
+        bool,
+        Field(
+            True,
+            description=(
+                "Include a legend. Keep this on for any map going into a "
+                "presentation - a colour-filled map without a scale is not "
+                "interpretable once separated from this conversation."
+            ),
+        ),
+    ] = True,
+    show_scale_bar: Annotated[bool, Field(True)] = True,
+    show_north_arrow: Annotated[bool, Field(True)] = True,
+    transparent_background: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Render without a background fill, so the map can sit on a "
+                "branded slide template."
+            ),
+        ),
+    ] = False,
+) -> list[Any]:
+    """Render a map image from one or more datasets.
+
+    Returns a display-sized preview image plus structured metadata: value range
+    and units, CRS, extent, and data vintage. Use that metadata to write figure
+    captions - do not describe the image from its pixels, and never state a
+    value range you did not receive here. The preview is downsampled, so do not
+    judge label placement or line weight from it.
+
+    Renders are persisted with an ID. To place the same map on several slides,
+    reuse the render_id rather than calling this again. For the
+    full-resolution image, call webmap_get_render with size="master".
+    """
+    from mcp.types import ImageContent, TextContent
+
+    payload = await _post(
+        "/api/v1/renders",
+        {
+            "layers": layers,
+            "title": title,
+            "bbox": bbox,
+            "size": size,
+            "show_legend": show_legend,
+            "show_scale_bar": show_scale_bar,
+            "show_north_arrow": show_north_arrow,
+            "transparent_background": transparent_background,
+        },
+    )
+
+    # **The image is a content block, not markdown** (`04` §6.1). A webmap://
+    # URI inside a markdown image is inert - it renders as dead text - and an
+    # internal https:// URL is unreachable from claude.ai, so the response body
+    # is the only path by which image bytes arrive.
+    return [
+        ImageContent(type="image", data=payload["preview_base64"], mimeType="image/png"),
+        TextContent(type="text", text=render_summary(payload)),
+    ]
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def webmap_get_render(
+    render_id: Annotated[UUID, Field(description="Render id from webmap_render_map.")],
+    size: Annotated[
+        Literal["preview", "master"],
+        Field(
+            "preview",
+            description=(
+                "'preview' returns the image inline again. 'master' returns "
+                "metadata and the download path for the full-resolution "
+                "artifact - the master is too large to inline."
+            ),
+        ),
+    ] = "preview",
+) -> list[Any]:
+    """Fetch a render made earlier, by id.
+
+    Use this to place a map already rendered onto another slide, rather than
+    rendering it again: a second render of the same view is a slightly
+    different image, and a deck where one map shifts between slides looks like
+    a mistake.
+    """
+    from mcp.types import ImageContent, TextContent
+
+    detail = await _get(f"/api/v1/renders/{render_id}")
+
+    if size == "master":
+        return [TextContent(type="text", text=render_summary(detail, master=True))]
+
+    preview = await _get_bytes(f"/api/v1/renders/{render_id}/image", {"size": "preview"})
+    return [
+        ImageContent(type="image", data=preview, mimeType="image/png"),
+        TextContent(type="text", text=render_summary(detail)),
+    ]
+
+
+# --- Sessions ---------------------------------------------------------------
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    )
+)
+async def webmap_open_session(
+    layers: Annotated[
+        list[dict[str, Any]],
+        Field(description="Same shape as webmap_render_map."),
+    ],
+    name: Annotated[str | None, Field(None)] = None,
+    bbox: Annotated[list[float] | None, Field(None, min_length=4, max_length=4)] = None,
+) -> str:
+    """Create a map session and return a link for the user to open.
+
+    Use this when the user wants to interact with data rather than look at an
+    image - editing a shapefile, adjusting a variogram, inspecting values. The
+    session persists; they can return to it later.
+    """
+    view: dict[str, Any]
+    if bbox:
+        view = {"bbox": bbox}
+    else:
+        # No bbox given: centre on the layers' own extent rather than inventing
+        # a world view, which would open the map on the Atlantic.
+        first = await _get(f"/api/v1/datasets/{layers[0]['dataset_id']}")
+        box = first.get("bbox_4326")
+        view = {"bbox": box} if box else {"center": [-102.08, 31.99], "zoom": 9}
+
+    created = await _post(
+        "/api/v1/sessions",
+        {
+            "layers": [{"dataset_id": str(layer["dataset_id"])} for layer in layers],
+            "view": view,
+            "name": name,
+        },
+    )
+    return session_summary(created)
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def webmap_get_session(
+    session: Annotated[str, Field(description="Session id or short code, e.g. 'k3n8fq'.")],
+) -> str:
+    """Read back session state after the user has edited it.
+
+    This closes the loop: the session id is the shared vocabulary between the
+    conversation and the application, so a map the user rearranged in the
+    browser can be re-rendered here without asking them what they changed.
+    """
+    return session_detail(await _get(f"/api/v1/sessions/{session}"))

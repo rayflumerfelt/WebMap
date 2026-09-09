@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:5173"
 
     # --- Internal services --------------------------------------------------
+    # Where the render service reaches this API from inside the network. Not
+    # `public_base_url`: the browser in the render container resolves internal
+    # names, and pointing it at the public host would route a tile request out
+    # and back in — through a proxy that may not even be reachable.
+    internal_api_base: str = "http://api:8000"
     titiler_url: str = "http://localhost:8001"
     render_url: str = "http://localhost:8002"
     # Glyphs and sprites for the render shell. Must be an allowlisted host in

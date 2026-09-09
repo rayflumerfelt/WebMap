@@ -188,3 +188,142 @@ def search_results(payload: dict[str, Any], query: str) -> str:
             f"everything available."
         )
     return dataset_table({"items": items, "total": len(items), "offset": 0})
+
+
+def render_summary(payload: dict[str, Any], *, master: bool = False) -> str:
+    """The text block beside a rendered image. `04-mcp-server.md` §6.1.
+
+    Everything here comes from the render's stored metadata, which came from
+    the dataset registry — never from the pixels. That is what makes the tool
+    description's instruction ("never state a value range you did not receive
+    here") something Claude can actually follow: the numbers are present, so
+    there is no reason to guess at them.
+    """
+    metadata = payload.get("metadata") or {}
+    lines: list[str] = []
+
+    render_id = clean(str(payload.get("id", "")))
+    size = f"{payload.get('width', '?')}x{payload.get('height', '?')}"
+    lines.append(f"**Render** `{short_id(render_id)}` · master {size}")
+    lines.append("")
+
+    layers = metadata.get("layers") or []
+    if layers:
+        described = ", ".join(
+            f"{clean(layer.get('name'))} ({clean(layer.get('kind'))})" for layer in layers
+        )
+        lines.append(f"- **Layers**: {described}")
+
+    value_range = metadata.get("value_range")
+    if value_range and value_range.get("min") is not None:
+        unit = clean(value_range.get("unit") or "")
+        suffix = f" {unit}" if unit else ""
+        lines.append(f"- **Values**: {value_range['min']:g} – {value_range['max']:g}{suffix}")
+
+    if metadata.get("method"):
+        lines.append(f"- **Method**: {clean(metadata['method'])}")
+    if metadata.get("grid"):
+        lines.append(f"- **Grid**: {clean(metadata['grid'])}")
+
+    crs = metadata.get("crs") or {}
+    if crs.get("srid"):
+        name = clean(crs.get("name") or "")
+        label = f"{name} (EPSG:{crs['srid']})" if name else f"EPSG:{crs['srid']}"
+        lines.append(f"- **CRS**: {label}")
+
+    if metadata.get("vintage"):
+        lines.append(f"- **Vintage**: {clean(metadata['vintage'])}")
+
+    extent = metadata.get("extent_4326")
+    if extent:
+        lines.append(
+            f"- **Extent**: {extent[0]:.3f}, {extent[1]:.3f} to "
+            f"{extent[2]:.3f}, {extent[3]:.3f} (WGS84)"
+        )
+
+    caption = payload.get("caption")
+    if caption:
+        lines.append("")
+        lines.append(f"**Suggested caption**: {clean(caption)}")
+
+    # `06-rendering.md` §5.1. A failed tile is a hole in the map, and a hole
+    # looks exactly like sparse data — which is the reading a geologist will
+    # reach for, because it is the one that looks like geology.
+    failures = payload.get("failed_requests") or []
+    if failures:
+        lines.append("")
+        lines.append(
+            f"⚠️ {len(failures)} request(s) failed during rendering, so part of "
+            f"this map may be incomplete. Do not describe the empty areas as "
+            f"sparse data — re-render before drawing any conclusion from them."
+        )
+
+    if master:
+        lines.append("")
+        lines.append(
+            f"Full-resolution image: `GET /api/v1/renders/{render_id}/image?size=master`"
+        )
+
+    return "\n".join(lines)
+
+
+def session_summary(created: dict[str, Any]) -> str:
+    """`04-mcp-server.md` §7.1: the tool's whole output is a link."""
+    lines = [
+        f"Session ready: **{clean(str(created.get('url', '')))}**",
+        "",
+        f"{_count(created.get('layer_count'))} layer(s) loaded.",
+        "",
+        "Changes save automatically. Ask me to re-render when you are done and "
+        "I will pick up the current state.",
+    ]
+    return "\n".join(lines)
+
+
+def session_detail(session: dict[str, Any]) -> str:
+    """Session state, for picking up after the user has edited.
+
+    This closes the loop `01-architecture.md` §5.2 describes: the session id is
+    the shared vocabulary, so a map the user rearranged in the browser can be
+    re-rendered without asking them what they changed.
+    """
+    name = f" — {clean(session['name'])}" if session.get("name") else ""
+    lines = [f"**Session** `{clean(str(session.get('short_code', '')))}`{name}", ""]
+
+    layers = session.get("layers") or []
+    if layers:
+        lines.append("| Layer | Kind | Visible | Opacity |")
+        lines.append("|---|---|---|---|")
+        for layer in layers:
+            dataset = layer.get("dataset") or {}
+            visible = "yes" if layer.get("visible") else "no"
+            lines.append(
+                f"| {clean(dataset.get('name'))} | {clean(dataset.get('kind'))} | "
+                f"{visible} | {layer.get('opacity', 1):g} |"
+            )
+    else:
+        lines.append("This session has no layers you can see.")
+
+    hidden = session.get("hidden_layer_count") or 0
+    if hidden:
+        # Said plainly rather than left as a discrepancy in the count. The
+        # reader would otherwise take what they can see to be the session, and
+        # render a map missing a layer without knowing it.
+        lines.append("")
+        lines.append(
+            f"{hidden} further layer(s) are in this session but not visible to "
+            f"you. Anything rendered from it will omit them."
+        )
+
+    view = session.get("view") or {}
+    if view.get("center"):
+        lines.append("")
+        lines.append(
+            f"View: {view['center'][0]:.3f}, {view['center'][1]:.3f} at zoom {view.get('zoom')}"
+        )
+    elif view.get("bbox"):
+        box = view["bbox"]
+        lines.append("")
+        lines.append(f"View: {box[0]:.3f}, {box[1]:.3f} to {box[2]:.3f}, {box[3]:.3f}")
+
+    return "\n".join(lines)

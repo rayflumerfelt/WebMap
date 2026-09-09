@@ -1,5 +1,24 @@
 # syntax=docker/dockerfile:1.7
 # ~2 GB. Accepted — see 01-architecture.md §4.1 and 06-rendering.md §2.
+
+# --- shell assets ------------------------------------------------------------
+# The render shell needs MapLibre and the overlay bundle beside it, because it
+# is loaded from file:// and fetches nothing (03-auth-security.md §7). Built
+# here rather than committed: they are build outputs, and a vendored copy of
+# maplibre-gl.js would drift from the version the app renders with — which is
+# exactly the divergence screenshotting the page is meant to prevent.
+FROM node:22-slim AS shell
+WORKDIR /build
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/ packages/
+COPY apps/web/package.json apps/web/
+COPY apps/render/shell/ apps/render/shell/
+RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm --filter @webmap/style-model build  && cd packages/ui && npx vite build --config vite.overlay.config.ts
+RUN cp node_modules/.pnpm/maplibre-gl@*/node_modules/maplibre-gl/dist/maplibre-gl.js        node_modules/.pnpm/maplibre-gl@*/node_modules/maplibre-gl/dist/maplibre-gl.css        apps/render/shell/
+
+# --- service -----------------------------------------------------------------
 FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
 
 # Fonts for HTML overlays (legend, title block). Map labels use glyph PBFs
@@ -31,6 +50,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY python/ python/
 COPY apps/ apps/
+# The built shell, from the stage above. A missing bundle is a build failure
+# here rather than a render that comes back without a legend and says nothing
+# about why.
+COPY --from=shell /build/apps/render/shell/ apps/render/shell/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package webmap-render
 

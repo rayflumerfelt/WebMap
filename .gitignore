@@ -48,3 +48,12 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Render shell build outputs. Built by `make render-shell` locally and by the
+# node stage of infra/docker/render.Dockerfile in CI. Not committed: a vendored
+# maplibre-gl.js would drift from the version the app renders with, which is
+# the divergence screenshotting the page exists to prevent.
+apps/render/shell/maplibre-gl.js
+apps/render/shell/maplibre-gl.css
+apps/render/shell/overlay.js
+apps/render/shell/overlay.js.map

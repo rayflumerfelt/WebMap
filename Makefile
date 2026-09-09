@@ -11,7 +11,7 @@ COMPOSE ?= docker compose -f infra/compose.yaml
 
 .DEFAULT_GOAL := help
 .PHONY: help setup dev down check lint typecheck test test-visual update-goldens \
-        migrate migration seed mcp-inspect eval fmt clean
+        migrate migration seed mcp-inspect eval fmt clean render-shell
 
 help:  ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | \
@@ -58,6 +58,11 @@ test-visual:  ## Visual regression (needs the render service)
 # the diff — `tests/visual/output/` holds the actual images.
 update-goldens:  ## Regenerate visual goldens — review the diff
 	$(UV) run pytest tests/visual/ --update-goldens
+
+render-shell:  ## Build the render shell's MapLibre and overlay bundles
+	$(PNPM) --filter @webmap/style-model build
+	cd packages/ui && npx vite build --config vite.overlay.config.ts
+	cp node_modules/.pnpm/maplibre-gl@*/node_modules/maplibre-gl/dist/maplibre-gl.js 	   node_modules/.pnpm/maplibre-gl@*/node_modules/maplibre-gl/dist/maplibre-gl.css 	   apps/render/shell/
 
 migrate:  ## Apply Alembic migrations
 	$(UV) run alembic upgrade head

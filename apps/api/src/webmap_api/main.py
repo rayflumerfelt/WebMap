@@ -20,6 +20,7 @@ from webmap_api.db.session import assert_policies_present, unscoped_session
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
 from webmap_api.routes.projects import router as projects_router
+from webmap_api.routes.renders import router as renders_router
 from webmap_api.routes.sessions import router as sessions_router
 from webmap_api.routes.tiles import router as tiles_router
 from webmap_api.routes.uploads import router as uploads_router
@@ -186,6 +187,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(uploads_router)
     app.include_router(datasets_router)
     app.include_router(sessions_router)
+    app.include_router(renders_router)
 
     return app
 

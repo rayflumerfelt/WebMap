@@ -75,6 +75,16 @@ MIDLAND = (-103.0, 31.0, -101.5, 32.5)
 # afternoon to diagnose the first time.
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def pool() -> AsyncIterator[BrowserPool]:
+    # The shell's MapLibre and overlay bundles are build outputs, not committed
+    # (see .gitignore). Skipping with the command to build them beats fifteen
+    # failures that all mean "run make render-shell".
+    for asset in ("maplibre-gl.js", "overlay.js"):
+        if not (SHELL.parent / asset).is_file():
+            pytest.skip(
+                f"The render shell is not built ({asset} is missing). Build it "
+                f"with: make render-shell"
+            )
+
     pool = BrowserPool(max_concurrent=2)
     try:
         await pool.start()

@@ -64,6 +64,28 @@ def put_file(s3: S3Client, bucket: str, key: str, path: Path) -> None:
         s3.put_object(Bucket=bucket, Key=key, Body=handle)
 
 
+def put_bytes(
+    s3: S3Client, bucket: str, key: str, data: bytes, *, content_type: str | None = None
+) -> None:
+    """Write bytes directly.
+
+    For objects that were never files — a render's PNG comes out of a browser
+    as bytes, and staging it through a temp file only to read it back would be
+    two extra copies of a four-megabyte image.
+    """
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=data,
+        **({"ContentType": content_type} if content_type else {}),
+    )
+
+
+def get_bytes(s3: S3Client, bucket: str, key: str) -> bytes:
+    response = s3.get_object(Bucket=bucket, Key=key)
+    return bytes(response["Body"].read())
+
+
 def get_file(s3: S3Client, bucket: str, key: str, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     response = s3.get_object(Bucket=bucket, Key=key)
