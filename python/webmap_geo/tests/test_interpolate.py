@@ -28,7 +28,9 @@ def grid(nx: int = 21, ny: int = 21, cell: float = 100.0) -> GridDefinition:
     return GridDefinition(xmin=0.0, ymin=0.0, cell_size=cell, nx=nx, ny=ny, frame=TEXAS)
 
 
-def scattered(rng: np.random.Generator, n: int = 60, extent: float = 2_000.0):
+def scattered(
+    rng: np.random.Generator, n: int = 60, extent: float = 2_000.0
+) -> tuple[np.ndarray, np.ndarray]:
     points = rng.uniform(0.0, extent, size=(n, 2))
     values = 100.0 + 20.0 * np.sin(points[:, 0] / 600.0) + 0.01 * points[:, 1]
     return points, values
