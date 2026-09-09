@@ -183,8 +183,13 @@ def contour_grid(
 
     lines: list[ContourLine] = []
     for position, level in enumerate(levels):
-        for vertices in generator.lines(float(level)):
-            if len(vertices) < 2:
+        for raw in generator.lines(float(level)):
+            # `lines()` is typed as a union across every LineType contourpy
+            # supports. With `Separate` each entry is an (n, 2) float array,
+            # and narrowing here is what lets the rest of this loop be typed
+            # rather than threading `Any` through it.
+            vertices = np.asarray(raw, dtype=float)
+            if vertices.ndim != 2 or len(vertices) < 2:
                 continue
             geometry = LineString(vertices)
             if smoothing > 0:

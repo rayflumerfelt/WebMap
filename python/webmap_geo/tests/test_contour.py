@@ -13,6 +13,7 @@ import pytest
 
 from webmap_geo.contour.lines import (
     MAX_SMOOTHING,
+    ContourLine,
     auto_levels,
     contour_grid,
     index_levels,
@@ -217,7 +218,7 @@ def test_smoothing_reduces_angularity() -> None:
     g = grid()
     surface = dome(g)
 
-    def angularity(lines: list) -> float:
+    def angularity(lines: list[ContourLine]) -> float:
         """The sharpest corner, not the total turning.
 
         Chaikin adds vertices, so total turning grows even as every individual
