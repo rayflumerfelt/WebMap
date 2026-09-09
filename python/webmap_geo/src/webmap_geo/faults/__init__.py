@@ -1,6 +1,27 @@
-"""Faults — Phase 4. See `05-geoprocessing.md` §4 (fault network preprocessing).
+"""Fault networks: validation, cleaning, and rasterisation onto a grid.
 
-Empty by design at Phase 0. The module exists because
-`05-geoprocessing.md` §2.3's import-linter contract names it, and a contract
-against a module that does not exist is not a contract.
+`05-geoprocessing.md` §3 and §4. The design rule governing everything here:
+**never silently repair a fault network.** The distinction between "this fault
+tips out here" and "this fault trace is incomplete" is geological judgment, not
+a preprocessing decision.
 """
+
+from webmap_geo.faults.network import (
+    Constraint,
+    ConstraintKind,
+    ValidationReport,
+    clean_network,
+    validate_network,
+)
+from webmap_geo.faults.raster import blocked_edges, compartments, control_per_compartment
+
+__all__ = [
+    "Constraint",
+    "ConstraintKind",
+    "ValidationReport",
+    "blocked_edges",
+    "clean_network",
+    "compartments",
+    "control_per_compartment",
+    "validate_network",
+]
