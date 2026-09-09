@@ -6,6 +6,7 @@ from arq.connections import RedisSettings
 
 from webmap_core.logging import configure_logging, get_logger
 from webmap_core.settings import Environment, get_settings
+from webmap_worker.tasks.health import ping
 
 log = get_logger(__name__)
 
@@ -24,10 +25,12 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
 
-    # Phase 4 fills this in: interpolate, contour, aggregate, ingest, sync,
-    # export. Registering none yet is deliberate — an arq worker with a task
-    # that raises NotImplementedError still accepts and burns the job.
-    functions: ClassVar[list[Any]] = []
+    # Phase 4 adds interpolate, contour, aggregate, ingest, sync and export.
+    # `ping` is not a placeholder for those: it is the round-trip smoke test
+    # for the queue path, and arq refuses to start a worker whose function
+    # list is empty — which is how this container silently crashlooped the
+    # first time the stack came up.
+    functions: ClassVar[list[Any]] = [ping]
     cron_jobs: ClassVar[list[Any]] = []
 
     on_startup = startup

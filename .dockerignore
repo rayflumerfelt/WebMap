@@ -1,0 +1,19 @@
+# The build context is the repository root. Without this, every image build
+# uploads the Windows virtualenv and node_modules — hundreds of MB that the
+# Dockerfile then ignores.
+.venv/
+node_modules/
+**/node_modules/
+**/dist/
+**/dist-types/
+.git/
+.turbo/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.import_linter_cache/
+**/__pycache__/
+*.pyc
+.env
+tests/visual/output/
+docs/

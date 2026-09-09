@@ -9,8 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-inter fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy PYTHONUNBUFFERED=1
+# Pinned to the version that wrote uv.lock — see api.Dockerfile.
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /usr/local/bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
@@ -22,12 +27,13 @@ COPY apps/worker/pyproject.toml         apps/worker/
 COPY apps/render/pyproject.toml         apps/render/
 COPY apps/mcp/pyproject.toml            apps/mcp/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-workspace --no-dev
+    uv sync --frozen --no-dev --no-install-workspace --package webmap-render
 
 COPY python/ python/
 COPY apps/ apps/
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --package webmap-render
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 EXPOSE 8002
-CMD ["uv", "run", "--frozen", "python", "-m", "webmap_render.main"]
+CMD ["uv", "run", "--no-sync", "python", "-m", "webmap_render.main"]

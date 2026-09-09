@@ -50,8 +50,17 @@ ANALYSIS_SRID = 2277
 #: lineage record written against a seeded dataset survives a re-seed.
 NAMESPACE = UUID("6f1a5c9e-0000-4000-8000-000000000000")
 
-#: A rectangle over the Midland Basin, in EPSG:2277 feet.
-EXTENT_FT = (1_150_000.0, 6_650_000.0, 1_560_000.0, 6_980_000.0)
+#: A rectangle over the Midland Basin, in EPSG:2277 feet — about 106 x 76
+#: miles, Midland and Odessa across to Big Spring. Verified by transforming
+#: back: it lands at roughly (-102.91, 31.17)-(-101.09, 32.30) in EPSG:4326.
+#:
+#: An earlier revision used a northing near 6.6M ftUS, inferred from this
+#: projection's false-northing constant rather than checked against a known
+#: point. That put the whole seed 1,200 km south, in central Mexico, and
+#: nothing failed — the grids were internally consistent and the registry
+#: bbox agreed with them. It is the exact failure 02-data-model.md §1 names,
+#: which is why test_seed_extent.py now asserts this against real towns.
+EXTENT_FT = (1_500_000.0, 10_400_000.0, 2_060_000.0, 10_800_000.0)
 
 #: One seed for the whole script. CLAUDE.md §3.3: all randomness takes an
 #: explicit Generator — no bare np.random, no module-level seeding.
@@ -351,11 +360,19 @@ def main(argv: list[str] | None = None) -> int:
 def _register(seeded: list[SeededDataset], vmin: float, vmax: float, database_url: str) -> None:
     """Insert the registry rows.
 
-    Connects with the **migration** role rather than the application role. The
-    application role is subject to RLS and its policies require a principal;
-    a seed script has no request and no logged-in user, so it would insert
-    zero rows and report success. This is the one context where bypassing the
-    application path is correct, and it is why the two roles exist.
+    Connects with the **migration** role because it owns the tables, but that
+    buys no exemption: the migration sets FORCE ROW LEVEL SECURITY, so policies
+    apply to the owner too. The seed therefore establishes an RLS context the
+    same way a request does (`03-auth-security.md` §3.4) before touching any
+    ownable table.
+
+    That is the right shape rather than a workaround. It means the seed
+    exercises the INSERT policies instead of going around them, so a policy
+    that forbids legitimate writes fails here rather than in Phase 1.
+
+    `app_user`, `team` and `team_member` are not ownable and carry no policies,
+    which is what makes the ordering possible — the principal has to exist
+    before it can be declared.
     """
     import psycopg
     from psycopg.types.json import Jsonb
@@ -399,6 +416,17 @@ def _register(seeded: list[SeededDataset], vmin: float, vmax: float, database_ur
                 "INSERT INTO team_member (team_id, user_id) VALUES (%s, %s) "
                 "ON CONFLICT DO NOTHING",
                 (team_id, owner_id),
+            )
+
+            # Everything below writes to RLS-protected tables. Declare the
+            # principal, transaction-local, exactly as principal_session does.
+            # Without this the policies raise "unrecognized configuration
+            # parameter" — deliberately loud, because the alternative is a
+            # seed that silently inserts nothing and reports success.
+            cur.execute("SELECT set_config('webmap.user_id', %s, true)", (str(owner_id),))
+            cur.execute(
+                "SELECT set_config('webmap.team_ids', %s, true)",
+                ("{" + str(team_id) + "}",),
             )
 
             project_id = sid("project:midland-basin")

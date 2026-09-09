@@ -83,9 +83,9 @@ editing to run the stack.
 | Area | State |
 |---|---|
 | Monorepo, boundary lint (both languages) | Working; each contract verified against a deliberate violation |
-| Schema migration, RLS policies | Written; see [`infra/migrations/`](infra/migrations/) |
-| Compose stack, container images | Written |
-| Seed script | Working — 2,000 points, 20 faults, one grid |
+| Schema migration, RLS policies | Applied and rolled back cleanly; 17 tables, 24 policies |
+| Compose stack, container images | `docker compose up` verified from empty volumes |
+| Seed script | Working — 2,000 points, 20 faults, one grid, queryable via DuckDB and TiTiler |
 | `webmap_geo` | CRS, `AnalysisFrame`, Hilbert ordering, DuckDB data plane. Solvers are Phase 4 |
 | `webmap_core` | Models, permissions, settings, signing, quotas, jobs, versioning |
 | `webmap_io` | GeoParquet writer, COG writer, object storage |
