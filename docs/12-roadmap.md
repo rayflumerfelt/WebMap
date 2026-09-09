@@ -15,14 +15,14 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 
 ## Current status
 
-Updated 2026-09-09. A phase is complete only when every criterion passes; a
+Updated 2026-09-09 (Phase 2 in progress). A phase is complete only when every criterion passes; a
 criterion met with a caveat says so rather than being ticked quietly.
 
 | Phase | State |
 |---|---|
 | 0 — Foundations | **Complete.** All criteria verified. |
 | 1 — Identity and data plane | **Complete.** Two caveats in "Carried forward" below. |
-| 2 — Display | Not started. Types and theme exist in `packages/*`; no components. |
+| 2 — Display | **In progress.** Backend complete; frontend shell outstanding — see below. |
 | 3 — Claude integration | Not started. `apps/render` has SSRF validation only. |
 | 4 — Gridding | Not started. `webmap_geo` solver modules are empty by design. |
 | 5 — Styling and editing | Not started. |
@@ -47,6 +47,29 @@ Neither blocks Phase 2; the first must be closed on deployment day.
   `03-auth-security.md` §3.3 describes means opening both that trigger and the
   UPDATE policies — deliberately two decisions. Nobody has needed it yet.
 
+### Phase 2 progress
+
+Done and verified:
+
+- Tile path: in-process MVT from GeoParquet via DuckDB, GeoJSON/MVT switching,
+  TiTiler COG proxy, scoped-token auth, cache keyed on
+  (dataset_id, version, z, x, y)
+- Style compilation in both languages against nine shared hand-written vectors
+- Classification (`classify`, Fisher-Jenks, pretty breaks) and legend derivation
+- Sessions: create, load, autosave, soft delete, per-principal layer resolution
+- `compileStyle`, the `WebMap` component, and `@webmap/ui` legend / scale bar /
+  north arrow
+
+Outstanding, all in `apps/web`:
+
+- Layer tree; single-symbol and categorized symbology UI
+- Desktop shell — docked resizable panels, toolbar, status bar, keyboard
+  shortcuts, context menus (`07-frontend.md` §5)
+- Session store and autosave wiring against `/api/v1/sessions`
+- The four acceptance criteria that need a browser: 500k features at 30+ fps,
+  panel state persisting per user, the 1280 px notice, and every keyboard
+  shortcut and `Shift+F10` context menu
+
 ### Deliberately empty
 
 These modules exist so that import contracts and package boundaries have
@@ -54,8 +77,8 @@ something to check, and are empty until their phase. They are not oversights:
 
 | Module | Phase |
 |---|---|
+| `packages/ui` ramp editor, schema-driven property editor | 5 |
 | `webmap_geo.{interpolate,mesh,faults,variogram,contour,aggregate}` | 4 |
-| `webmap_core.style`, `packages/style-model` compilers | 2 |
 | `apps/render` beyond `security.py` | 3 |
 | `webmap_io.connectors` (file share, PostGIS) | 6 |
 | `webmap_io` readers for `.grd`, ZMAP+, KML, DXF | 6 |

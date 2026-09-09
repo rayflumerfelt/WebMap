@@ -19,3 +19,5 @@ export { metersPerPixel, scaleBar } from './ScaleBar/scale.js';
 export type { ScaleBarSpec, ScaleUnit } from './ScaleBar/scale.js';
 export { NorthArrow } from './NorthArrow/NorthArrow.js';
 export type { NorthArrowProps } from './NorthArrow/NorthArrow.js';
+export { LayerTree } from './LayerTree/LayerTree.js';
+export type { LayerTreeProps, SessionLayerView } from './LayerTree/LayerTree.js';
