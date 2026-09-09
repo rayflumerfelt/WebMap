@@ -41,6 +41,7 @@ from webmap_core.permissions import Channel, Principal
 from webmap_core.services import datasets as service
 from webmap_core.services.directory import resolve_principal, team_ids_for
 from webmap_core.signing import verify_tile_token
+from webmap_geo.exceptions import DegenerateInput
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["tiles"])
@@ -296,6 +297,60 @@ async def feature_attributes(
     }
 
 
+#: A colormap is forwarded to TiTiler as a query parameter, so it is bounded.
+#:
+#: A 256-entry RGBA lookup is about 6 KB and a discrete band set is far
+#: smaller, so 32 KB is generous. It is deliberately well under the ~64 KB URL
+#: length that clients and proxies enforce — a limit above that would be
+#: unreachable, because the request would be refused before it arrived. Note
+#: that many reverse proxies cap URLs at 8 KB, so a palette approaching this
+#: size may not survive a production deployment even though the API accepts it.
+MAX_COLORMAP_BYTES = 32 * 1024
+
+
+def _validated_colormap(raw: str) -> tuple[str, bool]:
+    """Parse-check an explicit colormap. Returns it with "is it discrete?".
+
+    Only the shape is checked, not the semantics — TiTiler owns those. The
+    point is that a malformed palette fails here, naming what is wrong, rather
+    than reaching an internal service and coming back as an opaque 500.
+
+    **The discrete flag decides whether `rescale` may be sent**, and getting
+    that wrong renders the whole grid transparent. `rescale` normalises the
+    data to 0-255 *before* the colormap is applied, so:
+
+    - a **list** of `[[min,max],[r,g,b,a]]` bands is in raw data units and
+      must not be rescaled — its bounds would be compared against 0-255 and
+      nothing would ever match;
+    - a **dict** keyed 0-255 is a lookup and needs `rescale` to mean anything.
+
+    Sending both produced a fully transparent tile, which is how this was
+    found: 65,536 pixels of alpha zero and a 200 response.
+    """
+    import json
+
+    if len(raw.encode()) > MAX_COLORMAP_BYTES:
+        raise DegenerateInput(
+            f"The colormap is {len(raw.encode()):,} bytes (limit "
+            f"{MAX_COLORMAP_BYTES:,}). A 256-entry lookup is about 6 KB; "
+            f"something this large is not a palette."
+        )
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise DegenerateInput(
+            f"The colormap is not valid JSON ({error}). Send either discrete "
+            f"bands — [[[min,max],[r,g,b,a]], ...] — or a lookup keyed 0-255."
+        ) from error
+
+    if not isinstance(parsed, list | dict) or not parsed:
+        raise DegenerateInput(
+            "A colormap is a non-empty list of bands or a lookup object keyed "
+            "0-255. An empty one would render the whole grid transparent."
+        )
+    return raw, isinstance(parsed, list)
+
+
 @router.get("/cog/{dataset_id}/{z}/{x}/{y}.png")
 async def raster_tile(
     request: Request,
@@ -306,6 +361,16 @@ async def raster_tile(
     y: int,
     principal: Annotated[Principal, Depends(tile_principal)],
     colormap_name: Annotated[str, Query()] = "viridis",
+    colormap: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Explicit colormap as JSON, overriding colormap_name. Either "
+                "discrete bands in data units — [[[min,max],[r,g,b,a]], ...] — "
+                'or a 0-255 lookup {"0": [r,g,b,a], ...} used with rescale.'
+            )
+        ),
+    ] = None,
     rescale: Annotated[str | None, Query(description="min,max")] = None,
 ) -> Response:
     """Proxy a COG tile from TiTiler, after checking permission.
@@ -316,22 +381,45 @@ async def raster_tile(
 
     Changing the colour ramp is a URL parameter change rather than a regrid,
     which is what makes palette editing feel instant (`01` §2.5).
+
+    **A grid is not coloured by MapLibre.** Raster layers have no data-driven
+    paint, so the colour is baked into this PNG before the browser sees it —
+    which is why a custom palette has to arrive here rather than in the style.
+    `colormap_name` covers the named ramps; `colormap` carries the two forms a
+    palette editor produces:
+
+    - **Discrete bands**, in data units, for interval symbology. No `rescale`:
+      the bands say what they mean, so the same bands compare directly across
+      grids.
+    - **A 0-255 lookup**, used with `rescale`, for a gradient. Relative to the
+      range, which is why `rescale` matters so much.
     """
     async with principal_session(request.app.state.engine, principal) as conn:
         cog_key = await service.resolve_grid_object(conn, principal, dataset_id)
         detail = await service.get_dataset(conn, principal, dataset_id)
 
+    default_rescale: str | None = None
     if rescale is None and detail.get("value_min") is not None:
         # Default to the dataset's own range. Without it TiTiler stretches to
         # the tile's local range, so every tile gets its own scale and the map
         # becomes a patchwork.
-        rescale = f"{detail['value_min']},{detail['value_max']}"
+        default_rescale = f"{detail['value_min']},{detail['value_max']}"
+        rescale = default_rescale
 
-    params = {
-        "url": f"s3://{settings.s3_bucket}/{cog_key}",
-        "colormap_name": colormap_name,
-    }
-    if rescale:
+    params: dict[str, str] = {"url": f"s3://{settings.s3_bucket}/{cog_key}"}
+    discrete = False
+    if colormap:
+        # Validated rather than proxied blind: this string is forwarded to an
+        # internal service, and an unparseable one should fail here with a
+        # message naming the problem rather than as a 500 from TiTiler.
+        params["colormap"], discrete = _validated_colormap(colormap)
+    else:
+        params["colormap_name"] = colormap_name
+
+    # Discrete bands are in data units and are ruined by rescale — see
+    # `_validated_colormap`. An explicitly requested rescale is still honoured,
+    # because a caller who sends both has said what they mean.
+    if rescale and not (discrete and rescale is default_rescale):
         params["rescale"] = rescale
 
     async with httpx.AsyncClient(timeout=30.0) as client:

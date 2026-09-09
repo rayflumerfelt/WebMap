@@ -316,8 +316,10 @@ fault is gridded with it.
 
 **Still owed by Phase 4:** universal kriging and cubic spline (`Method` has four members:
 ordinary kriging, minimum curvature, IDW, nearest); breakline-aware interpolation;
-`webmap_aggregate` and `webmap_fit_variogram`; the `aggregate` package, which is still an
-empty placeholder; and the worker's ingest, sync and export tasks.
+**filled contour bands** — polygons between levels, for exporting and attributing the bands
+that a colour-filled grid only renders (`08` §5.2); `webmap_aggregate` and
+`webmap_fit_variogram`; the `aggregate` package, which is still an empty placeholder; and the
+worker's ingest, sync and export tasks.
 
 **Risk.** Minimum curvature is now the only fault-aware interpolator, so a geologist who wants
 a kriged surface of a faulted field cannot have one. Mitigated by saying so at the point of
@@ -348,6 +350,10 @@ produces the same wrong surface with nothing said about it.
 - **Capability roles**: `app_user.is_global_admin`, `team_member.role`, and the
   administration screens they gate
 - **Default basemaps** across the user / team / global tiers, keyed on presentation
+- **Formatting dialogs and shared controls** (`07` §6.2-6.3): colour modes, line, text,
+  size-by-column, null colour, index-contour rules, live legend preview
+- **Grid colouring** (`08` §5.2): interval bands snapped to the contour interval, gradient
+  over a P5-P95 display range, and clip-to-polygon
 - **Ownership transfer** for a deactivated user's objects — the audited operation
   `03-auth-security.md` §3.3 specifies and `migration 0002` left an escape hatch for
 
@@ -362,6 +368,10 @@ produces the same wrong surface with nothing said about it.
 - [ ] A polygon digitized against an existing boundary with snapping on produces no sliver
 - [ ] Editing a fault and re-gridding produces a surface reflecting the new geometry
 - [ ] Undo restores exact prior state across 20 random operation sequences
+- [ ] A colour-filled grid's bands land on the contour levels drawn over it
+- [ ] An interval palette renders the exact colours it names, and a value outside every band
+      clamps to an end colour rather than rendering transparent
+- [ ] The italic control is disabled for a family that has no italic
 - [ ] Two basemaps share one layer; editing the layer changes both, and soft-deleting it is
       refused with both basemaps named
 - [ ] Duplicating a layer copies the row and references the same object — verified by storage

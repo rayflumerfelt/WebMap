@@ -53,6 +53,21 @@ DEFAULT_MARGIN = 0.05
 #: caller almost always overrides it with a number a geologist chose.
 DEFAULT_CELLS_ACROSS = 200
 
+#: The percentiles a grid is coloured across by default.
+#:
+#: **Not the surface's own minimum and maximum.** Minimum curvature overshoots
+#: into extrapolated corners, and the overshoot is unbounded: one measured run
+#: produced a surface spanning -8,708 to +2,709 ft from data spanning -8,452 to
+#: -8,224 — 228 ft of signal inside an 11,417 ft range. Scaled to the extremes,
+#: the well-controlled area gets 2% of the colour ramp and the map reads as one
+#: flat colour with a rainbow smear in an empty corner.
+#:
+#: P5-P95 clips that, and values outside clamp to the end colours rather than
+#: rendering transparent — a hole in a grid reads as no-data, and this is not
+#: no-data. `05-geoprocessing.md` §6.5's extrapolation reporting is what says
+#: the corner is invention; the colour ramp should not have to.
+DISPLAY_PERCENTILES = (5.0, 95.0)
+
 
 @dataclass(frozen=True)
 class GridRequest:
@@ -350,6 +365,37 @@ def crs_frame(srid: int) -> Any:
     return frame_for(srid)
 
 
+def display_range(surface: Any) -> tuple[float, float] | None:
+    """The range to colour this surface across. See `DISPLAY_PERCENTILES`.
+
+    Stored in `dataset.value_min` / `value_max`, which the tile endpoint uses
+    as its default `rescale`. **Without it TiTiler stretches each tile to that
+    tile's own local range**, so every tile gets a different scale and the map
+    becomes a patchwork — the endpoint's own comment says so, and until this
+    existed every grid the job produced rendered that way.
+
+    The surface's true extremes are not lost: they are in the job result's
+    `diagnostics.output_range`, beside the input range they should be compared
+    against.
+    """
+    import numpy as np
+
+    finite = np.asarray(surface, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return None
+
+    low, high = (float(v) for v in np.percentile(finite, DISPLAY_PERCENTILES))
+    if not high > low:
+        # A surface flat enough that the percentiles coincide. Fall back to the
+        # extremes so the ramp has somewhere to go; if those coincide too the
+        # grid is constant and there is nothing to colour by.
+        low, high = float(finite.min()), float(finite.max())
+        if not high > low:
+            return None
+    return (low, high)
+
+
 async def write_grid_dataset(
     conn: AsyncConnection,
     principal: Principal,
@@ -410,6 +456,7 @@ async def write_grid_dataset(
         project_id=request.project_id,
         cog_key=key,
         bbox_4326=inputs.bbox_4326,
+        value_range=display_range(result.surface),
         owner_team_id=request.owner_team_id,
         visibility=request.visibility,
         caption=_caption(result, inputs),

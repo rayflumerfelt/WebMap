@@ -440,6 +440,111 @@ the map cannot disagree.
 
 ---
 
+### 6.1 Managing layers, maps and basemaps
+
+All three are ownable objects (`adr/0010`), so create, edit, duplicate and delete are the same
+verbs on each and share one permission model. What differs is what they contain.
+
+**A map is a basemap, its layers, and one active layer.** Only the active layer is editable;
+Auto Zoom fits it, Zoom to Extents fits every layer in the map.
+
+> **"Only the active layer can be edited" is an interface affordance and never an
+> authorization boundary.** The API checks permission on every request regardless of what the
+> client considers active. A client that made a view-only layer active is still refused by the
+> service.
+
+Auto Zoom with no active layer, or one whose extent is unknown, falls back to Zoom to Extents
+rather than doing nothing — a button that silently does nothing reads as broken.
+
+**Loading a basemap is always available** and adds only the layers not already present.
+*Present* means the same `layer_id`: the same shapefile styled two ways is legitimately two
+layers, and treating them as duplicates would silently drop one.
+
+**Any map can be saved as a basemap**, which is a copy of its layer list. The dialog asks
+whether to include the active layer — saving it means the next map built on this basemap opens
+with last week's grid underneath it.
+
+**Deleting a layer a basemap still uses is refused**, naming the basemaps. Two basemaps sharing
+a layer is the point of the model; the sharing has to become visible at the moment it costs
+something rather than afterwards, when someone else's map has quietly lost a layer.
+
+**Refresh and replace** apply to any layer whose data came from a file or a connector:
+
+- *Refresh* re-reads the source. Per `adr/0005` that produces a new dataset **version**, so
+  maps referencing the layer follow the pointer with no edit of their own.
+- *Replace* points the layer at a different dataset. If the new data lacks a column the
+  symbology references, the layer breaks — so this validates at replace time and names the
+  missing column. A silently blank layer is the failure to avoid.
+
+### 6.2 Formatting dialogs
+
+One dialog per layer, with sections that appear only where the geometry supports them — the
+`SymbolSpec` union already prevents offering a fill colour for a line (§2.1 of `08`).
+
+**Colour mode** applies to every outline and fill on the layer:
+
+- **By column value.** For a numeric column, either *gradient* (stops, editable and
+  importable) or *interval* (maximums only; the minimum of each band is the maximum of the one
+  below, and the compiler closes both ends — see `08` §5.2). For a text column, a value/colour
+  table with an **Other** row pinned to the bottom, defaulting to light grey.
+- **Fixed.** One colour for everything.
+
+The text-value picker is sorted by descending count of occurrences, which needs a distinct-
+values query rather than anything MapLibre offers. It is **capped at the top few hundred**,
+reports how many values remain uncounted, and the endpoint **refuses to enumerate a column
+above a cardinality threshold** rather than hanging the dialog — a well-name column on 500k
+features has 500k distinct values and no useful colour mapping.
+
+**Transparency** applies to fills only. On a grid it is `raster-opacity`, which is the one part
+of a grid's appearance MapLibre still controls.
+
+**Line formatting** is colour, width and type. Type is a fixed choice, never by column value:
+`line-dasharray` accepts no property expressions (`08` §2.2). A layer that needs dash-by-
+category uses rule-based symbology instead.
+
+**Text formatting** is family, weight, style, size in points, and size mode. The family list
+comes from `GET /static/glyphs` so it reflects what this deployment actually built. **The
+italic control is disabled when the family has none** — Oswald — rather than offered and
+ignored.
+
+Sections the requirement did not name but the model needs, all already in `Symbology`:
+
+- **Size by column** — graduated symbols. Bubble size by production or thickness is core
+  geological visualisation and `Graduated.vary` already carries `'size'`.
+- **Which column is labelled, and at what zooms.** Halo colour and width belong here too;
+  unhaloed text over a filled grid is unreadable.
+- **Null and no-data colour.** *Other* catches unlisted text. It does not catch a numeric null,
+  a value outside the gradient range, or a blanked grid cell — and a well with no porosity
+  reading is not zero.
+- **Automatic classification.** Equal interval, quantile, Jenks, standard deviation and pretty
+  breaks are implemented (`webmap_core.style.classify`); the dialog generates stops with them
+  and leaves the result editable.
+- **Index contours.** "Every fifth contour heavier and labelled" is not expressible in a flat
+  colour/line/text dialog — it is a rule on the `is_index` flag the contour job already emits,
+  and it is the single most important piece of contour formatting.
+
+Every dialog shows a **live legend preview**. `deriveLegend` already exists, and it is the
+cheapest way to catch a palette that looks fine in the editor and illegible on the map.
+
+### 6.3 Shared controls
+
+Built as standalone components with no knowledge of layers, maps or this application, so they
+can be lifted into another one. Each takes a value and an `onChange` and nothing else.
+
+| Component | Used by |
+|---|---|
+| `ColorPicker` | Fixed colour, every stop, every category, Other, no-data |
+| `RampEditor` | Gradient stops, with a histogram underlay (§5) |
+| `IntervalEditor` | Interval maximums and their colours |
+| `CategoryTable` | Text value/colour rows, sorted by count, Other pinned last |
+| `LinePicker` | Width, dash pattern, cap and join, with a preview |
+| `MarkerPicker` | Point shape, size, rotation |
+| `FontPicker` | Family, weight, style — disables what the family lacks |
+| `PaletteIO` | Import and export, `.clr` / `.cpt` / QGIS XML (`08` §5.1) |
+| `LegendPreview` | Every mode, in every dialog |
+
+---
+
 ## 7. Data loading
 
 ```typescript

@@ -275,6 +275,7 @@ async def create_dataset(
     feature_count: int | None = None,
     bbox_4326: list[float] | None = None,
     attribute_schema: list[dict[str, Any]] | None = None,
+    value_range: tuple[float, float] | None = None,
     owner_team_id: UUID | None = None,
     visibility: Visibility = Visibility.TEAM,
     caption: str | None = None,
@@ -304,14 +305,15 @@ async def create_dataset(
                 project_id, name, description, kind, geometry_kind, connector,
                 source_uri, source_checksum, sync_state, storage_srid,
                 bbox_4326, parquet_key, version, feature_count,
-                attribute_schema, cog_key, caption,
+                attribute_schema, value_min, value_max, cog_key, caption,
                 owner_user_id, owner_team_id, visibility)
             VALUES (
                 coalesce(CAST(:dataset_id AS uuid), gen_random_uuid()),
                 :project_id, :name, :description, :kind, :geometry_kind,
                 :connector, :source_uri, :source_checksum, 'ready',
                 :storage_srid, :bbox_4326, :parquet_key, 1, :feature_count,
-                CAST(:attribute_schema AS jsonb), :cog_key, :caption,
+                CAST(:attribute_schema AS jsonb), :value_min, :value_max,
+                :cog_key, :caption,
                 :owner_user_id, :owner_team_id, :visibility)
             RETURNING id
             """
@@ -331,6 +333,8 @@ async def create_dataset(
             "parquet_key": parquet_key,
             "feature_count": feature_count,
             "attribute_schema": (json.dumps(attribute_schema) if attribute_schema else None),
+            "value_min": value_range[0] if value_range else None,
+            "value_max": value_range[1] if value_range else None,
             "cog_key": cog_key,
             "caption": caption,
             "owner_user_id": principal.user_id,

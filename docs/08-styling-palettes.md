@@ -138,10 +138,99 @@ export interface PolygonSymbol {
   outlineWidth: number;
   outlineDashArray?: number[];
 }
+
+export interface LabelSymbol {
+  geometry: 'label';
+  /** Which attribute is drawn. Without one there is nothing to label. */
+  field: string;
+  /** Points. Compiled to pixels — see §2.2. */
+  size: number;
+  /** How size behaves as the map zooms. See §2.2; neither is MapLibre's
+   *  default, which is fixed pixels regardless of scale. */
+  sizeMode: 'fixed' | 'scale-with-map';
+  color: string;
+  /** Essential rather than decorative: unhaloed text over a filled grid is
+   *  unreadable at any size. */
+  haloColor: string;
+  haloWidth: number;
+  /** A MapLibre *font stack*, e.g. `['Oswald Bold']`. Bold and italic are
+   *  separate stacks, not properties — see §2.3. */
+  font: string[];
+  placement: 'point' | 'line' | 'line-center';
+  allowOverlap: boolean;
+  minZoom?: number;
+  maxZoom?: number;
+}
 ```
 
 **No conditional fields.** A `PointSymbol` has no `fillColor` because points have no fill.
 The type system prevents the UI from offering it, which is more reliable than a runtime check.
+
+### 2.2 What MapLibre cannot do, and what we do instead
+
+Four things the formatting model has to work around rather than express directly. Each was
+checked against the style spec and against a running MapLibre, not assumed.
+
+**Polygon outlines have no width.** `fill-outline-color` is always one pixel and takes no
+width property, so `PolygonSymbol.outlineWidth` compiles to a **companion `line` layer** above
+the fill. Every polygon layer is therefore two MapLibre layers. The user is never shown this:
+one layer in the tree, one entry in the legend, one thing to edit.
+
+**`line-dasharray` cannot be data-driven.** It accepts no property expressions, so line *type*
+by column value is not offered — colour is. It also cannot interpolate smoothly across zoom,
+and its units are multiples of line width, so a data-driven width makes the dashes breathe.
+A layer that genuinely needs dash-by-category expresses it as `RuleBased`, which compiles to
+one MapLibre layer per pattern.
+
+**Text size is in screen pixels and fixed by default.** `LabelSymbol.size` is in *points*, so
+it compiles to pixels; `sizeMode` decides what happens as the map zooms:
+
+- `fixed` — the same size on screen at every zoom. MapLibre's own default.
+- `scale-with-map` — the same size on the ground, compiled as an `interpolate` with
+  `["exponential", 2]` on zoom, which matches the doubling of scale per zoom level. It is an
+  approximation; nothing in the style spec does it exactly.
+
+The render service outputs at 2x for slides, so the point-to-pixel conversion has to scale
+with the render, not be baked at authoring time.
+
+**Grids are not coloured by MapLibre at all.** See §5.2.
+
+### 2.3 Fonts
+
+MapLibre has no system-font fallback. `text-font` names a **font stack** and the renderer
+fetches signed-distance-field glyphs from the style's `glyphs` URL. A stack it cannot fetch
+draws nothing — silently, with no console error and no failed-tile warning, so the failure
+looks like a map that simply has no labels.
+
+**Bold and italic are not properties.** Each is its own stack built from its own font file, so
+"Oswald Bold" and "Oswald Regular" are two glyph sets. The formatting UI offers family, weight
+and style as separate controls and composes the stack name from them.
+
+`scripts/fetch_fonts.py` builds the roster — ten families chosen for variety, all SIL OFL or
+Apache 2.0 so an internal deployment may redistribute them:
+
+| Family | Style | Why |
+|---|---|---|
+| Noto Sans | Humanist sans | Broadest coverage; the default |
+| Open Sans | Neutral humanist | The most common web-map label face |
+| Roboto | Neo-grotesque | Tighter, more mechanical texture |
+| Source Sans 3 | Humanist | Clean at small sizes |
+| Lato | Warm semi-rounded | A softer texture |
+| PT Sans | Slightly narrow | Dense labelling |
+| Oswald | Condensed | Contour labels and tight polygons |
+| Noto Serif | Serif | Traditional for physical-feature names |
+| Playfair Display | Display serif | Titles and map furniture |
+| Roboto Mono | Monospace | Coordinates and grid references |
+
+**29 stacks, not 30: Oswald has no italic.** The UI disables the italic control when Oswald is
+selected rather than offering one that does nothing — and a test asserts the absence, so
+nobody later "fixes" it by synthesising a slant.
+
+The API serves the ranges at `/static/glyphs/{fontstack}/{start}-{end}.pbf`, unauthenticated:
+they are open-licensed outlines carrying no user data, and requiring a token would mean the
+isolated render worker needed one to draw a label. `GET /static/glyphs` lists what this
+deployment actually built, and the styling UI reads it rather than hard-coding a font list, so
+a font that failed to build is absent rather than offered and then blank.
 
 ---
 
@@ -342,6 +431,111 @@ structure because that is what geologists expect even though it is perceptually 
 the perceptual caveat as a tooltip rather than removing the option.
 
 ---
+
+### 5.2 Colouring a grid
+
+**MapLibre never colours a grid.** Raster layers have no data-driven paint, so the colour is
+baked into the PNG by TiTiler before the browser sees it — MapLibre draws a picture. There are
+no values left to write an expression against, which is why a grid's palette travels as a tile
+parameter rather than in the style.
+
+```
+COG (float32, one band)
+   -> API /api/v1/cog/{dataset}/{z}/{x}/{y}.png     permission check, colour params
+      -> TiTiler                                     float -> RGBA, server side
+         -> MapLibre raster layer                    draws the result
+```
+
+MapLibre still owns `raster-opacity` — the layer's fill transparency — plus resampling, draw
+order and zoom range. Nothing else about the colour.
+
+**Both scale types are expressible, and they work differently.**
+
+| Mode | Sent as | Units | Comparable across grids? |
+|---|---|---|---|
+| **Interval** | a list of `[[min,max],[r,g,b,a]]` bands | **raw data** | Yes — the bands say what they mean |
+| **Gradient** | a 0-255 lookup plus `rescale` | normalised | No — the same colour is a different value on every grid |
+
+A band list is a direct lookup: no interpolation and no normalisation, so the rendered pixels
+are byte-for-byte the colours the palette editor chose.
+
+**The two must never be combined.** `rescale` normalises the data to 0-255 *before* the
+colormap applies, so a band list sent alongside one has its bounds compared against 0-255 and
+nothing ever matches — the whole tile renders transparent behind a 200 response. The endpoint
+therefore drops its *default* rescale when the colormap is a band list, while still honouring
+one a caller asked for explicitly.
+
+**Implicit minimums must be closed at both ends.** The interval editor takes only maximums —
+the minimum of each band is the maximum of the one below. The compiler extends the first band
+down to the data floor and the last up to the ceiling, so a value below the lowest entry or
+above the highest clamps to the end colour. Uncovered values render **transparent**, and a
+hole in a grid is indistinguishable from no-data, which is the one thing the extrapolation
+reporting exists to prevent.
+
+Genuine no-data stays transparent, because it comes from the COG's nodata rather than from the
+colormap. That is what lets a blanked or clipped area show the basemap through.
+
+#### The range a gradient scales across
+
+`dataset.value_min` / `value_max` is the **display range**, not the extremes, and the tile
+endpoint uses it as the default `rescale`. Without it TiTiler stretches each tile to *that
+tile's* local range and the map becomes a patchwork — for a while every grid the gridding job
+produced rendered exactly that way, because the job recorded no range at all.
+
+Derived grids record **P5-P95** of their finite cells (`gridding.DISPLAY_PERCENTILES`).
+Not the minimum and maximum, because minimum curvature overshoots into extrapolated corners
+and the overshoot is unbounded. Measured on one run:
+
+| | Range | Span | Share of ramp given to the signal |
+|---|---|---|---|
+| Control data | -10,371 to -7,521 | 2,850 ft | — |
+| Grid extremes | -10,441 to **-248** | 10,193 ft | 28% |
+| **P5-P95 (stored)** | -10,007 to -6,098 | 3,909 ft | **73%** |
+
+Values outside clamp to the end colours. The surface's true extremes are not lost — they are
+in the job result's `diagnostics.output_range`, beside the input range they should be compared
+against, and the legend states the percentiles so a suspiciously flat maximum is explicable
+rather than mysterious.
+
+#### Bands snap to the contour interval
+
+When a grid is displayed with contours, the colour bands default to **the contour levels
+themselves**. Unaligned bands produce colour edges that wander across the contour lines and
+look wrong to people who cannot say why; aligned, the map reads as one object.
+
+One set of levels therefore drives three renderings, with nothing to keep in sync because
+there is only one list:
+
+| Rendering | What it is |
+|---|---|
+| Contour lines | LineStrings at the levels |
+| Colour-filled grid | Discrete colormap with bands *at* those levels |
+| Polygon bands | Filled contour output between the same levels |
+
+The snap is on by default when contours are present and can be turned off — a gradient is the
+better choice when the gradient itself is the message, as for porosity or saturation, where
+banding invents boundaries the data does not have.
+
+#### Clipping
+
+A grid can be clipped to a polygon layer, or to selected features of one, with the sense
+invertible so an area can be excluded as well as included. **The clip sets cells to nodata in
+the grid**, either at gridding time as a job parameter or as a small job producing a derived
+grid with lineage to both inputs.
+
+Not a per-tile mask: masking each tile as it is proxied measured at 21 ms median, and a pan
+touches around twenty tiles. That buys nothing except avoiding a duplicate COG of a few
+megabytes, and costs the lineage and the ability to export the clipped surface.
+
+Nothing changes in rendering, because nodata is already transparent.
+
+Two things a clipped grid must recompute or it lies: its **extrapolation fraction**, since
+clipping away an invented corner is a legitimate way to make a grid honest, and its **display
+range**, or the legend spans values no longer on the map.
+
+Clipping is also the cleanest answer to extrapolation. A **clip to the control** preset — the
+convex hull of the control points, or everything within the search radius the diagnostics
+already compute — removes the unsupported area rather than warning about it.
 
 ## 6. Schema-driven property editor
 
