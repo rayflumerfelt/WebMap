@@ -61,9 +61,12 @@ Neither blocks later phases; the first must be closed on deployment day.
   claim name, and whether groups arrive as object ids or display names.
 - **Ownership transfer is blocked, not implemented.** Migration `0002` installs
   a trigger refusing ownership changes through an ordinary UPDATE, because the
-  RLS `WITH CHECK` did not catch them. Building the audited transfer operation
-  `03-auth-security.md` §3.3 describes means opening both that trigger and the
-  UPDATE policies — deliberately two decisions. Nobody has needed it yet.
+  RLS `WITH CHECK` did not catch them, and leaves
+  `webmap.allow_ownership_transfer` as a transaction-local escape for the
+  audited operation `03-auth-security.md` §3.3 describes.
+  **`adr/0010` §5 is the driver that was missing**: recovering a departed
+  colleague's private work is a transfer rather than an administrator read, so
+  this lands in Phase 5 with layers and basemaps.
 
 ### Operational notes
 
@@ -345,6 +348,8 @@ produces the same wrong surface with nothing said about it.
 - **Capability roles**: `app_user.is_global_admin`, `team_member.role`, and the
   administration screens they gate
 - **Default basemaps** across the user / team / global tiers, keyed on presentation
+- **Ownership transfer** for a deactivated user's objects — the audited operation
+  `03-auth-security.md` §3.3 specifies and `migration 0002` left an escape hatch for
 
 **Acceptance**
 
@@ -368,6 +373,9 @@ produces the same wrong surface with nothing said about it.
 - [ ] Removing a user from a team leaves everything they own intact
 - [ ] A deactivated user cannot sign in, and their team-visible layers still resolve in a
       colleague's map
+- [ ] A global administrator can transfer a deactivated user's private layer to a named owner
+      **without being able to read it** — the test that keeps the confidentiality claim honest
+- [ ] The same transfer is refused for an *active* user's objects
 
 ---
 

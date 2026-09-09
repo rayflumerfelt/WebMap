@@ -84,6 +84,7 @@ Delaware" is ordinary and a single four-value enum cannot say it.
 | Manage membership of a locally-managed team | that team's administrator, or global |
 | Set team defaults | that team's administrator, or global |
 | Set global defaults, create and deactivate users | global administrator |
+| **Transfer a deactivated user's objects to a named owner** | global administrator |
 
 **"Team Member" is not stored.** The requirement distinguishes it from "User" only by
 belonging to a team, which `team_member` already records. A stored role would be a second
@@ -132,7 +133,7 @@ a preference would change someone else's map with no visible cause. If determini
 arbitrary proves annoying, `user_preferences.primary_team_id` is the fix, and it can be added
 without changing the rule above.
 
-### 5. Users are deactivated, never deleted
+### 5. Users are deactivated, never deleted — and their work is transferred, not read
 
 `app_user.is_active = false`. They cannot sign in. **Their objects remain**, owned by them and
 still visible per their visibility and grants — which is the entire point: deleting a
@@ -144,6 +145,42 @@ requirement states. Objects they published to that team stay owned by them and k
 
 Deactivation shows what the account owns before confirming, and is audited. `lineage.created_by`
 and `audit_event.actor_user_id` keep pointing at a real row, which an erasable user would not.
+
+**That leaves private work stranded, and the answer is transfer rather than read.** A geologist
+evaluating an acquisition keeps it private, leaves the company, and the work is unreachable —
+a real problem, and the obvious fix is the wrong one. Granting administrators read access to
+private objects would solve it by removing the guarantee, and a confidentiality claim that
+depends on how a deployment is configured is not one anyone can rely on.
+
+Reading an object and recovering it are different operations:
+
+> A global administrator may **reassign ownership of a deactivated user's objects** to a named
+> person, without being able to read them. The new owner then has ordinary access.
+
+The mechanism already exists. `migration 0002` forbids ownership changes through an ordinary
+UPDATE and provides `webmap.allow_ownership_transfer` as a transaction-local escape for
+exactly this operation; `03-auth-security.md` §3.3 and §10 already require it to be explicit
+and audited. This is the driver that was missing.
+
+**Restricted to deactivated users, because transfer-to-self is the loophole.** An administrator
+who could reassign any object to themselves would hold de facto read access to everything, and
+the guarantee would be theatre. So an active user's work is shareable by its owner and by
+nobody else. Someone on long leave is deactivated first — two audited steps rather than one,
+and the deactivation is itself visible.
+
+Every transfer records actor, source owner, target owner, object and a stated reason. Forcing
+a second person's name into the record is worth more than it looks.
+
+**The residual exposure is metadata, and it is accepted rather than solved.** An administrator
+running a transfer sees layer and basemap *names*. For a live acquisition the codename often
+is the leak. Blinding the transfer screen would make it unusable — you cannot hand work to the
+right person without knowing what it is — so the exposure is audited instead. It is also why
+A&D teams already use codenames.
+
+**The cheapest fix is not code.** Work is only stranded when it is kept private. A project
+held at `visibility = 'team'` in a small restricted team is confidential from the rest of the
+organisation *and* survives any one person leaving, with no administrator involved. That is
+the shape to push project work toward; transfer is the safety net for when nobody did.
 
 ## Consequences
 
@@ -170,6 +207,14 @@ two-gigabyte COG because someone clicked Duplicate is avoidable and would be sur
 authorization boundary.** The API checks permission on every request regardless of what the
 client considers active. Written down because the rule reads like a security control and is
 not one.
+
+**Break-glass read is anticipated and deliberately not designed.** Legal hold and compliance
+investigation are genuine reasons an administrator might need to read a private object, and
+transfer does not cover them. The shape would be an explicit, reasoned, time-boxed and loudly
+audited elevation rather than a standing permission — but it is better designed against a
+concrete requirement than speculatively, and transfer covers every operational case we have.
+If it is built, the property to preserve is that using it is *visible afterwards* to someone
+other than the person who used it.
 
 **Roadmap.** Layers, basemaps and defaults are Phase 5 work (`12-roadmap.md`), alongside the
 styling and editing surface they belong to. The capability roles are smaller and can land with

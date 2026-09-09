@@ -138,6 +138,7 @@ Capabilities come from two columns: `app_user.is_global_admin` and `team_member.
 | Manage membership of a locally-managed team | that team's administrator, or a global one |
 | Set team defaults | that team's administrator, or a global one |
 | Set global defaults; create and deactivate users | a global administrator |
+| Transfer a **deactivated** user's objects to a named owner | a global administrator |
 
 Two consequences worth stating plainly:
 
@@ -150,6 +151,11 @@ A capability never narrows object permission and object permission never grants 
 A global administrator holds no implicit read access to a private layer: administering the
 deployment is not the same as being able to read everyone's work, and conflating them would
 make the audit log's answer to "who saw this" much less useful.
+
+Recovering a departed colleague's private work is therefore a **transfer**, not a read
+(`adr/0010` §5). Ownership moves to a named person who then has ordinary access; the
+administrator never sees the contents. It is restricted to *deactivated* users because
+transfer-to-self would otherwise be a read permission wearing a different name.
 
 ---
 

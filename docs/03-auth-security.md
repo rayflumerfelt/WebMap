@@ -217,7 +217,21 @@ which turns a dead end into a next step.
 - A grant can widen access, never narrow it. There is no "deny" grant.
 - Granting `editor` on a dataset does **not** grant permission to delete it. Delete is
   owner-only.
-- Transferring ownership is an explicit operation, audited.
+- Transferring ownership is an explicit operation, audited. `migration 0002` forbids it
+  through an ordinary UPDATE and exposes `webmap.allow_ownership_transfer` as the
+  transaction-local escape the operation sets.
+
+**Transfer is how a departed colleague's private work is recovered** (`adr/0010` §5), and it
+is deliberately not a read:
+
+- A global administrator may transfer the objects of a **deactivated** user to a named owner.
+  The new owner then has ordinary access; the administrator never reads the object.
+- **Only deactivated users.** An active user's work is shareable by its owner alone.
+  Transfer-to-self on an active user's objects would be read access under another name, which
+  is precisely the guarantee this preserves.
+- Someone on long leave is deactivated first — two audited steps, and the deactivation is
+  itself visible.
+- The audit record carries actor, source owner, target owner, object and a stated reason.
 
 ### 3.4 Setting RLS context
 
@@ -614,7 +628,8 @@ Every one of these emits an `audit_event` (`02-data-model.md` §3.12):
 - Dataset read via MCP (not via tiles — too high volume)
 - Dataset create, update, delete
 - Grant create and revoke
-- Ownership transfer
+- Ownership transfer, with source owner, target owner and the stated reason
+- User deactivation and reactivation
 - Export and download
 - Render creation
 - Job submission
@@ -644,6 +659,9 @@ Retention: 2 years minimum. Confirm against corporate policy before launch.
       no implicit read access to a private object (`adr/0010` §2)
 - [ ] `visibility = 'org'` refused to a non-administrator
 - [ ] A membership write against a directory-synced team is refused and names the group
+- [ ] Ownership transfer is refused for an **active** user's objects — the loophole that would
+      turn transfer into read access (`adr/0010` §5)
+- [ ] A transfer emits an audit record naming source owner, target owner and reason
 
 **Local credentials — `managed` mode only.** None of this applies to a `directory`
 deployment, which has no local credential to protect.
