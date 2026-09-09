@@ -27,6 +27,7 @@ __all__ = [
     "Transformer",
     "axis_units",
     "crs_of",
+    "epsg_from_user_input",
     "frame_for",
     "is_geographic",
     "transform_bbox",
@@ -162,3 +163,25 @@ def transform_bbox(
         float(px[finite].max()),
         float(py[finite].max()),
     )
+
+
+def epsg_from_user_input(description: str, *, min_confidence: int = 70) -> int | None:
+    """Identify a CRS description as an EPSG code, or return None.
+
+    Takes WKT, PROJ strings, or an "EPSG:xxxx" token — whatever a file's
+    `.prj` or embedded metadata happens to hold. Lives here rather than in
+    `webmap_io` because it is a pyproj call, and adr/0003 puts all of those in
+    this module.
+
+    `min_confidence` is the important argument. `to_epsg()` defaults to a
+    permissive match and will happily return a code for a projection that is
+    merely *similar* — a near-miss datum that shifts everything a few hundred
+    metres and raises nothing. Refusing to identify is the safe answer,
+    because the caller's response is to ask the user rather than to guess.
+    """
+    try:
+        crs = CRS.from_user_input(description.strip())
+    except Exception:
+        return None
+    epsg = crs.to_epsg(min_confidence=min_confidence)
+    return int(epsg) if epsg is not None else None
