@@ -35,6 +35,9 @@ from webmap_mcp.errors import describe_http_error
 from webmap_mcp.format import (
     dataset_detail,
     dataset_table,
+    job_list,
+    job_status,
+    job_submitted,
     render_summary,
     search_results,
     session_detail,
@@ -262,6 +265,353 @@ async def webmap_list_projects() -> str:
             f"| `{short_id(item.get('id', ''))}` |"
         )
     return "\n".join(lines)
+
+
+# --- Analysis ----------------------------------------------------------------
+#
+# `04-mcp-server.md` §5. These are the tools the whole system exists for, and
+# they share one shape: submit, get a handle, poll. Nothing here runs the
+# analysis — it crosses the API into a worker, which is what makes a
+# forty-second krige survivable in a conversation.
+
+
+#: Not read-only — each call registers a dataset. Not destructive either,
+#: since nothing is overwritten, and not idempotent, because two calls with
+#: different parameters are two surfaces. The hour-long dedupe window (`10`
+#: §10) covers the retry case without claiming idempotency in the annotation,
+#: which would invite a client to retry freely for other reasons too.
+SUBMITS_JOB = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=False,
+)
+
+
+@mcp.tool(annotations=SUBMITS_JOB)
+async def webmap_interpolate(
+    dataset_id: Annotated[
+        UUID, Field(description="Point dataset containing the values to interpolate.")
+    ],
+    value_field: Annotated[
+        str,
+        Field(
+            description=(
+                "Attribute field holding the value to grid. Must be numeric. "
+                "Check webmap_describe_dataset for field names."
+            )
+        ),
+    ],
+    output_name: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "Name for the resulting grid, e.g. 'Wolfcamp A Porosity - "
+                "Kriged'. Omit to name it after the source and method."
+            ),
+        ),
+    ] = None,
+    method: Annotated[
+        Literal["ordinary_kriging", "minimum_curvature", "idw", "nearest"],
+        Field(
+            "ordinary_kriging",
+            description=(
+                "ordinary_kriging: best general choice; models spatial "
+                "correlation and gives uncertainty. minimum_curvature: smooth "
+                "surface honouring all data points, the Surfer default and what "
+                "geologists usually expect for structure maps, and the only "
+                "method here that honours faults. idw: fast and robust, produces "
+                "bull's-eyes around control points. nearest: diagnostic only - "
+                "use it to see where control exists, not to contour."
+            ),
+        ),
+    ] = "ordinary_kriging",
+    fault_dataset_id: Annotated[
+        UUID | None,
+        Field(
+            None,
+            description=(
+                "Fault network to honour. Interpolation will not cross features "
+                "marked as faults. Strongly recommended for any structure or "
+                "thickness map in a faulted area - omitting it produces "
+                "geologically wrong surfaces that still look plausible. "
+                "Currently honoured by minimum_curvature only; ordinary_kriging "
+                "says so in its warnings rather than silently ignoring it."
+            ),
+        ),
+    ] = None,
+    cell_size: Annotated[
+        float | None,
+        Field(
+            None,
+            gt=0,
+            description=(
+                "Grid cell size in the project's analysis-CRS units, usually feet "
+                "or metres - check webmap_list_projects. Omit to derive one from "
+                "the data's extent."
+            ),
+        ),
+    ] = None,
+    project_id: Annotated[
+        UUID | None,
+        Field(
+            None,
+            description=(
+                "Project whose analysis CRS the grid is built in. Omit to use the "
+                "source dataset's own CRS."
+            ),
+        ),
+    ] = None,
+    n_neighbors: Annotated[
+        int,
+        Field(
+            48,
+            ge=8,
+            le=256,
+            description=(
+                "Points in the local search neighbourhood. Higher is smoother and "
+                "slower. 32-64 is typical."
+            ),
+        ),
+    ] = 48,
+    max_radius: Annotated[
+        float | None,
+        Field(
+            None,
+            gt=0,
+            description=(
+                "Search radius in analysis-CRS units. Cells with no control point "
+                "inside it are left blank rather than invented."
+            ),
+        ),
+    ] = None,
+    tension: Annotated[
+        float,
+        Field(
+            0.0,
+            ge=0.0,
+            le=1.0,
+            description=(
+                "Minimum curvature only. 0 is pure minimum curvature; higher "
+                "values reduce overshoot near steep gradients at the cost of some "
+                "smoothness."
+            ),
+        ),
+    ] = 0.0,
+) -> str:
+    """Interpolate scattered point data into a gridded surface.
+
+    Returns a job handle immediately - gridding takes seconds to minutes
+    depending on point count and method. Poll with webmap_get_job.
+
+    On completion the job result contains the new grid's dataset_id, which can
+    be passed to webmap_render_map or webmap_contour. It also contains
+    diagnostics and warnings: how much of the surface is extrapolated, whether
+    it overshot the data's range, and how many control points were dropped for
+    having no value. Read them before describing the map - a gridded surface
+    looks identical whether it came from 1,847 wells or from six.
+    """
+    source = await _get(f"/api/v1/datasets/{dataset_id}")
+
+    detail = [
+        f"- **Method**: {method.replace('_', ' ')}",
+        f"- **Input**: {source.get('name')} ({source.get('feature_count') or '?'} points)",
+        f"- **Field**: {value_field}",
+    ]
+    if fault_dataset_id:
+        faults = await _get(f"/api/v1/datasets/{fault_dataset_id}")
+        honoured = (
+            "will be honoured"
+            if method == "minimum_curvature"
+            else "NOT honoured by this method"
+        )
+        detail.append(f"- **Faults**: {faults.get('name')} - {honoured}")
+    if cell_size:
+        detail.append(f"- **Cell size**: {cell_size:g}")
+
+    submitted = await _post(
+        "/api/v1/jobs/interpolate",
+        _clean_params(
+            {
+                "dataset_id": str(dataset_id),
+                "value_column": value_field,
+                "output_name": output_name,
+                "method": method,
+                "fault_dataset_id": str(fault_dataset_id) if fault_dataset_id else None,
+                "cell_size": cell_size,
+                "project_id": str(project_id) if project_id else None,
+                "n_neighbors": n_neighbors,
+                "max_radius": max_radius,
+                "tension": tension,
+            }
+        ),
+    )
+    return job_submitted(submitted, what="Gridding job", detail=detail)
+
+
+@mcp.tool(annotations=SUBMITS_JOB)
+async def webmap_contour(
+    dataset_id: Annotated[UUID, Field(description="Grid dataset to contour.")],
+    output_name: Annotated[
+        str | None, Field(None, description="Name for the resulting contour layer.")
+    ] = None,
+    interval: Annotated[
+        float | None,
+        Field(
+            None,
+            gt=0,
+            description=(
+                "Contour interval in the grid's value units. Omit for an automatic "
+                "interval that is a round number a geologist would choose, giving "
+                "roughly 10-20 contours."
+            ),
+        ),
+    ] = None,
+    levels: Annotated[
+        list[float] | None,
+        Field(
+            None,
+            description=(
+                "Explicit contour values. Overrides interval - use this to match "
+                "an existing map exactly."
+            ),
+        ),
+    ] = None,
+    smoothing: Annotated[
+        float,
+        Field(
+            0.0,
+            ge=0.0,
+            le=0.5,
+            description=(
+                "0 = raw contours following grid cells exactly. 0.3-0.5 is typical "
+                "for presentation maps. Capped at 0.5: beyond it a contour drifts "
+                "measurably off the value it is labelled with, which is a lie on a "
+                "map somebody will measure."
+            ),
+        ),
+    ] = 0.0,
+    index_every: Annotated[
+        int,
+        Field(
+            5,
+            ge=2,
+            le=20,
+            description=(
+                "Every Nth contour is marked as an index contour for heavier "
+                "styling and labelling. 5 is the convention on published structure "
+                "maps."
+            ),
+        ),
+    ] = 5,
+) -> str:
+    """Generate contour lines from a gridded surface.
+
+    Returns a job handle. The output is a vector dataset carrying each line's
+    value and whether it is an index contour, suitable for rendering or export.
+    """
+    source = await _get(f"/api/v1/datasets/{dataset_id}")
+
+    detail = [f"- **Input**: {source.get('name')}"]
+    if levels:
+        detail.append(f"- **Levels**: {len(levels)} explicit values")
+    elif interval:
+        detail.append(f"- **Interval**: {interval:g}")
+    else:
+        detail.append("- **Interval**: automatic (a round number)")
+
+    submitted = await _post(
+        "/api/v1/jobs/contour",
+        _clean_params(
+            {
+                "dataset_id": str(dataset_id),
+                "output_name": output_name,
+                "interval": interval,
+                "levels": levels,
+                "smoothing": smoothing,
+                "index_every": index_every,
+            }
+        ),
+    )
+    return job_submitted(submitted, what="Contouring job", detail=detail)
+
+
+# --- Jobs --------------------------------------------------------------------
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def webmap_get_job(
+    job_id: Annotated[UUID, Field(description="Job id from a submission response.")],
+) -> str:
+    """Check the status of a long-running operation.
+
+    States: queued, running, succeeded, failed, cancelled. When running,
+    includes progress and a description of the current phase. When succeeded,
+    includes the output dataset_id, diagnostics, and any warnings about the
+    result.
+
+    Poll no more than once every few seconds - the response says how long to
+    wait. Typical gridding jobs finish in 20-90 seconds. A job that says
+    `queued` has not been lost; do not resubmit it.
+    """
+    return job_status(await _get(f"/api/v1/jobs/{job_id}"))
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def webmap_list_jobs(
+    active_only: Annotated[
+        bool, Field(False, description="Only jobs that are queued or running.")
+    ] = False,
+    limit: Annotated[int, Field(25, ge=1, le=100)] = 25,
+) -> str:
+    """List your recent analysis jobs.
+
+    Use this when you have lost track of a job id, or to check whether the
+    analysis the user is asking about is already running before submitting a
+    second one.
+    """
+    return job_list(await _get("/api/v1/jobs", {"active_only": active_only, "limit": limit}))
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        # Destructive: it stops work in progress and discards its output.
+        # `03-auth-security.md` §8 pairs that hint with an explicit confirm.
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    )
+)
+async def webmap_cancel_job(
+    job_id: Annotated[UUID, Field(description="Job to stop.")],
+    confirm: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Must be true. Cancelling discards the job's work - a grid "
+                "part-way through solving produces nothing."
+            ),
+        ),
+    ] = False,
+) -> str:
+    """Stop a queued or running job.
+
+    Cancellation is cooperative: a queued job stops immediately, a running one
+    stops at its next checkpoint, within a few seconds for most steps. Nothing
+    partial is registered either way, so a cancelled gridding job leaves no
+    dataset behind.
+    """
+    if not confirm:
+        return (
+            f"Cancelling job {job_id} discards whatever it has computed so far, "
+            f"and a grid part-way through solving produces nothing. Call again "
+            f"with confirm=true if that is what the user wants."
+        )
+    result = await _post(f"/api/v1/jobs/{job_id}/cancel")
+    return str(result.get("message", "Cancellation requested."))
 
 
 def main() -> None:

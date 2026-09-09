@@ -65,8 +65,18 @@ def _date(value: Any) -> str:
 def dataset_table(payload: dict[str, Any]) -> str:
     """The list/search response from `04-mcp-server.md` §4.1.
 
-    Dense and scannable, ids present but not dominant — a geologist refers to
-    a layer by name, and Claude needs the id only to make the next call.
+    Dense and scannable — a geologist refers to a layer by name, and Claude
+    needs the id only to make the next call.
+
+    **The id is shown in full, where `04` §4.1's example shows `9f3a…c21b`.**
+    That example contradicts the tool it feeds: `webmap_describe_dataset`
+    takes a UUID, and a truncated one cannot be expanded, so the documented
+    flow — "find a dataset with webmap_search_datasets, inspect it with
+    webmap_describe_dataset" — has no way to pass an id along. The gap had
+    already been papered over: a test reached past the tools into the private
+    HTTP helper to get an id, with a comment saying the table's was too short
+    to use. Thirty-six characters a row is a small price for the column being
+    an identifier rather than a decoration.
     """
     items = payload.get("items", [])
     total = payload.get("total", len(items))
@@ -97,7 +107,7 @@ def dataset_table(payload: dict[str, Any]) -> str:
             f"| {clean(item.get('kind'))} "
             f"| {_count(item.get('feature_count'))} "
             f"| {_date(item.get('updated_at') or item.get('synced_at'))} "
-            f"| `{short_id(item.get('id', ''))}` |"
+            f"| `{clean(item.get('id', ''))}` |"
         )
 
     if payload.get("has_more"):

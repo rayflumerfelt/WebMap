@@ -268,15 +268,15 @@ async def test_describing_an_invisible_dataset_fails_with_a_next_step(
     import re
 
     ada = await _tools_as("ada", api_base_url)
-    listing = await ada.webmap_list_datasets()
-    # The table shows a shortened id; fetch the full one via search instead.
-    assert re.search(r"`[0-9a-f]{8}…", listing)
 
-    # Named by kind rather than taken as items[0]: the seed grants Alan's team
-    # the fault network, so "the first dataset Ada can see" is not reliably one
-    # Alan cannot. A test of refusal has to pick something actually refused.
-    payload = await ada._get("/api/v1/datasets", {"kind": "pointset", "limit": 1})
-    dataset_id = payload["items"][0]["id"]
+    # Named by kind rather than taken as the first row: the seed grants Alan's
+    # team the fault network, so "the first dataset Ada can see" is not
+    # reliably one Alan cannot. A test of refusal has to pick something
+    # actually refused.
+    listing = await ada.webmap_list_datasets(kind="pointset")
+    found = re.findall(r"`([0-9a-f-]{36})`", listing)
+    assert found, "the listing must carry an id usable by the next tool call"
+    dataset_id = found[0]
 
     alan = await _tools_as("alan", api_base_url)
     with pytest.raises(RuntimeError) as excinfo:
@@ -295,3 +295,111 @@ async def test_the_channel_header_marks_calls_as_claude(api_base_url: str) -> No
     async with ada.api() as client:
         assert client.headers["X-WebMap-Channel"] == "claude"
         assert client.headers["Authorization"].startswith("Bearer ")
+
+
+# --- analysis, against the live stack ---------------------------------------
+
+
+async def test_a_grid_can_be_made_and_polled_entirely_through_the_tools(
+    api_base_url: str,
+) -> None:
+    """**The conversation Phase 4 exists to support**, driven through the tool
+    surface rather than around it: find a layer, grid it, poll, contour the
+    result.
+
+    Nothing is stubbed. Each call crosses HTTP into the API, the job crosses
+    Redis into the worker, and what comes back is the text Claude would read.
+    """
+    import asyncio
+    import re
+    import uuid
+
+    ada = await _tools_as("ada", api_base_url)
+
+    listed = await ada.webmap_list_datasets(kind="pointset")
+    ids = re.findall(r"`([0-9a-f-]{36})`", listed)
+    if not ids:
+        pytest.skip("No seeded pointset. Run: uv run python scripts/seed.py")
+    dataset_id = uuid.UUID(ids[0])
+
+    described = await ada.webmap_describe_dataset(dataset_id=dataset_id)
+    field = next(
+        (name for name in ("tvdss_ft", "porosity", "thickness_ft") if name in described),
+        None,
+    )
+    if field is None:
+        pytest.skip("The seeded pointset has none of the expected numeric fields.")
+
+    submitted = await ada.webmap_interpolate(
+        dataset_id=dataset_id,
+        value_field=field,
+        method="minimum_curvature",
+        cell_size=1000,
+        # Unique per run: idempotency is keyed on parameters for an hour, so a
+        # repeat run would otherwise be handed the previous run's job.
+        output_name=f"MCP end to end {uuid.uuid4().hex[:8]}",
+    )
+    assert "Do not call again for the same input" in submitted
+
+    job_id = uuid.UUID(re.findall(r"`([0-9a-f-]{36})`", submitted)[0])
+
+    # Poll the way the tool description tells Claude to.
+    for _ in range(60):
+        status = await ada.webmap_get_job(job_id=job_id)
+        if "succeeded" in status or "failed" in status:
+            break
+        await asyncio.sleep(2)
+
+    assert "succeeded" in status, status
+    # The only full id in a succeeded status is the output dataset's. The job
+    # id is shown short there, because reaching this response required already
+    # having it — unlike a listing, which is where a full id has to appear.
+    grid_id = uuid.UUID(re.findall(r"`([0-9a-f-]{36})`", status)[0])
+
+    contoured = await ada.webmap_contour(dataset_id=grid_id)
+    assert "Contouring job queued" in contoured
+
+
+async def test_cancelling_requires_confirmation(api_base_url: str) -> None:
+    """`03-auth-security.md` §8: a destructive tool takes an explicit confirm.
+
+    Without it the tool must not act — and must say what would be lost, so the
+    confirmation is an informed one rather than a formality.
+    """
+    import uuid
+
+    ada = await _tools_as("ada", api_base_url)
+
+    refused = await ada.webmap_cancel_job(job_id=uuid.uuid4())
+
+    assert "confirm=true" in refused
+    assert "discards" in refused
+
+
+async def test_a_job_belonging_to_someone_else_is_not_readable(
+    api_base_url: str,
+) -> None:
+    """A job's parameters name the dataset and the method, which is what
+    somebody is working on. Same rule as datasets, different table."""
+    import re
+    import uuid
+
+    ada = await _tools_as("ada", api_base_url)
+    listed = await ada.webmap_list_datasets(kind="pointset")
+    ids = re.findall(r"`([0-9a-f-]{36})`", listed)
+    if not ids:
+        pytest.skip("No seeded pointset. Run: uv run python scripts/seed.py")
+
+    submitted = await ada.webmap_interpolate(
+        dataset_id=uuid.UUID(ids[0]),
+        value_field="tvdss_ft",
+        cell_size=2000,
+        output_name=f"MCP privacy probe {uuid.uuid4().hex[:8]}",
+    )
+    job_id = uuid.UUID(re.findall(r"`([0-9a-f-]{36})`", submitted)[0])
+
+    alan = await _tools_as("alan", api_base_url)
+    with pytest.raises(RuntimeError) as excinfo:
+        await alan.webmap_get_job(job_id=job_id)
+
+    assert "belongs to someone else" in str(excinfo.value)
