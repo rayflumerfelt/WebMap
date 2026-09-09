@@ -216,7 +216,9 @@ def interpolate(
             "to see where control exists, not to contour."
         )
 
-    diagnostics = _diagnostics(coords, z, surface, grid, blocked, variogram, n_neighbors, rng)
+    diagnostics = _diagnostics(
+        coords, z, surface, grid, blocked, variogram, n_neighbors, rng, max_radius
+    )
     warnings.extend(_warnings_from(diagnostics, z, surface))
 
     return InterpolationResult(
@@ -239,10 +241,12 @@ def _diagnostics(
     variogram: FittedVariogram | None,
     n_neighbors: int,
     rng: np.random.Generator,
+    max_radius: float | None = None,
 ) -> dict[str, Any]:
     """Everything §6.5 requires, computed once."""
     finite_surface = surface[np.isfinite(surface)]
 
+    radius = _search_radius(coords, max_radius)
     diagnostics: dict[str, Any] = {
         "input_range": [float(z.min()), float(z.max())],
         "output_range": (
@@ -250,9 +254,8 @@ def _diagnostics(
             if finite_surface.size
             else None
         ),
-        # A NaN cell is one no method could estimate — outside every search
-        # radius, or in a compartment with no control at all.
-        "extrapolated_fraction": float(np.isnan(surface).mean()),
+        "extrapolated_fraction": _extrapolated_fraction(coords, surface, grid, radius),
+        "search_radius": radius,
         "n_control_points": len(coords),
     }
 
@@ -276,6 +279,74 @@ def _diagnostics(
             diagnostics["cross_validation"] = None
 
     return diagnostics
+
+
+def _search_radius(coords: NDArray[np.float64], max_radius: float | None) -> float:
+    """The distance beyond which a cell is not supported by data.
+
+    `max_radius` when the caller gave one — that is literally the search
+    radius, and kriging has already NaN'd everything past it.
+
+    Otherwise **three times the median spacing between neighbouring control
+    points**, and specifically *not* the fitted variogram range. Measured on a
+    clustered 360-pick fixture over a 52,000 x 42,000 ft area: the fitted
+    range came out at 48,290 ft — larger than the domain — so a range-based
+    radius flagged 0% of a grid that was 61% invention. The correlation length
+    a variogram reports and the distance at which a grid stops being supported
+    by observations are different quantities, and on sparse control the first
+    is routinely larger than the map.
+
+    Three times, measured on that fixture against the true surface:
+
+        radius                flagged   rms inside   rms outside
+        2x spacing  1,284 ft     72%        19 ft      1,962 ft
+        3x spacing  1,927 ft     62%        32 ft      2,126 ft
+        4x spacing  2,569 ft     53%        52 ft      2,300 ft
+
+    All three separate supported from unsupported by about two orders of
+    magnitude. 3x is taken because 32 ft is roughly a third of a typical 100 ft
+    structural contour interval: inside the radius the grid is worth
+    contouring, and outside it is not.
+    """
+    from scipy.spatial import cKDTree
+
+    if max_radius is not None:
+        return float(max_radius)
+    if len(coords) < 2:
+        return float("inf")
+
+    # k=2 because the nearest point to a control point is itself.
+    spacing = cKDTree(coords).query(coords, k=2)[0][:, 1]
+    return float(3.0 * np.median(spacing))
+
+
+def _extrapolated_fraction(
+    coords: NDArray[np.float64],
+    surface: NDArray[np.float64],
+    grid: GridDefinition,
+    radius: float,
+) -> float:
+    """`05` §6.5: "the fraction of cells with no control point within the
+    search radius".
+
+    **Measured by distance, not by NaN.** Counting NaN cells was the obvious
+    implementation and it is inert for the method most structure maps use:
+    minimum curvature fills every cell, so `isnan(surface).mean()` is always
+    0.0. A grid whose far corner sat 8,000 ft from any well, and which ran
+    11,000 ft outside the range of the data that made it, reported that 0% of
+    it was extrapolated — and that is the one number whose whole purpose is to
+    stop somebody reading structure out of invention.
+
+    A NaN cell still counts: it is a cell no method could estimate at all.
+    """
+    from scipy.spatial import cKDTree
+
+    if not np.isfinite(radius):
+        return float(np.isnan(surface).mean())
+
+    distance, _ = cKDTree(coords).query(grid.cell_centres())
+    beyond = distance.reshape(grid.ny, grid.nx) > radius
+    return float((beyond | np.isnan(surface)).mean())
 
 
 def _warnings_from(

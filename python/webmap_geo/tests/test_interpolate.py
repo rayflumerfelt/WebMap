@@ -170,6 +170,64 @@ def test_a_well_controlled_grid_carries_no_extrapolation_warning() -> None:
     assert not any("extrapolated" in w for w in result.warnings)
 
 
+def test_minimum_curvature_reports_its_extrapolation_too() -> None:
+    """**The bug this metric had.** Minimum curvature fills every cell of the
+    grid, so counting NaN cells — the obvious implementation — reported 0.0
+    for the method most structure maps actually use.
+
+    Measured on a clustered fixture, that grid ran 11,000 ft outside the data
+    it was built from while reporting that none of it was extrapolated. The
+    one number whose whole purpose is to stop someone reading structure out of
+    invention was inert for the default method.
+    """
+    rng = np.random.default_rng(SEED)
+    # Control in one corner of a much larger grid, as clustered well pads
+    # leave the rest of a lease.
+    points = rng.uniform(0.0, 600.0, size=(40, 2))
+    values = rng.normal(100.0, 5.0, size=40)
+    g = grid(nx=41, ny=41, cell=100.0)
+
+    result = interpolate(points, values, g, method=Method.MINIMUM_CURVATURE, rng=rng)
+
+    assert not np.isnan(result.surface).any(), (
+        "minimum curvature fills every cell — which is why a NaN count could not measure this"
+    )
+    assert result.diagnostics["extrapolated_fraction"] > 0.4
+    assert any("extrapolated" in w for w in result.warnings)
+
+
+def test_the_search_radius_behind_the_extrapolation_number_is_reported() -> None:
+    """A fraction with no radius attached cannot be argued with. Reporting it
+    is what lets a reader say "1,900 ft is too generous for this field"."""
+    rng = np.random.default_rng(SEED)
+    points, values = scattered(rng, n=120)
+
+    result = interpolate(points, values, grid(), method=Method.MINIMUM_CURVATURE, rng=rng)
+
+    assert result.diagnostics["search_radius"] > 0
+
+
+def test_an_explicit_max_radius_is_the_search_radius() -> None:
+    """When the caller names one, that is literally the search radius, and
+    inventing a different one for the diagnostic would make the number
+    disagree with the surface it describes."""
+    rng = np.random.default_rng(SEED)
+    points = rng.uniform(0.0, 400.0, size=(30, 2))
+    values = rng.normal(100.0, 5.0, size=30)
+
+    result = interpolate(
+        points,
+        values,
+        grid(nx=41, ny=41, cell=100.0),
+        method=Method.ORDINARY_KRIGING,
+        variogram=FittedVariogram(model="spherical", nugget=0.0, sill=25.0, range_=500.0),
+        max_radius=500.0,
+        rng=rng,
+    )
+
+    assert result.diagnostics["search_radius"] == 500.0
+
+
 def test_the_input_and_output_ranges_are_both_reported() -> None:
     """Overshoot is only visible as a comparison, so both have to be there."""
     rng = np.random.default_rng(SEED)

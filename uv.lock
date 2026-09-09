@@ -3761,6 +3761,7 @@ dependencies = [
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "structlog" },
     { name = "webmap-geo" },
+    { name = "webmap-io" },
 ]
 
 [package.metadata]
@@ -3774,6 +3775,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "webmap-geo", editable = "python/webmap_geo" },
+    { name = "webmap-io", editable = "python/webmap_io" },
 ]
 
 [[package]]
