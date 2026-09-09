@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MCP evaluations. `04-mcp-server.md` §10.
+
+  Ten questions a geologist would actually ask, each needing several tool calls
+  and each verifiable by string comparison. They run against the seeded Midland
+  Basin project, which is synthetic and stable (`scripts/seed.py`).
+
+  The rules from §10, and why each matters:
+
+  - **Independent.** No question may depend on another having run, or on the
+    order they run in.
+  - **Read-only.** An evaluation that grids something would leave a dataset
+    behind and change the answer to "how many datasets are there".
+  - **Several tool calls.** A question answerable from one listing tests
+    nothing about tool selection.
+  - **Verifiable by string comparison.** `expect` holds the fragments that must
+    appear in the tool output; a rubric nobody can run is not a test.
+  - **Stable.** Nothing here depends on a value that a re-seed or a later
+    phase would move — no counts of derived datasets, no timestamps.
+  - **Structural where it matters.** Several `expect` fragments name the label
+    as well as the value (`**CRS**: EPSG:2277`, not `EPSG:2277`). The seeded
+    captions mention the CRS and the vintage in prose, so a bare value passed
+    even with the structured field deleted — the assertion was satisfied by
+    seed text rather than by the tool's own output.
+
+  `plan` records the tool calls a correct agent makes; `$1` is the first
+  dataset id the previous call returned. `inspect` reads a tool's own
+  description, for the question about which method honours faults — the answer
+  lives in the description, not in the data. `test_evaluations.py` executes
+  both: see that file for what this does and does not prove without a model in
+  the loop.
+-->
+<evaluation>
+
+  <qa_pair id="largest-pointset">
+    <question>Which dataset in the Midland Basin project has the largest number
+      of point features, and what coordinate reference system is it stored in?</question>
+    <answer>Wolfcamp A Control Points, 2,000 features, EPSG:2277</answer>
+    <plan>
+      <call tool="webmap_list_datasets"><arg name="kind">pointset</arg></call>
+      <call tool="webmap_describe_dataset"><arg name="dataset_id">$1</arg></call>
+    </plan>
+    <expect>Wolfcamp A Control Points</expect>
+    <expect>2,000</expect>
+    <expect>**CRS**: EPSG:2277</expect>
+  </qa_pair>
+
+  <qa_pair id="numeric-fields">
+    <question>I want to grid porosity from the Wolfcamp control points. Which
+      numeric attribute fields does that layer carry?</question>
+    <answer>porosity and tvdss</answer>
+    <plan>
+      <call tool="webmap_search_datasets"><arg name="query">wolfcamp control</arg></call>
+      <call tool="webmap_describe_dataset"><arg name="dataset_id">$1</arg></call>
+    </plan>
+    <expect>porosity</expect>
+    <expect>tvdss</expect>
+    <expect>number</expect>
+  </qa_pair>
+
+  <qa_pair id="grid-range">
+    <question>What is the value range of the Wolfcamp A porosity grid, and in
+      what units?</question>
+    <answer>2.0 to 17.4 percent</answer>
+    <plan>
+      <call tool="webmap_search_datasets"><arg name="query">porosity grid</arg></call>
+      <call tool="webmap_describe_dataset"><arg name="dataset_id">$1</arg></call>
+    </plan>
+    <expect>**Values**: 2.018</expect>
+    <expect>17.39</expect>
+    <expect>%</expect>
+  </qa_pair>
+
+  <qa_pair id="fault-count">
+    <question>How many features are in the Midland Basin fault network, and does
+      it contain anything other than faults?</question>
+    <answer>20 features; every fourth is a breakline, so it also contains breaklines</answer>
+    <plan>
+      <call tool="webmap_search_datasets"><arg name="query">fault</arg></call>
+      <call tool="webmap_describe_dataset"><arg name="dataset_id">$1</arg></call>
+    </plan>
+    <expect>20</expect>
+    <expect>constraint_kind</expect>
+    <expect>breakline</expect>
+  </qa_pair>
+
+  <qa_pair id="project-crs">
+    <question>What analysis CRS and horizontal unit does the Midland Basin
+      project work in?</question>
+    <answer>EPSG:2277, US survey feet</answer>
+    <plan>
+      <call tool="webmap_list_projects" />
+    </plan>
+    <expect>Midland Basin</expect>
+    <expect>2277</expect>
+    <expect>usft</expect>
+  </qa_pair>
+
+  <qa_pair id="grid-cell-size">
+    <question>At what cell size was the Wolfcamp A porosity grid built?</question>
+    <answer>500 ft</answer>
+    <plan>
+      <call tool="webmap_search_datasets"><arg name="query">porosity grid</arg></call>
+      <call tool="webmap_describe_dataset"><arg name="dataset_id">$1</arg></call>
+    </plan>
+    <expect>500</expect>
+  </qa_pair>
+
+  <qa_pair id="fault-aware-method">
+    <question>I need a structure map across a faulted area and I want the faults
+      honoured. Which interpolation method should I use, and what happens if I
+      supply the fault network to ordinary kriging instead?</question>
+    <answer>minimum_curvature honours faults; ordinary kriging does not and warns
+      that its surface is continuous across every fault</answer>
+    <!-- The one question answered from the tool surface itself rather than
+         from data: what Claude does here depends entirely on whether
+         webmap_interpolate's own description says which method honours
+         faults. `inspect` reads that description. -->
+    <plan>
+      <inspect tool="webmap_interpolate" />
+    </plan>
+    <expect>minimum_curvature</expect>
+    <expect>Euclidean</expect>
+  </qa_pair>
+
+  <qa_pair id="vintage">
+    <question>How current is the Wolfcamp A control point data?</question>
+    <answer>vintage 2026-07-31</answer>
+    <plan>
+      <call tool="webmap_search_datasets"><arg name="query">wolfcamp control</arg></call>
+      <call tool="webmap_describe_dataset"><arg name="dataset_id">$1</arg></call>
+    </plan>
+    <expect>**Vintage**: 2026-07-31</expect>
+  </qa_pair>
+
+  <qa_pair id="extent">
+    <question>Roughly what area does the Wolfcamp A control point layer cover,
+      in longitude and latitude?</question>
+    <answer>about -102.9 to -101.1 east, 31.2 to 32.3 north</answer>
+    <plan>
+      <call tool="webmap_search_datasets"><arg name="query">wolfcamp control</arg></call>
+      <call tool="webmap_describe_dataset"><arg name="dataset_id">$1</arg></call>
+    </plan>
+    <expect>**Extent** (EPSG:4326)</expect>
+    <expect>-102.9</expect>
+    <expect>32.29</expect>
+  </qa_pair>
+
+  <qa_pair id="kinds-present">
+    <question>What kinds of spatial data are available to me in this
+      deployment — points, grids, faults, or something else?</question>
+    <answer>a pointset, a grid, and a fault network</answer>
+    <plan>
+      <call tool="webmap_list_datasets" />
+    </plan>
+    <expect>pointset</expect>
+    <expect>grid</expect>
+    <expect>fault_network</expect>
+  </qa_pair>
+
+</evaluation>

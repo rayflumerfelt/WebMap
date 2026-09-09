@@ -50,8 +50,7 @@ INSTRUCTIONS = (
     "WebMap is a geospatial mapping system for subsurface geology. Use it to "
     "find spatial datasets, interpolate scattered point data into gridded "
     "surfaces (honoring geological faults, with minimum_curvature), derive "
-    "contours, and render maps "
-    "for presentations.\n\n"
+    "contours, and render maps for presentations.\n\n"
     "Typical flow: find a dataset with webmap_search_datasets, inspect it with "
     "webmap_describe_dataset, grid it with webmap_interpolate, then render with "
     "webmap_render_map. Renders return structured metadata — use it to write "
@@ -333,12 +332,14 @@ async def webmap_interpolate(
         Field(
             None,
             description=(
-                "Fault network to honour. Interpolation will not cross features "
-                "marked as faults. Strongly recommended for any structure or "
-                "thickness map in a faulted area - omitting it produces "
-                "geologically wrong surfaces that still look plausible. "
-                "Currently honoured by minimum_curvature only; ordinary_kriging "
-                "says so in its warnings rather than silently ignoring it."
+                "Fault network to honour. Honoured by minimum_curvature only, "
+                "which will not interpolate across features marked as faults. "
+                "Strongly recommended for any structure or thickness map in a "
+                "faulted area - omitting it produces geologically wrong "
+                "surfaces that still look plausible. Supplying it with a "
+                "kriging method returns a warning rather than a barrier: "
+                "kriging measures distance in a straight line, so it is "
+                "Euclidean and its surface is continuous across every fault."
             ),
         ),
     ] = None,

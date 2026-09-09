@@ -33,11 +33,14 @@ contracts clean in both languages.
 | 6 — Aggregation and polish | Not started. |
 
 **The gap worth naming** is not unwritten code — it is unwritten *harnesses*.
-`tests/visual/golden/`, `tests/e2e/` and `tests/mcp_eval/` each contain nothing but a
-`.gitkeep`, and between them they gate criteria across Phases 2, 3 and 6: everything
-that needs a browser at a real resolution, a rendered image compared against a golden, or
-Claude answering an evaluation question. The code behind those criteria is written and
-unit-tested. None of it is *demonstrated*.
+`tests/visual/golden/` and `tests/e2e/` each contain nothing but a `.gitkeep`, and
+between them they gate criteria across Phases 2, 3 and 6: everything that needs a
+browser at a real resolution or a rendered image compared against a golden. The code
+behind those criteria is written and unit-tested. None of it is *demonstrated*.
+
+`tests/mcp_eval/` is no longer among them — ten questions run against the live tool
+surface — but it tests reachability rather than tool *selection*, which is the half
+§10 cares most about and the half that needs a model.
 
 Second, `CLAUDE.md` §6.1 puts reference comparison at the highest bar in the repo for
 `webmap_geo`, and no test in the suite carries the `reference` marker. Minimum curvature
@@ -84,7 +87,7 @@ something to check, and are empty until their phase. They are not oversights:
 | `webmap_io.connectors` (file share, PostGIS) | 6 |
 | `webmap_io` readers for `.grd`, ZMAP+, KML, DXF | 6 |
 | Export and loss reporting (`11-file-io.md` §4.2, §7) | 6 |
-| `tests/visual/golden`, `tests/e2e`, `tests/mcp_eval` | 2, 3 — **overdue**, see above |
+| `tests/visual/golden`, `tests/e2e` | 2, 3 — **overdue**, see above |
 
 ---
 
@@ -238,7 +241,11 @@ The point of the project.
       — the allowlist is tested; **the container's own egress is not**
 - [x] `webmap_open_session` produces a link that loads correctly for the same user, and shows
       a helpful permission error for a different user
-- [ ] All 10 evaluations pass — **not written**; `tests/mcp_eval/` is empty
+- [~] All 10 evaluations pass — the ten questions exist and each one's answer is
+      verified *reachable* through the tool surface. **Tool selection is not tested**:
+      that needs a model in the loop, and there is none. See
+      `tests/mcp_eval/test_evaluations.py` for exactly what the harness does and does
+      not prove
 - [ ] Legends appear correctly in rendered output, matching the interactive legend — legend
       derivation is tested; **its appearance in a render is not**
 

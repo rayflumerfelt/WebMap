@@ -114,16 +114,35 @@ async def search_datasets(
 ) -> list[dict[str, Any]]:
     """Resolve an informal name to datasets. `04-mcp-server.md` §4.2.
 
-    Trigram similarity rather than prefix matching, because this is the tool
-    that turns "our fault picks" into an id and it has to be forgiving of
-    partial and misspelled terms. `pg_trgm` and the GIN index on
-    `dataset.name` exist for this query.
+    Trigram matching rather than prefix matching, because this is the tool that
+    turns "our fault picks" into an id and it has to be forgiving of partial
+    and misspelled terms. `pg_trgm` and the GIN index on `dataset.name` exist
+    for this query.
+
+    **Three matchers, because similarity alone is not forgiving of short
+    queries.** `similarity` normalises over the whole string, so a one-word
+    query against a long name scores badly however exactly it matches:
+    `similarity('Midland Basin Fault Network', 'fault')` is 0.214, under the
+    0.3 default threshold, and searching "fault" for the fault network
+    returned nothing at all. An MCP evaluation caught it, which is what those
+    are for.
+
+    - `name % :q` — whole-name similarity, which tolerates misspelling.
+    - `:q <% name` — word similarity: does the query match a *word* inside the
+      name. This is the one that answers "fault".
+    - `name ILIKE :like` — plain substring, for a query that is a fragment of
+      a word rather than a whole one ("wolfcam").
+
+    All three ride the same GIN trigram index.
 
     The bbox filter compares plain floats — `bbox_4326` is four doubles, not a
     geometry, because the control plane has no PostGIS (`adr/0002`).
     """
     limit = max(1, min(limit, 50))
-    filters = ["deleted_at IS NULL", "(name % :q OR description ILIKE :like)"]
+    filters = [
+        "deleted_at IS NULL",
+        "(name % :q OR :q <% name OR name ILIKE :like OR description ILIKE :like)",
+    ]
     params: dict[str, Any] = {"q": query, "like": f"%{query}%", "limit": limit}
     if kind is not None:
         filters.append("kind = :kind")
@@ -142,7 +161,7 @@ async def search_datasets(
             f"""
             SELECT id, name, kind, geometry_kind, feature_count, bbox_4326,
                    sync_state, synced_at, caption,
-                   similarity(name, :q) AS score
+                   greatest(similarity(name, :q), word_similarity(:q, name)) AS score
             FROM dataset WHERE {" AND ".join(filters)}
             ORDER BY score DESC, updated_at DESC
             LIMIT :limit

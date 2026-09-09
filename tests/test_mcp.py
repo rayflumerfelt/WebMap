@@ -285,6 +285,36 @@ async def test_two_users_get_different_results(api_base_url: str) -> None:
     assert "Fault Network" in alan_view, "the one dataset granted to his team"
 
 
+async def test_one_word_from_a_layers_name_finds_it(api_base_url: str) -> None:
+    """**The bug an MCP evaluation caught.**
+
+    `similarity` normalises over the whole string, so a short query against a
+    long name scores badly however exactly it matches:
+    `similarity('Midland Basin Fault Network', 'fault')` is 0.214, under
+    pg_trgm's 0.3 default. Searching "fault" for the fault network returned
+    nothing — while the tool description promises Claude that "a partial word
+    usually works".
+
+    Search had tests for scoping and for the empty case, and none for whether
+    it finds anything, which is how this survived.
+    """
+    ada = await _tools_as("ada", api_base_url)
+
+    for query in ("fault", "wolfcamp", "porosity"):
+        result = await ada.webmap_search_datasets(query=query)
+        assert "No datasets matched" not in result, (
+            f"searching {query!r} found nothing, though a seeded layer's name contains it"
+        )
+
+
+async def test_search_tolerates_a_misspelling(api_base_url: str) -> None:
+    """The other half of what trigram matching is for. A geologist asking for
+    "our wolfcam picks" should not have to spell it correctly."""
+    ada = await _tools_as("ada", api_base_url)
+
+    assert "Wolfcamp" in await ada.webmap_search_datasets(query="wolfcam")
+
+
 async def test_search_is_scoped_to_the_caller(api_base_url: str) -> None:
     """Search must not become a way to confirm a dataset exists.
 
