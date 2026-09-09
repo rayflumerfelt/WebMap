@@ -29,15 +29,24 @@ system. Every function that touches coordinates must be explicit about which it 
 4. Vertical units are tracked separately from horizontal. A grid can be feet-vertical on
    meters-horizontal. See `dataset.vertical_unit`.
 
+`webmap_geo.crs` owns `pyproj` and is the only module permitted to import it
+(`adr/0003-geoprocessing-owns-crs.md`). `CrsContext` is a **thin wrapper over
+it, not a parallel implementation** — it holds the validation that belongs at
+the boundary preparing arrays for analysis, and delegates every transform.
+
 ```python
 # python/webmap_core/crs.py
 
 from dataclasses import dataclass
-from pyproj import CRS, Transformer
-from functools import lru_cache
 
-WGS84 = 4326
-WEB_MERCATOR = 3857
+from webmap_geo import crs as geo_crs
+# Re-exported by the module that owns pyproj. Naming the type here is not
+# owning the dependency; importing pyproj directly would be.
+from webmap_geo.crs import Transformer
+from webmap_geo.frame import AnalysisFrame
+
+WGS84 = geo_crs.WGS84
+WEB_MERCATOR = geo_crs.WEB_MERCATOR
 
 
 @dataclass(frozen=True)
@@ -45,13 +54,13 @@ class CrsContext:
     """Explicit CRS context threaded through every geoprocessing call.
 
     Constructing this is the only sanctioned way to obtain a transformer.
-    Direct pyproj use outside this module is a lint error.
+    Direct pyproj use outside webmap_geo.crs is an import-linter error.
     """
     storage_srid: int
     analysis_srid: int
 
     def __post_init__(self) -> None:
-        if CRS.from_epsg(self.analysis_srid).is_geographic:
+        if geo_crs.is_geographic(self.analysis_srid):
             raise ValueError(
                 f"analysis_srid={self.analysis_srid} is geographic. "
                 "Analysis requires a projected CRS — distances and areas in "
@@ -61,19 +70,25 @@ class CrsContext:
 
     @property
     def storage_to_analysis(self) -> Transformer:
-        return _transformer(self.storage_srid, self.analysis_srid)
+        return geo_crs.transformer(self.storage_srid, self.analysis_srid)
 
     @property
     def analysis_to_storage(self) -> Transformer:
-        return _transformer(self.analysis_srid, self.storage_srid)
+        return geo_crs.transformer(self.analysis_srid, self.storage_srid)
 
+    @property
+    def frame(self) -> AnalysisFrame:
+        """The frame to hand webmap_geo entry points.
 
-@lru_cache(maxsize=256)
-def _transformer(src: int, dst: int) -> Transformer:
-    return Transformer.from_crs(
-        CRS.from_epsg(src), CRS.from_epsg(dst), always_xy=True
-    )
+        Metadata declaring what the arrays are already in. It never causes a
+        transformation — this context performs those, at the boundary.
+        """
+        return geo_crs.frame_for(self.analysis_srid)
 ```
+
+The transformer cache lives in `webmap_geo.crs`, once. A second `lru_cache`
+here would be a second implementation with its own `always_xy` decision, which
+is exactly the divergence `adr/0003` exists to prevent.
 
 ---
 
@@ -115,6 +130,7 @@ connects as a role that **cannot** bypass RLS.
 -- storage, queried by DuckDB in-process). See adr/0002-duckdb-data-plane.md.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;      -- gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS pg_trgm;       -- dataset name search
+CREATE EXTENSION IF NOT EXISTS citext;        -- app_user.email (§3.2)
 
 CREATE TYPE visibility_t     AS ENUM ('private', 'team', 'org');
 CREATE TYPE grant_role_t     AS ENUM ('viewer', 'editor');
@@ -170,6 +186,7 @@ Every ownable table repeats this block. Defined once as a SQL macro in the migra
 --   visibility     visibility_t NOT NULL DEFAULT 'team'
 --   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 --   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+--   deleted_at     TIMESTAMPTZ            -- soft delete, 30 days (03 §8)
 
 CREATE TABLE access_grant (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -185,7 +202,21 @@ CREATE TABLE access_grant (
 CREATE INDEX ON access_grant (object_type, object_id);
 CREATE INDEX ON access_grant (grantee_user_id);
 CREATE INDEX ON access_grant (grantee_team_id);
+
+-- One grant per (object, grantee). Without this, two rows can name the same
+-- grantee with different roles and a revoke removes only one of them.
+CREATE UNIQUE INDEX ON access_grant (object_type, object_id, grantee_user_id)
+    WHERE grantee_user_id IS NOT NULL;
+CREATE UNIQUE INDEX ON access_grant (object_type, object_id, grantee_team_id)
+    WHERE grantee_team_id IS NOT NULL;
 ```
+
+**On `deleted_at`.** Deletion is soft for 30 days (`03-auth-security.md` §8),
+then hard. The column is deliberately **not** filtered by the RLS policies in
+§4: deleted datasets must remain resolvable by lineage records so provenance
+chains do not break. Excluding them is the service layer's job, per query.
+Adding `AND deleted_at IS NULL` to a read policy would break every lineage
+chain that references a deleted input, and would do it silently.
 
 ### 3.4 Project
 
@@ -213,7 +244,8 @@ CREATE TABLE project (
     owner_team_id   UUID REFERENCES team(id),
     visibility      visibility_t NOT NULL DEFAULT 'team',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
 );
 ```
 
@@ -270,6 +302,7 @@ CREATE TABLE dataset (
     visibility          visibility_t NOT NULL DEFAULT 'team',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at          TIMESTAMPTZ,
 
     CONSTRAINT vector_has_parquet CHECK (
         kind NOT IN ('vector','pointset','fault_network') OR parquet_key IS NOT NULL),
@@ -379,7 +412,8 @@ CREATE TABLE palette (
     owner_team_id   UUID REFERENCES team(id),
     visibility      visibility_t NOT NULL DEFAULT 'team',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
 );
 
 CREATE TABLE style_template (
@@ -398,7 +432,8 @@ CREATE TABLE style_template (
     owner_team_id   UUID REFERENCES team(id),
     visibility      visibility_t NOT NULL DEFAULT 'team',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
 );
 
 -- Per-geologist defaults applied to every new map.
@@ -441,6 +476,7 @@ CREATE TABLE map_session (
     visibility      visibility_t NOT NULL DEFAULT 'team',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ,
     expires_at      TIMESTAMPTZ                -- NULL = permanent
 );
 CREATE INDEX ON map_session (short_code);
@@ -479,7 +515,8 @@ CREATE TABLE render (
     owner_user_id   UUID NOT NULL REFERENCES app_user(id),
     owner_team_id   UUID REFERENCES team(id),
     visibility      visibility_t NOT NULL DEFAULT 'team',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
 );
 CREATE INDEX ON render (session_id, created_at DESC);
 ```
@@ -580,6 +617,10 @@ submission. `actor_channel` is what makes "what did Claude do on my behalf" answ
 
 ```sql
 ALTER TABLE dataset ENABLE ROW LEVEL SECURITY;
+-- Policies do not apply to a table's owner unless forced, and migrations run
+-- as the role that owns these tables. Without FORCE, any query issued on the
+-- migration connection bypasses every policy below.
+ALTER TABLE dataset FORCE ROW LEVEL SECURITY;
 
 -- The app sets these per request/session; see 03-auth-security.md
 --   SET LOCAL webmap.user_id = '<uuid>';
@@ -599,8 +640,27 @@ USING (
     )
 );
 
+-- With RLS enabled and no INSERT policy, every insert is denied and the
+-- application cannot create anything. The WITH CHECK also makes "create an
+-- object owned by someone else" impossible at the database.
+CREATE POLICY dataset_insert ON dataset FOR INSERT
+WITH CHECK (owner_user_id = current_setting('webmap.user_id')::uuid);
+
+-- WITH CHECK as well as USING. USING decides which rows may be updated;
+-- without WITH CHECK, Postgres reuses it for the NEW row — which lets an
+-- editor rewrite owner_user_id to a third party and keep the row visible.
 CREATE POLICY dataset_write ON dataset FOR UPDATE
 USING (
+    owner_user_id = current_setting('webmap.user_id')::uuid
+    OR EXISTS (
+        SELECT 1 FROM access_grant g
+        WHERE g.object_type = 'dataset' AND g.object_id = dataset.id
+          AND g.role = 'editor'
+          AND (g.grantee_user_id = current_setting('webmap.user_id')::uuid
+               OR g.grantee_team_id = ANY(current_setting('webmap.team_ids')::uuid[]))
+    )
+)
+WITH CHECK (
     owner_user_id = current_setting('webmap.user_id')::uuid
     OR EXISTS (
         SELECT 1 FROM access_grant g
@@ -615,7 +675,15 @@ CREATE POLICY dataset_delete ON dataset FOR DELETE
 USING (owner_user_id = current_setting('webmap.user_id')::uuid);
 ```
 
-Repeat for `project`, `style_template`, `palette`, `map_session`, `render`.
+Repeat all four policies for `project`, `style_template`, `palette`,
+`map_session`, and `render`. The migration generates them from one list, so
+adding an ownable table without adding it to that list leaves the table
+unprotected — which is what the `assert_policies_present` startup check in
+`03-auth-security.md` §3.5 exists to catch.
+
+`current_setting` is called **without** the missing-ok flag deliberately. A
+query that reaches these tables with no principal set should raise loudly
+rather than quietly return zero rows and look like an empty result.
 
 > **The application database role must not have `BYPASSRLS`.** Verify in a startup assertion
 > and fail loudly. Migrations run as a separate privileged role.

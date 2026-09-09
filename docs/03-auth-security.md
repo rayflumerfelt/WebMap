@@ -109,7 +109,8 @@ the one query someone forgets.
 ```python
 # python/webmap_core/permissions.py
 
-from enum import IntEnum
+from dataclasses import dataclass
+from enum import IntEnum, StrEnum
 from uuid import UUID
 
 
@@ -121,13 +122,19 @@ class Permission(IntEnum):
     OWNER = 3
 
 
+@dataclass(frozen=True)
 class Principal:
-    """The authenticated actor. Constructed once per request, never mutated."""
+    """The authenticated actor. Constructed once per request, never mutated.
 
-    def __init__(self, user_id: UUID, team_ids: frozenset[UUID], channel: str):
-        self.user_id = user_id
-        self.team_ids = team_ids
-        self.channel = channel  # 'web' | 'claude'
+    Frozen, so "never mutated" is enforced rather than asserted — CLAUDE.md
+    §4.2 asks for frozen dataclasses for internal value objects, and this one
+    is threaded into RLS context and job payloads where a late mutation would
+    change who a query runs as.
+    """
+
+    user_id: UUID
+    team_ids: frozenset[UUID]
+    channel: Channel  # 'web' | 'claude' | 'worker'
 
 
 async def effective_permission(db, principal: Principal, obj) -> Permission:
@@ -383,8 +390,15 @@ def verify_tile_token(token: str, dataset_id: UUID, secret: bytes) -> UUID:
     return UUID(uid)
 ```
 
-Martin and TiTiler sit behind an auth proxy in `webmap-api` that verifies the token before
-forwarding. Neither is exposed directly.
+TiTiler sits behind an auth proxy in `webmap-api` that verifies the token before forwarding.
+It is never exposed directly.
+
+Vector tiles have no second process to proxy — `adr/0002-duckdb-data-plane.md` removed Martin,
+and MVT is now generated in-process by the API from the dataset's GeoParquet object
+(`06-rendering.md` §7). That shortens the path but does not relax the control: the MVT endpoint
+verifies the same token through the same code, before the object is opened. It has to, because
+this is the data plane, where the API is the *sole* enforcement point and RLS is not behind it
+(`02-data-model.md` §4.1).
 
 ### 6.1 The render service
 

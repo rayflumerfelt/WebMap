@@ -35,8 +35,11 @@ Scaffolding. Boring, and skipping it costs triple later.
 - [ ] `import-linter` and `eslint-plugin-boundaries` contracts fail CI (verify each with a
       deliberate violation, including a `pyproj` import outside `webmap_geo.crs`)
 - [ ] Migrations apply and roll back cleanly
-- [ ] Seed data loads and is queryable, and its GeoParquet object prunes row groups on a
-      tile-extent predicate (see `11-file-io.md` §6.1 — an unsorted write silently defeats it)
+- [ ] Seed data loads and is queryable
+- [ ] The ingest writer's Hilbert ordering prunes row groups on a tile-extent predicate,
+      asserted against a layer large enough to produce many groups — 2,000 seed points is a
+      single row group at the 128 MB target, so the seed cannot demonstrate this itself (see
+      `11-file-io.md` §6.1 — an unsorted write silently defeats it)
 
 ---
 

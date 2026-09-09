@@ -382,7 +382,13 @@ Two things carry the performance here, and both were defects in the previous Pos
   layer per tile.
 - **The tile envelope is transformed once, into storage CRS**, rather than transforming every
   feature into 3857 before comparing. 3857 → storage is separable and monotonic for the
-  projections in scope, so a corner transform is an exact bound.
+  projections in scope, so a corner transform is an exact bound *for those* — but this path is
+  reached with whatever `storage_srid` a user registered, and the predicate is only correct if
+  the bound actually **contains** the region. An oblique or conic projection curves the edges
+  outward; four corners under-cover it and features vanish from tiles with nothing logged.
+  Densify the edges rather than resting on a property holding for every CRS someone registers.
+  Twenty-odd extra point transforms against a cached transformer is not the bottleneck, and
+  the failure it prevents is invisible.
 
 Tiles are cached by `(dataset_id, version, z, x, y)`. The version in the key means an edit
 invalidates exactly the layer that changed, and nothing else, with no explicit purge.

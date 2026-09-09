@@ -54,7 +54,7 @@ enqueues jobs, and proxies tile requests. Stateless.
 
 Does *not* do heavy computation. Any operation that can exceed 2 seconds is enqueued.
 
-### 2.2 `webmap-mcp` — FastMCP, local to each workstation
+### 2.2 `webmap-mcp` — Python MCP SDK, local to each workstation
 
 **Runs on the geologist's machine, not the server.** Transport is stdio; Claude Code or Claude
 Desktop launches it as a subprocess. See `adr/0008-local-stdio-mcp.md`.
@@ -109,7 +109,8 @@ webmap/
 ├── docs/                          # These specification files
 ├── apps/
 │   ├── web/                       # React SPA (Vite)
-│   ├── api/                       # FastAPI + FastMCP
+│   ├── api/                       # FastAPI — the only authorization point
+│   ├── mcp/                       # Local stdio MCP server, shipped to workstations
 │   ├── worker/                    # arq worker
 │   └── render/                    # Playwright render service
 ├── packages/                      # Reusable JS
@@ -124,10 +125,18 @@ webmap/
 │   ├── docker/
 │   ├── migrations/                # Alembic
 │   └── compose.yaml
+├── scripts/                       # Seed and operational scripts
 └── tests/
+    ├── fixtures/                  # Synthetic inputs, including hostile/ (11 §8)
     ├── e2e/                       # Playwright
     └── visual/                    # Render regression goldens
 ```
+
+`apps/mcp` is a separate distribution rather than a package inside `apps/api`
+because it is installed on each geologist's workstation and is trusted with
+nothing (`adr/0008-local-stdio-mcp.md`). Inside `apps/api`, a database session
+would be one import away and "holds no database connection" would be a matter
+of discipline; as its own package an `import-linter` contract enforces it.
 
 ### 3.1 Package boundary rules
 
@@ -263,8 +272,11 @@ Detail in `05-geoprocessing.md`.
 
 ### 4.6 Ownership + grants, not tenant partitioning
 
-**Decision.** Every object carries one `owner_user_id`. There is no visibility scope, no
-grant model, no team, and no row-level security.
+**Decision.** Every object carries one `owner_user_id`, a `visibility` scope of
+`private` / `team` / `org`, and an optional `owner_team_id`. Explicit grants layer on top,
+naming a user or a team with a role of `viewer` or `editor`. There is no partition key and no
+tenant column. See `02-data-model.md` §2 for the resolution rule and
+`adr/0007-multi-user-directory-sso.md` for why it is back after the single-user detour.
 
 **Rationale.** Tenants here are business units inside one company. Cross-BU sharing is a
 legitimate and frequent need — one asset team's fault interpretation is exactly what another

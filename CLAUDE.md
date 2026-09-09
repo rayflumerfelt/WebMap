@@ -471,8 +471,13 @@ repos:
         language: pygrep
         files: ^(apps|python)/.*\.py$
         # The session helper is the one file that legitimately calls
-        # engine.begin(). It lives in apps/api/db/, not python/webmap_core/db/.
-        exclude: (^apps/api/db/session\.py$|(^|/)tests/)
+        # engine.begin(). Packages use a src layout, so the path is
+        # apps/api/src/webmap_api/db/ — not apps/api/db/, and not
+        # python/webmap_core/db/. Re-check these paths whenever the layout
+        # moves: an anchored path that no longer matches makes the exclude
+        # silently do nothing, which is the same failure as the ^tests/ one
+        # above.
+        exclude: (^apps/api/src/webmap_api/db/session\.py$|(^|/)tests/)
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
@@ -496,7 +501,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgis/postgis:16-3.4
+        # Plain Postgres, not PostGIS. Nothing in the control plane is spatial
+        # except dataset.bbox_4326, which is four floats (adr/0002).
+        image: postgres:16
         env: { POSTGRES_PASSWORD: postgres }
         options: >-
           --health-cmd pg_isready --health-interval 10s --health-retries 5
@@ -586,7 +593,7 @@ Terms that appear throughout and are not general software vocabulary.
 | CRS handling | `python/webmap_core/crs.py` |
 | Interpolation | `python/webmap_geo/interpolate/` |
 | Style compilation | `packages/style-model/` and `python/webmap_core/style/` |
-| MCP tools | `apps/api/mcp/server.py` |
+| MCP tools | `apps/mcp/src/webmap_mcp/server.py` |
 | Render service | `apps/render/service.py` |
 | Map component | `packages/map/src/WebMap.tsx` |
 | Test fixtures | `tests/fixtures/` |

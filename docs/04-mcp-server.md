@@ -2,7 +2,9 @@
 
 Server name: `webmap_mcp` (Python convention `{service}_mcp`).
 Transport: **stdio**, launched by the Claude client on the user's own workstation.
-Framework: FastMCP (Python SDK).
+Framework: the Python MCP SDK. The server class is `MCPServer` from mcp 2.0 onward; it
+was called `FastMCP` through 1.x, and the older name still appears in a lot of writing
+about the SDK. Same framework, renamed.
 
 > **A thin client, not a service.** It runs locally, holds no database connection and no
 > authorization logic, and forwards every call to `webmap-api` over HTTPS carrying the
@@ -61,19 +63,23 @@ Twenty tools in six groups.
 ## 3. Server skeleton
 
 ```python
-# apps/api/mcp/server.py
+# apps/mcp/src/webmap_mcp/server.py
+#
+# A separate distribution, not a package inside apps/api. It is installed on
+# each workstation and is trusted with nothing; inside apps/api a database
+# session would be one import away. See adr/0008-local-stdio-mcp.md.
 
 from typing import Annotated, Literal
 from uuid import UUID
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 
 import httpx
 
-from webmap_core.settings import settings
+from webmap_mcp.settings import settings   # its own; webmap_core would drag in SQLAlchemy
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="webmap",
     instructions=(
         "WebMap is a geospatial mapping system for subsurface geology. Use it to "
@@ -652,7 +658,7 @@ Both paths forward are named, and the consequence of the easy one is stated.
 ## 9. Error handling
 
 ```python
-# apps/api/mcp/errors.py
+# apps/mcp/src/webmap_mcp/errors.py
 
 class WebMapToolError(Exception):
     """Base for errors surfaced to Claude. The message IS the interface —

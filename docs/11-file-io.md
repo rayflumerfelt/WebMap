@@ -385,8 +385,8 @@ async def ingest(ctx: JobContext, source_uri: str, options: IngestOptions) -> UU
                        on a Hilbert curve so row-group bboxes are tight
     8. register        dataset row + dataset_version row, attribute_schema,
                        bbox, feature_count
-   10. caption         generate the one-line description for Claude
-   11. audit           emit ingest event
+    9. caption         generate the one-line description for Claude
+   10. audit           emit ingest event
 
     Steps 5-6 produce warnings attached to the dataset, visible in the UI and
     in webmap_describe_dataset. A layer with 40 dropped null geometries
@@ -441,7 +441,7 @@ async def export_dataset(
 ## 8. Testing
 
 ```
-tests/io/fixtures/
+tests/fixtures/
 ├── valid/
 │   ├── points_nad83_texas_central.shp   (+ .shx .dbf .prj .cpg)
 │   ├── faults_utm14n.gpkg

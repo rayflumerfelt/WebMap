@@ -12,7 +12,7 @@ Naming: `NNNN-short-title.md`. Format and an example are in `CLAUDE.md` §10.
 | [0005](0005-single-editor-persistence.md) | Copy-on-write feature persistence | Accepted · amended 2026-09-08 |
 | [0006](0006-render-image-delivery.md) | Renders return image content blocks, sized for the conversation | Accepted |
 | [0007](0007-multi-user-directory-sso.md) | Multi-user deployment with directory SSO | Accepted |
-| [0008](0008-local-stdio-mcp.md) | The MCP server runs locally over stdio | Accepted |
+| [0008](0008-local-stdio-mcp.md) | The MCP server runs locally over stdio | Accepted · amended 2026-09-08 |
 
 ## Reading order
 

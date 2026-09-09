@@ -86,3 +86,40 @@ that per-workstation installation becomes an operational burden. The fallback is
 `webmap-auth` build — it is a pre-provisioned confidential OAuth client per environment, which
 the original spec already named as its own fallback and which costs a manual registration step
 rather than an authorization server.
+
+---
+
+## Amendment — 2026-09-08
+
+**Status unchanged: Accepted.** Recording where the code lives, which the
+original decision implied but did not state.
+
+`04-mcp-server.md` §3 located the server at `apps/api/mcp/server.py`, and
+`01-architecture.md` §3's repository tree labelled `apps/api` as
+"FastAPI + FastMCP". Both predate this ADR: they describe the server as a
+package *inside* the API application, which is what it was when it mounted on
+the API's ASGI app.
+
+That location no longer matches what this decision requires. **The server is
+now `apps/mcp`, its own distribution**, for one reason: inside `apps/api`,
+`from webmap_core.db import ...` is one import away, and this ADR's central
+property — no database connection, no service credential, no permission logic
+— would rest on nobody writing that line. As a separate package the property
+is structural. An `import-linter` contract forbids `webmap_mcp` from importing
+`sqlalchemy`, `asyncpg`, `psycopg`, `duckdb`, `webmap_core`, `webmap_geo`,
+`webmap_io`, and `webmap_api`, so the check is mechanical rather than the
+"verified by inspection" that `12-roadmap.md` Phase 1 asks for.
+
+The exclusion of `webmap_core` is deliberate and slightly counter-intuitive:
+sharing the Pydantic response models would be convenient, but `webmap_core`
+depends on SQLAlchemy, and a forbidden-module contract that permits the
+package which imports the driver permits the driver. So the local server keeps
+its own settings module and its own response shapes. That is the duplication
+§2.2 of `01-architecture.md` already calls safe — response formatting, not
+authorization.
+
+**Consequence for packaging.** The per-workstation install this ADR introduced
+is now a single distribution with a console entry point (`webmap-mcp`) and a
+short dependency list — `httpx`, `mcp`, `pydantic`, plus the credential broker.
+It does not carry NumPy, GDAL, DuckDB, or a database driver onto a geologist's
+laptop, which was not true of the previous location.
