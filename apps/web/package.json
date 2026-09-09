@@ -27,6 +27,7 @@
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.2.0",
+    "@types/node": "^26.5.0",
     "@types/proj4": "^2.19.0",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",

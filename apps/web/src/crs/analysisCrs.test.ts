@@ -12,6 +12,10 @@
  * 1,200 km south of where it claimed to be.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import { cursorTransform } from './analysisCrs.js';
@@ -22,21 +26,17 @@ const TEXAS_CENTRAL_FTUS =
   '+lat_1=31.8833333333333 +lat_2=30.1166666666667 +x_0=699999.999898399 ' +
   '+y_0=3000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=us-ft +no_defs';
 
-/** What `project.crs_wkt` returns for EPSG:2277, from pyproj. */
-const TEXAS_CENTRAL_WKT =
-  'PROJCS["NAD83 / Texas Central (ftUS)",GEOGCS["NAD83",' +
-  'DATUM["North_American_Datum_1983",SPHEROID["GRS 1980",6378137,298.257222101,' +
-  'AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6269"]],' +
-  'PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],' +
-  'UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],' +
-  'AUTHORITY["EPSG","4269"]],PROJECTION["Lambert_Conformal_Conic_2SP"],' +
-  'PARAMETER["latitude_of_origin",29.6666666666667],' +
-  'PARAMETER["central_meridian",-100.333333333333],' +
-  'PARAMETER["standard_parallel_1",31.8833333333333],' +
-  'PARAMETER["standard_parallel_2",30.1166666666667],' +
-  'PARAMETER["false_easting",2296583.333],PARAMETER["false_northing",9842500],' +
-  'UNIT["US survey foot",0.304800609601219,AUTHORITY["EPSG","9003"]],' +
-  'AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","2277"]]';
+/**
+ * What `project.crs_wkt` actually returns, read from the committed fixture
+ * rather than transcribed. `tests/fixtures/crs/README.md` explains the pairing:
+ * a Python test asserts the server still produces this string, and this one
+ * asserts proj4 can parse it. Either alone would pass while the two drifted —
+ * which already nearly happened, with a WKT1 fixture against a WKT2 server.
+ */
+const TEXAS_CENTRAL_WKT = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../../../../tests/fixtures/crs/epsg2277.wkt'),
+  'utf-8',
+);
 
 describe('cursorTransform', () => {
   const toTexasCentral = cursorTransform(TEXAS_CENTRAL_FTUS);
@@ -106,20 +106,29 @@ describe('cursorTransform', () => {
     expect(() => cursorTransform('')).toThrow(/crs_wkt/);
   });
 
-  it('accepts the WKT the server actually sends', () => {
-    // The fixture above is a PROJ string because it is readable. This is the
-    // format `project.crs_wkt` really carries, and the two must agree — a
-    // transform that only works on the development shorthand would fail on
-    // every real session.
+  it('parses the WKT the server actually sends', () => {
+    // **The half of the pairing this side owns.** A pyproj upgrade that
+    // changed the WKT dialect would leave the server serving a definition the
+    // browser silently could not use, and the status bar would show nothing
+    // with no error anywhere.
     const fromWkt = cursorTransform(TEXAS_CENTRAL_WKT);
-    const fromProj = cursorTransform(TEXAS_CENTRAL_FTUS);
 
-    const wkt = fromWkt([-102.0779, 31.9973])!;
-    const proj = fromProj([-102.0779, 31.9973])!;
+    const point = fromWkt([-102.0779, 31.9973])!;
 
-    // Within a foot: the PROJ form drops the datum's full definition, which
-    // for NAD83 against WGS84 is about a metre. That the two agree this
-    // closely is the check that neither definition is mangled.
+    expect(point).not.toBeNull();
+    expect(point.x).toBeGreaterThan(1_500_000);
+    expect(point.x).toBeLessThan(2_060_000);
+    expect(point.y).toBeGreaterThan(10_400_000);
+    expect(point.y).toBeLessThan(10_800_000);
+  });
+
+  it('agrees with the PROJ shorthand to within a foot', () => {
+    // The PROJ form drops the datum's full definition, which for NAD83 against
+    // WGS84 is about a metre. That the two agree this closely is the check
+    // that neither definition is mangled.
+    const wkt = cursorTransform(TEXAS_CENTRAL_WKT)([-102.0779, 31.9973])!;
+    const proj = cursorTransform(TEXAS_CENTRAL_FTUS)([-102.0779, 31.9973])!;
+
     expect(wkt.x).toBeCloseTo(proj.x, 0);
     expect(wkt.y).toBeCloseTo(proj.y, 0);
   });

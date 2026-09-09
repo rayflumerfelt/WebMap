@@ -151,3 +151,29 @@ export function useTileToken(api: ApiClient, datasetId: string | null) {
     staleTime: 0,
   });
 }
+
+export interface FeatureCollection {
+  type: 'FeatureCollection';
+  features: Array<{ properties: Record<string, unknown> | null }>;
+}
+
+/**
+ * A layer's attributes, for the attribute table.
+ *
+ * Uses the GeoJSON endpoint, which **refuses** above the switch threshold
+ * rather than truncating (`06-rendering.md` §7.1). That refusal is honoured
+ * here rather than worked around: a table showing the first 5,000 of 500,000
+ * features silently would be a table someone draws a conclusion from. Above
+ * the threshold the panel says so instead, and paging comes with the server
+ * support for it.
+ */
+export function useFeatures(api: ApiClient, datasetId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['features', datasetId],
+    queryFn: () => api.get<FeatureCollection>(`/features/${datasetId}.geojson`),
+    enabled: Boolean(datasetId) && enabled,
+    // Feature data is large and does not change unless the layer is edited.
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}

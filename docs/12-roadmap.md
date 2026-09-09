@@ -60,15 +60,19 @@ Done and verified:
 - `compileStyle`, the `WebMap` component, and `@webmap/ui` legend / scale bar /
   north arrow
 
-Outstanding, all in `apps/web`:
+- Layer tree, symbology editor, desktop shell, attribute table, session route
+  and autosave, wired end to end against the local stack
 
-- Layer tree; single-symbol and categorized symbology UI
-- Desktop shell — docked resizable panels, toolbar, status bar, keyboard
-  shortcuts, context menus (`07-frontend.md` §5)
-- Session store and autosave wiring against `/api/v1/sessions`
-- The four acceptance criteria that need a browser: 500k features at 30+ fps,
-  panel state persisting per user, the 1280 px notice, and every keyboard
-  shortcut and `Shift+F10` context menu
+Outstanding:
+
+- **The two criteria that need a browser**: a 500k-feature layer at 30+ fps,
+  and layer tree + symbology + attribute table all usable at 1920x1080 without
+  occluding the map. Both need Playwright and real data; neither is assertable
+  from a unit test.
+- Attribute paging. The GeoJSON endpoint refuses above 5,000 features rather
+  than truncating (`06` §7.1), and the panel passes that refusal on rather
+  than working around it — so a large layer currently has no table at all.
+  Paging needs server support that is not written.
 
 ### Deliberately empty
 

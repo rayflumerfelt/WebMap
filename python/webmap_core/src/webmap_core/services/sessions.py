@@ -256,6 +256,9 @@ async def create_session(
             conn, "dataset", UUID(layer["dataset_id"]), principal, Permission.VIEWER
         )
 
+    if project_id is None:
+        project_id = await _project_of(conn, [UUID(x["dataset_id"]) for x in normalised])
+
     owner_team_id = resolve_owner_team(principal, visibility, owner_team_id)
     document = {"layers": normalised, "view": normalise_view(view)}
 
@@ -317,6 +320,35 @@ async def create_session(
         },
     )
     return {"id": created, "short_code": code, "layer_count": len(normalised)}
+
+
+async def _project_of(conn: AsyncConnection, dataset_ids: list[UUID]) -> UUID | None:
+    """The project a session belongs to, inferred from its layers.
+
+    A session's project is where its **analysis CRS** comes from, and without
+    one the status bar cannot show cursor coordinates in anything but degrees
+    — which is the readout a geologist checks constantly (`07` §5.2).
+
+    Callers rarely have a project to pass: the MCP tools have no concept of one
+    (`04` §7.1 takes layers and a bbox), and the browser's "open these datasets"
+    path does not either. So it is inferred, and only when unambiguous. Layers
+    spanning two projects leave it null rather than picking one, because the
+    two may have different analysis CRSs and choosing silently would put the
+    readout in the wrong frame — the exact failure `02` §1 exists to prevent.
+    """
+    result = await conn.execute(
+        text(
+            "SELECT DISTINCT project_id FROM dataset "
+            "WHERE id = ANY(:ids) AND project_id IS NOT NULL"
+        ),
+        {"ids": dataset_ids},
+    )
+    projects = [row[0] for row in result]
+    if len(projects) == 1:
+        return UUID(str(projects[0]))
+    if len(projects) > 1:
+        log.info("session_project_ambiguous", project_count=len(projects))
+    return None
 
 
 # --- read -------------------------------------------------------------------

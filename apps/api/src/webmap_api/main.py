@@ -35,7 +35,7 @@ from webmap_core.exceptions import (
 from webmap_core.identity import AuthenticationFailed
 from webmap_core.logging import bind_request, configure_logging, get_logger
 from webmap_core.settings import Environment, Settings, get_settings
-from webmap_geo.exceptions import DegenerateInput, GeoError, NotProjected
+from webmap_geo.exceptions import DegenerateInput, GeoError, NotProjected, UnknownCrs
 from webmap_io.exceptions import (
     MissingCRS,
     PathTraversal,
@@ -76,6 +76,9 @@ _STATUS_FOR: dict[type[Exception], int] = {
     # outside the grid, a geographic CRS where a projected one is needed.
     DegenerateInput: 400,
     NotProjected: 422,
+    # A mistyped EPSG code is a caller mistake, and the message names the
+    # codes this deployment actually uses.
+    UnknownCrs: 422,
 }
 
 

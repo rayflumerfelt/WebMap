@@ -13,6 +13,8 @@ import { WebMap } from '@webmap/map';
 import { LayerTree, Legend, NorthArrow, ScaleBar } from '@webmap/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AttributePanel } from './attributes/AttributePanel.js';
+import { ApiClient } from './api/client.js';
 import { cursorTransform } from './crs/analysisCrs.js';
 import { useShortcuts } from './keyboard/useShortcuts.js';
 import type { Command } from './keyboard/shortcuts.js';
@@ -39,6 +41,12 @@ export interface AppProps {
   /** `project.crs_wkt`. Without it the status bar shows no coordinates rather
    *  than showing longitude/latitude and implying they are the analysis CRS. */
   crsWkt?: string;
+  /** Supplied by the session route. The shell renders without one, which is
+   *  what lets it be developed and tested with no API in reach. */
+  api?: ApiClient;
+  /** Feature count per dataset, from session metadata. Decides whether the
+   *  attribute panel asks for attributes at all. */
+  featureCounts?: Record<string, number | null>;
 }
 
 export function App({
@@ -48,6 +56,8 @@ export function App({
   crsLabel = 'EPSG:2277 · NAD83 / Texas Central (ftUS)',
   analysisUnit = 'usft',
   crsWkt,
+  api,
+  featureCounts = {},
 }: AppProps = {}) {
   const layers = useSessionStore((state) => state.layers);
   const view = useSessionStore((state) => state.view);
@@ -226,6 +236,19 @@ export function App({
             }
           }}
         />
+      }
+      attributes={
+        api ? (
+          <AttributePanel
+            api={api}
+            datasetId={selectedLayer?.datasetId ?? null}
+            layerName={selectedLayer?.name ?? null}
+            featureCount={
+              selectedLayer ? (featureCounts[selectedLayer.datasetId] ?? null) : null
+            }
+            height={prefs.attributes.width}
+          />
+        ) : undefined
       }
       statusBar={
         <StatusBar

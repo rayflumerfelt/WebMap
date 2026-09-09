@@ -15,8 +15,9 @@ from functools import lru_cache
 import numpy as np
 from numpy.typing import NDArray
 from pyproj import CRS, Transformer
+from pyproj.exceptions import CRSError
 
-from webmap_geo.exceptions import NotProjected
+from webmap_geo.exceptions import NotProjected, UnknownCrs
 from webmap_geo.frame import AnalysisFrame, LengthUnit
 
 # Re-exported so `webmap_core.crs` can name the type it returns without
@@ -59,7 +60,21 @@ _UNIT_NAMES: dict[str, LengthUnit] = {
 
 @lru_cache(maxsize=256)
 def crs_of(srid: int) -> CRS:
-    return CRS.from_epsg(srid)
+    """The CRS for an EPSG code.
+
+    Wraps pyproj's `CRSError`, which is otherwise the one exception in this
+    module that no handler maps — so a mistyped SRID from a caller becomes a
+    500 rather than a message naming the mistake. Same shape as the duplicate
+    `MissingCRS` that made a `.prj`-less shapefile return 500 instead of 422.
+    """
+    try:
+        return CRS.from_epsg(srid)
+    except CRSError as exc:
+        raise UnknownCrs(
+            f"EPSG:{srid} is not a coordinate reference system PROJ recognises. "
+            f"Check the code against epsg.io — for the Permian Basin the usual "
+            f"choices are 2277 (Texas Central, ftUS) and 32613 (UTM zone 13N)."
+        ) from exc
 
 
 @lru_cache(maxsize=256)

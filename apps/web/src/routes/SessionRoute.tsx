@@ -135,6 +135,10 @@ export function SessionRoute({ shortCode, api: injected }: SessionRouteProps) {
         <HiddenLayerNotice count={session.data.hidden_layer_count} />
       ) : null}
       <App
+        api={api}
+        featureCounts={Object.fromEntries(
+          session.data.layers.map((layer) => [layer.dataset_id, layer.dataset.feature_count]),
+        )}
         projectName={project.data?.name ?? 'WebMap'}
         crsLabel={
           project.data

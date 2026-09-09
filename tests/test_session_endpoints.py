@@ -132,6 +132,51 @@ def test_a_session_stores_references_not_copies(api: str) -> None:
     assert "geometry" not in layer
 
 
+def test_a_session_adopts_the_project_of_its_layers(api: str) -> None:
+    """**Where the analysis CRS comes from.**
+
+    A session's project is what gives the status bar a CRS to show cursor
+    coordinates in. Neither the MCP tools nor the browser's "open these
+    datasets" path has a project to pass, so it is inferred from the layers —
+    and without it a geologist reads longitude and latitude on a project that
+    works in State Plane feet.
+    """
+    headers = bearer(api, "ada")
+    dataset = datasets_of(api, headers, "pointset")[0]
+
+    created = make_session(api, headers, [dataset["id"]])
+    loaded = httpx.get(
+        f"{api}/api/v1/sessions/{created['id']}", headers=headers, timeout=30
+    ).json()
+
+    assert loaded["project_id"] is not None
+    project = httpx.get(
+        f"{api}/api/v1/projects/{loaded['project_id']}", headers=headers, timeout=30
+    )
+    assert project.status_code == 200
+    # WKT2 (`PROJCRS`), which is what `to_wkt()` emits and what proj4 in the
+    # browser parses — `tests/fixtures/crs/README.md` covers the pairing.
+    wkt = project.json()["crs_wkt"]
+    assert wkt.startswith("PROJCRS["), "the browser needs a usable CRS definition"
+    assert 'ID["EPSG",2277]' in wkt
+
+
+def test_an_explicit_project_is_not_overridden(api: str) -> None:
+    """Inference fills a gap; it does not second-guess a caller who knows."""
+    headers = bearer(api, "ada")
+    dataset = datasets_of(api, headers, "pointset")[0]
+    detail = httpx.get(
+        f"{api}/api/v1/datasets/{dataset['id']}", headers=headers, timeout=30
+    ).json()
+
+    created = make_session(api, headers, [dataset["id"]], project_id=detail["project_id"])
+    loaded = httpx.get(
+        f"{api}/api/v1/sessions/{created['id']}", headers=headers, timeout=30
+    ).json()
+
+    assert loaded["project_id"] == detail["project_id"]
+
+
 # --- permissions ------------------------------------------------------------
 
 
