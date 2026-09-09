@@ -10,8 +10,6 @@ dependencies = [
     "arq>=0.26",
 ]
 
-[project.optional-dependencies]
-solvers = ["webmap-geo[solvers]"]
 
 [build-system]
 requires = ["hatchling"]

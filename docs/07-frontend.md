@@ -30,8 +30,12 @@ Enforced by `eslint-plugin-boundaries`, not by convention.
 - `@webmap/style-model` **must not** import React or MapLibre. It is pure data
   transformation, shared with tooling and testable in Node.
 
+ESLint 9 loads flat config; `.eslintrc.cjs` is the previous format and is not
+read by default. The element types and the allow-matrix are the rule — the
+wrapper around them is whatever the installed ESLint reads.
+
 ```javascript
-// .eslintrc.cjs (excerpt)
+// eslint.config.js (excerpt)
 "boundaries/elements": [
   { type: "app",    pattern: "apps/*" },
   { type: "map",    pattern: "packages/map/*" },

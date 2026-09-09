@@ -18,7 +18,7 @@ help:  ## Show this help
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 setup:  ## Install all deps, both languages
-	$(UV) sync --all-extras
+	$(UV) sync
 	$(PNPM) install
 
 dev:  ## Start the full stack via Docker Compose

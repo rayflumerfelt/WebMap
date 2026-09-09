@@ -13,20 +13,11 @@ dependencies = [
     "scipy>=1.14",
     "shapely>=2.0",
     "contourpy>=1.3",      # contour extraction (matplotlib's engine)
-    "pyproj>=3.6",
-]
-
-[project.optional-dependencies]
-# The Phase 4 solver stack. Split out of `dependencies` only because these
-# three are the ones without universal wheels — `triangle` and `pyamg` build
-# from source on some platforms, and Phase 0 has no reason to make a clean
-# clone pay for a C toolchain. `make setup` installs them; CI installs them.
-# 05 §1 lists them as ordinary dependencies and that remains the intent.
-solvers = [
     "gstools>=1.6",        # variogram models, random fields
     "scikit-gstat>=1.0",   # experimental variogram estimation, binning
     "triangle>=20230923",  # Shewchuk constrained Delaunay
     "pyamg>=5.2",          # algebraic multigrid for sparse solves
+    "pyproj>=3.6",
 ]
 
 [build-system]

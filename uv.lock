@@ -3781,17 +3781,13 @@ source = { editable = "python/webmap_geo" }
 dependencies = [
     { name = "contourpy" },
     { name = "duckdb" },
+    { name = "gstools" },
     { name = "numpy" },
+    { name = "pyamg" },
     { name = "pyproj" },
+    { name = "scikit-gstat" },
     { name = "scipy" },
     { name = "shapely" },
-]
-
-[package.optional-dependencies]
-solvers = [
-    { name = "gstools" },
-    { name = "pyamg" },
-    { name = "scikit-gstat" },
     { name = "triangle" },
 ]
 
@@ -3799,16 +3795,15 @@ solvers = [
 requires-dist = [
     { name = "contourpy", specifier = ">=1.3" },
     { name = "duckdb", specifier = ">=1.5" },
-    { name = "gstools", marker = "extra == 'solvers'", specifier = ">=1.6" },
+    { name = "gstools", specifier = ">=1.6" },
     { name = "numpy", specifier = ">=2.0" },
-    { name = "pyamg", marker = "extra == 'solvers'", specifier = ">=5.2" },
+    { name = "pyamg", specifier = ">=5.2" },
     { name = "pyproj", specifier = ">=3.6" },
-    { name = "scikit-gstat", marker = "extra == 'solvers'", specifier = ">=1.0" },
+    { name = "scikit-gstat", specifier = ">=1.0" },
     { name = "scipy", specifier = ">=1.14" },
     { name = "shapely", specifier = ">=2.0" },
-    { name = "triangle", marker = "extra == 'solvers'", specifier = ">=20230923" },
+    { name = "triangle", specifier = ">=20230923" },
 ]
-provides-extras = ["solvers"]
 
 [[package]]
 name = "webmap-io"
@@ -3895,20 +3890,13 @@ dependencies = [
     { name = "webmap-io" },
 ]
 
-[package.optional-dependencies]
-solvers = [
-    { name = "webmap-geo", extra = ["solvers"] },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "arq", specifier = ">=0.26" },
     { name = "webmap-core", editable = "python/webmap_core" },
     { name = "webmap-geo", editable = "python/webmap_geo" },
-    { name = "webmap-geo", extras = ["solvers"], marker = "extra == 'solvers'", editable = "python/webmap_geo" },
     { name = "webmap-io", editable = "python/webmap_io" },
 ]
-provides-extras = ["solvers"]
 
 [[package]]
 name = "websockets"
