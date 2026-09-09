@@ -11,15 +11,21 @@ Naming: `NNNN-short-title.md`. Format and an example are in `CLAUDE.md` §10.
 | [0004](0004-geoprocessing-owns-geometry.md) | All geometry operations belong to the geoprocessing module | Accepted |
 | [0005](0005-single-editor-persistence.md) | Copy-on-write feature persistence | Accepted · amended 2026-09-08 |
 | [0006](0006-render-image-delivery.md) | Renders return image content blocks, sized for the conversation | Accepted |
-| [0007](0007-multi-user-directory-sso.md) | Multi-user deployment with directory SSO | Accepted |
+| [0007](0007-multi-user-directory-sso.md) | Multi-user deployment with directory SSO | Accepted · amended by 0010 |
 | [0008](0008-local-stdio-mcp.md) | The MCP server runs locally over stdio | Accepted · amended 2026-09-08 |
 | [0009](0009-offline-identity-seam.md) | A verifier seam so identity is testable without the directory | Accepted |
+| [0010](0010-layers-basemaps-and-capability-roles.md) | Layers and basemaps as shared objects; roles as capabilities | Accepted |
 
 ## Reading order
 
-**0007 and 0008 are the current architecture.** 0007 supersedes 0001 and restores the
+**0007, 0008 and 0010 are the current architecture.** 0007 supersedes 0001 and restores the
 authorization model; 0008 is what makes that affordable, by removing the OAuth 2.1 / DCR
-requirement rather than solving it.
+requirement rather than solving it; 0010 adds the objects users actually share — layers and
+basemaps — and separates role capabilities from per-object grants.
+
+0010 amends 0007 in one place worth knowing about: the directory is no longer assumed to be
+authoritative for every team. A team with no `idp_group_id` is managed in WebMap, and a
+deployment with no directory at all is a supported mode.
 
 0001 is kept rather than deleted. It records why the model was removed and what the removal
 cost, which is the context 0007 answers — and it named its own reversal trigger, "a second

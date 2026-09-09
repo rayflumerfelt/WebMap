@@ -54,6 +54,27 @@ unchanged by user count and were correct even during the single-user detour.
 
 ## 2. Human authentication (browser)
 
+Two modes, selected by `WEBMAP_IDENTITY_MODE` (`adr/0010` §1). Both terminate in the same
+session cookie and the same `Principal`, so everything downstream of authentication is
+identical.
+
+| Mode | Users come from | Team membership |
+|---|---|---|
+| `directory` | OIDC upsert on login | Reconciled from group claims for any team with `idp_group_id` |
+| `managed` | Created by a global administrator | Managed in WebMap |
+
+**A team with a null `idp_group_id` is locally managed in either mode**, which is what makes
+"mostly directory, plus an ad-hoc project team" expressible without a second switch. A
+membership write against a synced team is refused and names the group, because accepting it
+and letting the next sign-in silently undo it is the failure the distinction exists to
+prevent.
+
+`managed` mode needs local credentials, which is genuinely new attack surface — §11 carries
+the checklist. It should not be built until a deployment without a directory is actually
+wanted; `directory` mode needs none of it.
+
+### 2.1 Directory mode
+
 Standard OIDC Authorization Code + PKCE against the corporate IdP.
 
 ```
@@ -101,6 +122,19 @@ async def sync_user_from_claims(db, claims: dict) -> AppUser:
 ---
 
 ## 3. Authorization
+
+### 3.0 Two axes, not one rank
+
+**Object permission** — may I read or change this thing — resolves as owner → grant →
+visibility scope, and is what §3.1 and §3.2 describe.
+
+**Capability** — may I publish globally, manage a team, create a user — is a separate axis,
+stored as `app_user.is_global_admin` and `team_member.role`. `02-data-model.md` §2 lists them.
+
+`adr/0010` §2 explains why they are not one four-rank role: a plain user holding an `editor`
+grant on a colleague's layer resolves differently under each model, and only one of them can
+be authoritative. Capabilities decide what you may *do*; grants decide what you may do it
+*to*. A global administrator therefore has no implicit read access to a private layer.
 
 ### 3.1 Two layers, both required
 
@@ -606,6 +640,22 @@ Retention: 2 years minimum. Confirm against corporate policy before launch.
 - [ ] Every endpoint that reads the data plane has an explicit permission check —
       RLS does not cover it (`02-data-model.md` §4.1)
 - [ ] Permission logic tested exhaustively: every visibility × grant × role combination
+- [ ] Capability checks tested separately from object permission: a global administrator has
+      no implicit read access to a private object (`adr/0010` §2)
+- [ ] `visibility = 'org'` refused to a non-administrator
+- [ ] A membership write against a directory-synced team is refused and names the group
+
+**Local credentials — `managed` mode only.** None of this applies to a `directory`
+deployment, which has no local credential to protect.
+
+- [ ] Passwords hashed with Argon2id; parameters recorded and reviewed
+- [ ] `password_hash` never leaves the database — not in an API response, a log line, or an
+      audit detail blob
+- [ ] Per-account lockout after repeated failures, and a rate limit on the login endpoint
+- [ ] Reset is administrator-initiated and audited; a deployment may have no mail server, so
+      a self-service emailed link cannot be the only path
+- [ ] Timing of a failed login does not distinguish "no such user" from "wrong password"
+- [ ] A deactivated user cannot authenticate, and their session is invalidated
 
 **Tiles and rendering**
 

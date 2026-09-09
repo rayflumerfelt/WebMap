@@ -29,7 +29,7 @@ contracts clean in both languages.
 | 2 — Display | **Built.** 8 of 11 criteria verified; the rest need a browser — see below. |
 | 3 — Claude integration | **Built.** 4 of 9 verified; the visual harness and the evaluations are empty directories. |
 | 4 — Gridding | **In progress.** 7 of 10 verified. Jobs, contouring and lineage are done; see the list at the end of that phase for what is owed. |
-| 5 — Styling and editing | Not started. |
+| 5 — Styling and editing | Not started. Scope grew with `adr/0010` — layers, basemaps and capability roles. |
 | 6 — Aggregation and polish | Not started. |
 
 **The gap worth naming** is not unwritten code — it is unwritten *harnesses*.
@@ -340,6 +340,11 @@ produces the same wrong surface with nothing said about it.
 - Copy-on-write version commit with 409 conflict detection; version history browser
 - Undo/redo
 - Attribute editing
+- **Layers and basemaps as shared objects** (`adr/0010`): `layer`, `basemap`,
+  `basemap_layer`, duplication, and the map's active layer
+- **Capability roles**: `app_user.is_global_admin`, `team_member.role`, and the
+  administration screens they gate
+- **Default basemaps** across the user / team / global tiers, keyed on presentation
 
 **Acceptance**
 
@@ -352,6 +357,17 @@ produces the same wrong surface with nothing said about it.
 - [ ] A polygon digitized against an existing boundary with snapping on produces no sliver
 - [ ] Editing a fault and re-gridding produces a surface reflecting the new geometry
 - [ ] Undo restores exact prior state across 20 random operation sequences
+- [ ] Two basemaps share one layer; editing the layer changes both, and soft-deleting it is
+      refused with both basemaps named
+- [ ] Duplicating a layer copies the row and references the same object — verified by storage
+      size, not by inspection
+- [ ] A default basemap resolves user → team → global, presentation-specific before general at
+      each tier, with the source tier reported
+- [ ] A non-administrator cannot set `visibility = 'org'`
+- [ ] A global administrator has no implicit read access to a private layer
+- [ ] Removing a user from a team leaves everything they own intact
+- [ ] A deactivated user cannot sign in, and their team-visible layers still resolve in a
+      colleague's map
 
 ---
 

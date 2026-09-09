@@ -119,6 +119,38 @@ otherwise                                      → none
 RLS is enabled as a backstop, with policies written against this model. The application
 connects as a role that **cannot** bypass RLS.
 
+### Capabilities
+
+Object permission answers *may I read or change this thing*. It does not answer *may I publish
+globally, manage a team, or create a user* — those are not about any one object, and `adr/0010`
+§2 keeps them on a separate axis rather than folding them into a rank that would then have to
+argue with grants.
+
+Capabilities come from two columns: `app_user.is_global_admin` and `team_member.role`.
+
+| Capability | Who |
+|---|---|
+| Create, edit, delete own layers, basemaps and maps | any active user |
+| View and duplicate anything visible to them | any active user |
+| Grant access to an object they own | the owner |
+| Publish to a team (`visibility = 'team'`) | a member of that team |
+| **Publish globally (`visibility = 'org'`)** | **a global administrator** |
+| Manage membership of a locally-managed team | that team's administrator, or a global one |
+| Set team defaults | that team's administrator, or a global one |
+| Set global defaults; create and deactivate users | a global administrator |
+
+Two consequences worth stating plainly:
+
+- **Publishing globally is now restricted.** Any user could previously set
+  `visibility = 'org'`.
+- **There is no "team member" role.** It would differ from an ordinary user only by belonging
+  to a team, which `team_member` already records, and a stored copy could disagree with it.
+
+A capability never narrows object permission and object permission never grants a capability.
+A global administrator holds no implicit read access to a private layer: administering the
+deployment is not the same as being able to read everyone's work, and conflating them would
+make the audit log's answer to "who saw this" much less useful.
+
 ---
 
 ## 3. Schema
@@ -141,20 +173,54 @@ CREATE TYPE sync_state_t     AS ENUM ('pending', 'syncing', 'ready', 'failed', '
 CREATE TYPE job_state_t      AS ENUM ('queued', 'running', 'succeeded', 'failed', 'cancelled');
 CREATE TYPE constraint_kind_t AS ENUM ('fault', 'breakline');
 CREATE TYPE length_unit_t    AS ENUM ('m', 'ft', 'usft');
+CREATE TYPE team_role_t      AS ENUM ('member', 'admin');
+
+-- How a layer is drawn, which is NOT its dataset_kind (adr/0010). A
+-- colour-filled grid and a contour map of the same surface are both
+-- dataset_kind='grid' rendered two ways, and contours are a derived
+-- dataset_kind='vector'. Default basemaps are keyed on this, so conflating the
+-- two would make "my default for contour maps" unexpressible.
+CREATE TYPE presentation_t   AS ENUM (
+    'vector', 'filled_grid', 'contour', 'filled_contour', 'hillshade', 'points'
+);
 ```
 
 ### 3.2 Identity
 
-Users and teams mirror the corporate directory. Never a source of truth — synced from OIDC
-claims on login.
+Users and teams mirror the corporate directory **when there is one**. `adr/0010` makes that a
+mode rather than an assumption:
+
+- `WEBMAP_IDENTITY_MODE = directory` — OIDC as `03-auth-security.md` §2 describes. `app_user`
+  is upserted from claims, and a team with `idp_group_id` set has its membership reconciled at
+  every login. The directory is authoritative and `team_member` is a cache.
+- `WEBMAP_IDENTITY_MODE = managed` — WebMap is authoritative. A global administrator creates
+  users with local credentials; nothing reconciles.
+
+**A team with a null `idp_group_id` is locally managed in either mode.** That is what makes
+"mostly directory, plus an ad-hoc project team" expressible without a second switch — the
+authority question is answered per team, not per deployment.
+
+A membership write against a directory-synced team is **refused**, naming the group, because
+accepting it and letting the next sign-in quietly undo it is the failure the mode exists to
+prevent.
 
 ```sql
 CREATE TABLE app_user (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    subject         TEXT NOT NULL UNIQUE,      -- OIDC 'sub'
+    subject         TEXT NOT NULL UNIQUE,      -- OIDC 'sub', or 'local|<uuid>'
     email           CITEXT NOT NULL UNIQUE,
     display_name    TEXT NOT NULL,
+    -- Deactivation, never deletion (adr/0010). Their objects stay owned by
+    -- them and visible per visibility and grants: deleting a departing
+    -- geologist's team-visible layer breaks every colleague's map that
+    -- references it, and lineage.created_by would point at nothing.
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    -- A capability, not an object permission (adr/0010 §2). Publishing
+    -- globally, managing any team, and creating users all check this.
+    is_global_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Argon2id. NULL in directory mode, where there is no local credential.
+    -- See 03-auth-security.md §11 for storage, lockout and reset.
+    password_hash   TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at    TIMESTAMPTZ
 );
@@ -170,6 +236,11 @@ CREATE TABLE team (
 CREATE TABLE team_member (
     team_id         UUID NOT NULL REFERENCES team(id) ON DELETE CASCADE,
     user_id         UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    -- Per team, because "administrator of Permian, member of Delaware" is
+    -- ordinary and a single global role cannot say it. In directory mode this
+    -- is set locally even for a synced team: the directory supplies who is in
+    -- the team, not who administers it here.
+    role            team_role_t NOT NULL DEFAULT 'member',
     PRIMARY KEY (team_id, user_id)
 );
 CREATE INDEX ON team_member (user_id);
@@ -436,12 +507,15 @@ CREATE TABLE style_template (
     deleted_at      TIMESTAMPTZ
 );
 
--- Per-geologist defaults applied to every new map.
+-- Defaults applied to every new map, in three tiers (adr/0010 §4). The
+-- columns are identical at each tier so resolution is one shape repeated,
+-- not three special cases.
 CREATE TABLE user_preferences (
     user_id             UUID PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
     schema_version      INTEGER NOT NULL DEFAULT 1,
-    -- Ordered list of dataset_ids / basemap ids always shown beneath data layers
-    default_basemap_layers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- {"*": <basemap_id>, "contour": <basemap_id>, ...} keyed on
+    -- presentation_t, plus "*" for the general default.
+    default_basemaps    JSONB NOT NULL DEFAULT '{}'::jsonb,
     default_palette_id  UUID REFERENCES palette(id),
     default_project_id  UUID REFERENCES project(id),
     preferred_units     JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -449,12 +523,130 @@ CREATE TABLE user_preferences (
     default_templates   JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Set by a team administrator. Same shape as the tier above it.
+CREATE TABLE team_preferences (
+    team_id             UUID PRIMARY KEY REFERENCES team(id) ON DELETE CASCADE,
+    schema_version      INTEGER NOT NULL DEFAULT 1,
+    default_basemaps    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    default_palette_id  UUID REFERENCES palette(id),
+    preferred_units     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    default_templates   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Set by a global administrator. One row, enforced: a second would make
+-- "the global default" ambiguous with nothing to arbitrate it.
+CREATE TABLE global_preferences (
+    id                  BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+    schema_version      INTEGER NOT NULL DEFAULT 1,
+    default_basemaps    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    default_palette_id  UUID REFERENCES palette(id),
+    preferred_units     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    default_templates   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
+
+**Resolution order** (`adr/0010` §4). At each tier the presentation-specific default is tried
+before the general one, and only then does resolution descend:
+
+```
+user.default_basemaps[presentation] → user.default_basemaps["*"]
+  → team.default_basemaps[presentation] → team.default_basemaps["*"]
+    → global.default_basemaps[presentation] → global.default_basemaps["*"]
+      → no basemap
+```
+
+A user who set a general default meant it to beat a team's, which is why the tier is exhausted
+before descending rather than matching presentation across all three first.
+
+Where a user belongs to several teams that each set a default, **the tie resolves
+alphabetically by `team.slug`** and the interface names the team it came from.
+Most-recently-updated was the alternative and is worse: a colleague editing a preference would
+change someone else's map with no visible cause.
+
+### 3.7a Layers and basemaps
+
+A **layer** is a dataset plus how it is drawn — the thing a geologist names, shares and
+duplicates. A **basemap** is an ordered collection of layers. The relationship is many-to-many:
+layers are independent of any basemap, and two basemaps share a layer rather than copying it
+(`adr/0010` §3).
+
+Both carry the ownership mixin of §3.3, so the grant model and the RLS policies of §4 cover
+them with no new authorization code. That is the reason they are tables rather than JSONB in
+preferences, which is where a basemap used to live and where it could not be named or shared.
+
+```sql
+CREATE TABLE layer (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            TEXT NOT NULL,
+    description     TEXT,
+    dataset_id      UUID NOT NULL REFERENCES dataset(id),
+
+    -- How it is drawn. NOT dataset_kind — see the presentation_t comment in
+    -- §3.1. This is the key default basemaps are looked up on.
+    presentation    presentation_t NOT NULL,
+    style_template_id UUID REFERENCES style_template(id),
+    -- Overrides the template, or stands alone when there is none.
+    symbology       JSONB,
+    schema_version  INTEGER NOT NULL DEFAULT 1,
+    default_opacity DOUBLE PRECISION NOT NULL DEFAULT 1.0
+        CHECK (default_opacity BETWEEN 0.0 AND 1.0),
+
+    owner_user_id   UUID NOT NULL REFERENCES app_user(id),
+    owner_team_id   UUID REFERENCES team(id),
+    visibility      visibility_t NOT NULL DEFAULT 'private',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+CREATE INDEX ON layer (dataset_id);
+
+CREATE TABLE basemap (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            TEXT NOT NULL,
+    description     TEXT,
+
+    owner_user_id   UUID NOT NULL REFERENCES app_user(id),
+    owner_team_id   UUID REFERENCES team(id),
+    visibility      visibility_t NOT NULL DEFAULT 'private',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+CREATE TABLE basemap_layer (
+    basemap_id      UUID NOT NULL REFERENCES basemap(id) ON DELETE CASCADE,
+    layer_id        UUID NOT NULL REFERENCES layer(id) ON DELETE RESTRICT,
+    z               INTEGER NOT NULL,          -- draw order, 0 at the bottom
+    PRIMARY KEY (basemap_id, layer_id)
+);
+CREATE INDEX ON basemap_layer (layer_id);
+```
+
+`ON DELETE RESTRICT` on `layer_id` is deliberate, and so is the soft-delete rule beside it:
+**soft-deleting a layer that a basemap still references is refused, naming the basemaps.** A
+shared object needs its shared-ness to be visible at the moment it costs something, not
+afterwards when someone else's map has quietly lost a layer.
+
+`visibility` defaults to `private` on both, unlike the `team` default elsewhere. A layer is
+made deliberately, often from an operation's output, and publishing it should be a decision
+rather than what happens if nobody chooses.
+
+**Duplicating** either copies the row, not the data. GeoParquet and COG objects are immutable
+(`adr/0005`), so a duplicated layer references the same `dataset_id` with a new owner and
+`visibility = 'private'` regardless of the source's. Copying a two-gigabyte COG because
+someone clicked Duplicate is avoidable.
 
 ### 3.8 Map sessions
 
-The saved state Claude creates and the browser loads. Stores dataset **references**, never
-copies — otherwise sessions balloon and go stale.
+The saved state Claude creates and the browser loads — **the map** of `adr/0010` §1. Stores
+references, never copies, otherwise sessions balloon and go stale.
+
+A map is a basemap, the layers drawn over it, and exactly one **active layer**. The active
+layer is what Auto Zoom fits and what the editing tools address; Zoom to Extents fits every
+layer in the map.
 
 ```sql
 CREATE TABLE map_session (
@@ -462,10 +654,22 @@ CREATE TABLE map_session (
     short_code      TEXT NOT NULL UNIQUE,      -- URL-friendly, e.g. 'k3n8fq'
     project_id      UUID REFERENCES project(id) ON DELETE SET NULL,
     name            TEXT,
-    schema_version  INTEGER NOT NULL DEFAULT 1,
+    -- 2 from adr/0010: `layers` holds layer_ids rather than inline dataset
+    -- dictionaries. See §6 for the migration.
+    schema_version  INTEGER NOT NULL DEFAULT 2,
 
-    -- [{dataset_id, style_template_id?, symbology_override?, opacity, visible, z}]
+    -- The layers beneath the data, resolved once at creation from the default
+    -- basemap for the active layer's presentation (§3.7). Stored rather than
+    -- re-resolved, so reopening a map a year later shows the map that was
+    -- made and not whatever the defaults have become since.
+    basemap_id      UUID REFERENCES basemap(id) ON DELETE SET NULL,
+    -- [{layer_id, opacity?, visible?, z}] — the overrides are per-map, so two
+    -- maps can show the same layer at different opacities without either
+    -- editing the shared layer.
     layers          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- The one layer edits address. Must appear in `layers`; a map with none
+    -- is a map nothing can be edited on, which is a legitimate state.
+    active_layer_id UUID REFERENCES layer(id) ON DELETE SET NULL,
     -- {center: [lon, lat], zoom, bearing, pitch} OR {bbox: [...]}
     view            JSONB NOT NULL,
     -- Set when Claude created this session, for conversational continuity
@@ -482,6 +686,12 @@ CREATE TABLE map_session (
 CREATE INDEX ON map_session (short_code);
 CREATE INDEX ON map_session (owner_user_id, updated_at DESC);
 ```
+
+**"Only the active layer can be edited" is an interface affordance, not an authorization
+boundary.** The API checks permission on every request regardless of what the client considers
+active. Written down because the rule reads like a security control and is not one — a client
+that set `active_layer_id` to a layer its user may only view must still be refused by the
+service, and is.
 
 ### 3.9 Renders
 
