@@ -15,23 +15,38 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 
 ## Current status
 
-Updated 2026-09-09 (Phase 2 in progress). A phase is complete only when every criterion passes; a
-criterion met with a caveat says so rather than being ticked quietly.
+Updated 2026-09-09 (Phase 4 in progress). A phase is complete only when every criterion
+passes; a criterion met with a caveat says so rather than being ticked quietly.
+
+Verified on this date against a live stack: 810 Python tests including the full integration
+suite, 295 TypeScript tests, and lint, formatting, typechecking and the package-boundary
+contracts clean in both languages.
 
 | Phase | State |
 |---|---|
 | 0 — Foundations | **Complete.** All criteria verified. |
 | 1 — Identity and data plane | **Complete.** Two caveats in "Carried forward" below. |
-| 2 — Display | **In progress.** Backend complete; frontend shell outstanding — see below. |
-| 3 — Claude integration | Not started. `apps/render` has SSRF validation only. |
-| 4 — Gridding | Not started. `webmap_geo` solver modules are empty by design. |
+| 2 — Display | **Built.** 8 of 11 criteria verified; the rest need a browser — see below. |
+| 3 — Claude integration | **Built.** 4 of 9 verified; the visual harness and the evaluations are empty directories. |
+| 4 — Gridding | **In progress.** 7 of 10 verified. Jobs, contouring and lineage are done; see the list at the end of that phase for what is owed. |
 | 5 — Styling and editing | Not started. |
 | 6 — Aggregation and polish | Not started. |
+
+**The gap worth naming** is not unwritten code — it is unwritten *harnesses*.
+`tests/visual/golden/`, `tests/e2e/` and `tests/mcp_eval/` each contain nothing but a
+`.gitkeep`, and between them they gate criteria across Phases 2, 3 and 6: everything
+that needs a browser at a real resolution, a rendered image compared against a golden, or
+Claude answering an evaluation question. The code behind those criteria is written and
+unit-tested. None of it is *demonstrated*.
+
+Second, `CLAUDE.md` §6.1 puts reference comparison at the highest bar in the repo for
+`webmap_geo`, and no test in the suite carries the `reference` marker. Minimum curvature
+against a Surfer grid is blocked on having a reference grid at all.
 
 ### Carried forward from Phase 1
 
 One item is genuinely untestable here and one is deliberately deferred.
-Neither blocks Phase 2; the first must be closed on deployment day.
+Neither blocks later phases; the first must be closed on deployment day.
 
 - **The MSAL broker call is untested and will stay so until a domain-joined
   workstation.** `adr/0009-offline-identity-seam.md` confines the untested
@@ -47,31 +62,15 @@ Neither blocks Phase 2; the first must be closed on deployment day.
   `03-auth-security.md` §3.3 describes means opening both that trigger and the
   UPDATE policies — deliberately two decisions. Nobody has needed it yet.
 
-### Phase 2 progress
+### Operational notes
 
-Done and verified:
-
-- Tile path: in-process MVT from GeoParquet via DuckDB, GeoJSON/MVT switching,
-  TiTiler COG proxy, scoped-token auth, cache keyed on
-  (dataset_id, version, z, x, y)
-- Style compilation in both languages against nine shared hand-written vectors
-- Classification (`classify`, Fisher-Jenks, pretty breaks) and legend derivation
-- Sessions: create, load, autosave, soft delete, per-principal layer resolution
-- `compileStyle`, the `WebMap` component, and `@webmap/ui` legend / scale bar /
-  north arrow
-
-- Layer tree, symbology editor, desktop shell, attribute table, session route
-  and autosave, wired end to end against the local stack
-
-Outstanding:
-
-- **The two criteria that need a browser**: a 500k-feature layer at 30+ fps,
-  and layer tree + symbology + attribute table all usable at 1920x1080 without
-  occluding the map. Both need Playwright and real data; neither is assertable
-  from a unit test.
-- Nothing else. Attribute paging landed as `GET /features/{id}/attributes`,
-  which reads no geometry and orders totally, so a 500k-feature layer has a
-  usable table.
+- **DuckDB extensions are baked into the API and worker images.** A container that cannot
+  load `spatial` and `httpfs` refuses to start rather than serving a 500 on the first tile
+  request. On a network that blocks `extensions.duckdb.org` — a captive portal will — run
+  `make duckdb-extensions` and start with `infra/compose.offline.yaml`.
+- **The HTTP-driven integration tests write to the development stack** and soft-delete what
+  they create. They are the only tests that do; everything else on the `engine` fixture gets
+  a throwaway database.
 
 ### Deliberately empty
 
@@ -81,11 +80,11 @@ something to check, and are empty until their phase. They are not oversights:
 | Module | Phase |
 |---|---|
 | `packages/ui` ramp editor, schema-driven property editor | 5 |
-| `webmap_geo.{interpolate,mesh,faults,variogram,contour,aggregate}` | 4 |
-| `apps/render` beyond `security.py` | 3 |
+| `webmap_geo.aggregate` | 4 (still owed) |
 | `webmap_io.connectors` (file share, PostGIS) | 6 |
 | `webmap_io` readers for `.grd`, ZMAP+, KML, DXF | 6 |
 | Export and loss reporting (`11-file-io.md` §4.2, §7) | 6 |
+| `tests/visual/golden`, `tests/e2e`, `tests/mcp_eval` | 2, 3 — **overdue**, see above |
 
 ---
 
@@ -188,18 +187,23 @@ First phase with something a geologist recognizes.
 
 **Acceptance**
 
-- [ ] A 500k-feature layer pans and zooms at 30+ fps
-- [ ] Tile requests without a valid scoped token return 403
-- [ ] TypeScript and Python compilers produce identical Style JSON for every test vector
-- [ ] A session saved in the browser reloads with identical appearance
-- [ ] Scale bar is correct at three latitudes spanning the working area
-- [ ] Layer reorder, visibility, and opacity persist across reload
+- [ ] A 500k-feature layer pans and zooms at 30+ fps — **needs a browser**; no harness yet
+- [x] Tile requests without a valid scoped token return 403 — bearer, scoped, tampered,
+      malformed, and cross-dataset cases all covered
+- [x] TypeScript and Python compilers produce identical Style JSON for every test vector
+- [x] A session saved in the browser reloads with identical appearance
+- [x] Scale bar is correct at three latitudes spanning the working area — tested as the
+      cos(latitude) relation plus equator, symmetry and the Mercator clamp, which is the
+      property the three-latitude check was standing in for
+- [x] Layer reorder, visibility, and opacity persist across reload
 - [ ] At 1920×1080, layer tree + symbology + attribute table are all usable without
-      occluding the map
-- [ ] Panel widths and collapsed state persist per user across sessions
-- [ ] Below 1280 px the app shows the minimum-width notice rather than reflowing
-- [ ] Status bar shows analysis CRS, live cursor coordinates in that CRS, and map scale
-- [ ] Every documented keyboard shortcut works; every context menu is reachable via
+      occluding the map — **needs a browser at that resolution**
+- [x] Panel widths and collapsed state persist per user across sessions
+- [ ] Below 1280 px the app shows the minimum-width notice rather than reflowing —
+      implemented in `AppShell`, but **no test covers it**; the shell suite's docstring
+      claims it and none of its cases exercise it
+- [x] Status bar shows analysis CRS, live cursor coordinates in that CRS, and map scale
+- [x] Every documented keyboard shortcut works; every context menu is reachable via
       `Shift+F10`
 
 ---
@@ -219,17 +223,24 @@ The point of the project.
 
 **Acceptance**
 
-- [ ] Claude renders a map of a registered dataset in under 5 s p95, and the image
-      actually displays — an image content block, not a markdown URI
-- [ ] The rendered image is pixel-comparable to the same view in the browser
-- [ ] Render metadata contains value range, units, CRS, and vintage — verified against the source
-- [ ] A hostile style referencing an internal host is rejected before dispatch
-- [ ] `page.route` blocks a redirect to a non-allowlisted host (test with a fixture)
+- [x] Claude renders a map of a registered dataset in under 5 s p95, and the image
+      actually displays — an image content block, not a markdown URI. Measured at
+      0.9–1.1 s for three 2560×1440 renders with zero failed requests; **the p95 is a
+      spot measurement, not a standing test**
+- [ ] The rendered image is pixel-comparable to the same view in the browser — **needs the
+      visual harness**, `tests/visual/golden/` is empty
+- [ ] Render metadata contains value range, units, CRS, and vintage — verified against the
+      source. The *formatter* is tested over a hand-built record; **nothing checks the
+      values against the dataset they came from**, which is the half that matters
+- [x] A hostile style referencing an internal host is rejected before dispatch
+- [x] `page.route` blocks a redirect to a non-allowlisted host (test with a fixture)
 - [ ] Render workers cannot reach the database or the internet (verify by attempting egress)
-- [ ] `webmap_open_session` produces a link that loads correctly for the same user, and shows
+      — the allowlist is tested; **the container's own egress is not**
+- [x] `webmap_open_session` produces a link that loads correctly for the same user, and shows
       a helpful permission error for a different user
-- [ ] All 10 evaluations pass
-- [ ] Legends appear correctly in rendered output, matching the interactive legend
+- [ ] All 10 evaluations pass — **not written**; `tests/mcp_eval/` is empty
+- [ ] Legends appear correctly in rendered output, matching the interactive legend — legend
+      derivation is tested; **its appearance in a render is not**
 
 **This is the first demoable milestone that proves the concept.** Get here before adding
 breadth.
@@ -273,19 +284,30 @@ fault is gridded with it.
 
 **Acceptance**
 
-- [ ] Minimum curvature matches the Surfer reference grid within 0.5% of value range
-- [ ] Kriging with a known synthetic variogram recovers the field within tolerance
-- [ ] A surface gridded across a sealing fault with **minimum curvature** shows the correct
-      discontinuity — verified visually and by sampling either side
-- [ ] Kriging with a fault network supplied warns that it does not honour it, and names the
+- [ ] Minimum curvature matches the Surfer reference grid within 0.5% of value range —
+      **blocked: no reference grid.** Nothing in the suite carries the `reference` marker,
+      so the highest bar in `CLAUDE.md` §6.1 is currently unmet for every algorithm
+- [x] Kriging with a known synthetic variogram recovers the field within tolerance
+- [x] A surface gridded across a sealing fault with **minimum curvature** shows the correct
+      discontinuity — sampled either side; the visual half awaits the render harness
+- [x] Kriging with a fault network supplied warns that it does not honour it, and names the
       method that does
-- [ ] A breakline produces gradient discontinuity with value continuity
-- [ ] Fault network validation catches all defects in the hostile fault fixture, each with a
+- [ ] A breakline produces gradient discontinuity with value continuity — **not
+      implemented.** Breaklines are modelled, validated and carried through the mesh, but
+      no interpolator honours them yet
+- [x] Fault network validation catches all defects in the hostile fault fixture, each with a
       location
 - [ ] 100k points → 1000×1000 with faults completes in under 5 minutes (minimum curvature)
-- [ ] Cancelling a running job leaves no partial dataset registered
-- [ ] Lineage record is sufficient to re-run and reproduce the identical grid
-- [ ] Contour intervals are round numbers a geologist would choose
+      — **unmeasured**
+- [x] Cancelling a running job leaves no partial dataset registered
+- [x] Lineage record is sufficient to re-run and reproduce the identical grid — asserted by
+      re-running the job and comparing the arrays, not by inspecting the record
+- [x] Contour intervals are round numbers a geologist would choose
+
+**Still owed by Phase 4:** universal kriging and cubic spline (`Method` has four members:
+ordinary kriging, minimum curvature, IDW, nearest); breakline-aware interpolation;
+`webmap_aggregate` and `webmap_fit_variogram`; the `aggregate` package, which is still an
+empty placeholder; and the worker's ingest, sync and export tasks.
 
 **Risk.** Minimum curvature is now the only fault-aware interpolator, so a geologist who wants
 a kriged surface of a faulted field cannot have one. Mitigated by saying so at the point of
