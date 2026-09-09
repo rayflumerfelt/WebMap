@@ -71,14 +71,22 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
       propsRef.current.onWarning?.(warningFrom(event.error));
     };
 
+    const handlePointerMove = (event: { lngLat: { lng: number; lat: number } }) =>
+      propsRef.current.onPointerMove?.([event.lngLat.lng, event.lngLat.lat]);
+    const handlePointerOut = () => propsRef.current.onPointerMove?.(null);
+
     map.on('moveend', handleMove);
     map.on('idle', handleIdle);
     map.on('error', handleError);
+    map.on('mousemove', handlePointerMove);
+    map.on('mouseout', handlePointerOut);
 
     return () => {
       map.off('moveend', handleMove);
       map.off('idle', handleIdle);
       map.off('error', handleError);
+      map.off('mousemove', handlePointerMove);
+      map.off('mouseout', handlePointerOut);
       map.remove();
       mapRef.current = null;
     };

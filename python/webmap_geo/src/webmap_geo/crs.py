@@ -26,6 +26,7 @@ __all__ = [
     "WGS84",
     "Transformer",
     "axis_units",
+    "crs_definition",
     "crs_of",
     "epsg_from_user_input",
     "frame_for",
@@ -75,6 +76,31 @@ def transformer(src: int, dst: int) -> Transformer:
 
 def is_geographic(srid: int) -> bool:
     return bool(crs_of(srid).is_geographic)
+
+
+def crs_definition(srid: int) -> str:
+    """The CRS as WKT, for a client that must reproject.
+
+    Exists for one caller: the browser's status-bar cursor readout, which shows
+    the pointer position in the project's analysis CRS. Serving the definition
+    rather than letting the client look the code up in its own EPSG table keeps
+    one source of truth for what a CRS means — two tables eventually disagree
+    about a datum shift, and the disagreement would stay invisible until
+    someone compared a readout against a well file.
+
+    **WKT rather than a PROJ string.** `to_proj4()` warns that it loses
+    projection information, and it is right to: the PROJ4 form cannot carry a
+    datum's full definition, which for NAD83 against WGS84 is a shift of about
+    a metre. A metre does not matter for a cursor readout, but shipping a
+    lossy definition when a lossless one parses just as well would be choosing
+    to be wrong for no reason. proj4js reads WKT.
+
+    This is not a licence to reproject geometry client-side. Stored geometry is
+    reprojected at defined boundaries, server-side
+    (`adr/0003-geoprocessing-owns-crs.md`); a cursor position has no lineage
+    and no stored consequence.
+    """
+    return str(crs_of(srid).to_wkt())
 
 
 def axis_units(srid: int) -> LengthUnit:

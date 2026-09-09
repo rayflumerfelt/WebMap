@@ -27,6 +27,9 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "@maplibre/maplibre-gl-style-spec": "24.10.0"
+    }
   }
 }

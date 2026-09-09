@@ -13,6 +13,8 @@
  * session without a JavaScript runtime.
  */
 
+import type { LayerSpecification, SourceSpecification } from '@maplibre/maplibre-gl-style-spec';
+
 import { compileSymbology } from './compile.js';
 import type { CompiledLayer } from './compile.js';
 import type { Palette, Symbology } from './symbology.js';
@@ -52,7 +54,7 @@ export interface Basemap {
   id: string;
   /** Sources and layers to place beneath everything else. Supplied whole
    *  rather than named, so an air-gapped deployment can point at its own. */
-  sources: Record<string, unknown>;
+  sources: Record<string, SourceSpecification>;
   layers: CompiledLayer[];
 }
 
@@ -70,14 +72,24 @@ export interface CompiledStyle {
   version: 8;
   glyphs?: string;
   sprite?: string;
-  sources: Record<string, unknown>;
-  layers: CompiledLayer[];
+  // Typed from `@maplibre/maplibre-gl-style-spec` rather than as `unknown`:
+  // that package is the specification as data and is already a dependency
+  // here, so a source this file builds wrongly is a compile error instead of
+  // a runtime one in the browser.
+  sources: Record<string, SourceSpecification>;
+  // `LayerSpecification`, so the result is a style MapLibre's own types accept
+  // without a cast at every call site. `CompiledLayer` stays loose inside
+  // `compile.ts` — a layer is assembled property by property there, and the
+  // discriminated union would have to be satisfied before the object is
+  // finished. The narrowing happens once, here, at the point the style becomes
+  // a whole thing.
+  layers: LayerSpecification[];
 }
 
 export function compileStyle(options: CompileStyleOptions): CompiledStyle {
   const { palettes, basemap } = options;
 
-  const sources: Record<string, unknown> = { ...(basemap?.sources ?? {}) };
+  const sources: Record<string, SourceSpecification> = { ...(basemap?.sources ?? {}) };
   // The basemap paints first, underneath everything. Not a layer in the
   // session's list, because a geologist reordering their layers should never
   // be able to put the basemap on top of their data.
@@ -113,7 +125,7 @@ export function compileStyle(options: CompileStyleOptions): CompiledStyle {
     ...(options.glyphs ? { glyphs: options.glyphs } : {}),
     ...(options.sprite ? { sprite: options.sprite } : {}),
     sources,
-    layers,
+    layers: layers as LayerSpecification[],
   };
 }
 
@@ -131,7 +143,7 @@ function byDrawOrder(a: StyleLayer, b: StyleLayer): number {
   return az - bz || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
-function sourceSpec(source: LayerSource): Record<string, unknown> {
+function sourceSpec(source: LayerSource): SourceSpecification {
   const shared = {
     ...(source.attribution ? { attribution: source.attribution } : {}),
     ...(source.bounds ? { bounds: source.bounds } : {}),
@@ -140,7 +152,7 @@ function sourceSpec(source: LayerSource): Record<string, unknown> {
   switch (source.kind) {
     case 'vector':
       return {
-        type: 'vector',
+        type: 'vector' as const,
         tiles: [source.url],
         ...(source.minzoom !== undefined ? { minzoom: source.minzoom } : {}),
         ...(source.maxzoom !== undefined ? { maxzoom: source.maxzoom } : {}),
@@ -149,10 +161,10 @@ function sourceSpec(source: LayerSource): Record<string, unknown> {
     case 'geojson':
       // `data` as a URL, not inlined: MapLibre fetches and parses it off the
       // critical path, and the app never has to hold the FeatureCollection.
-      return { type: 'geojson', data: source.url, ...shared };
+      return { type: 'geojson' as const, data: source.url, ...shared };
     case 'raster':
       return {
-        type: 'raster',
+        type: 'raster' as const,
         tiles: [source.url],
         // 256, not 512: TiTiler's WebMercatorQuad renders 256px tiles, and
         // declaring 512 stretches every tile to double size — which looks

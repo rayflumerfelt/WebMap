@@ -146,7 +146,17 @@ async def get_project(
         ),
         {"id": project_id},
     )
-    return dict(result.one()._mapping)
+    detail = dict(result.one()._mapping)
+
+    # The CRS definition, for the browser's cursor readout. Served rather than
+    # looked up client-side so there is one source of truth for what the CRS
+    # means — two EPSG tables eventually disagree about a datum shift, and the
+    # disagreement stays invisible until someone checks a readout against a
+    # well file.
+    from webmap_geo.crs import crs_definition
+
+    detail["crs_wkt"] = crs_definition(int(detail["analysis_srid"]))
+    return detail
 
 
 async def update_project(

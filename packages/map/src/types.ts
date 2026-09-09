@@ -69,6 +69,11 @@ export interface WebMapProps {
    *  "the data really is sparse there" from "the tile server was down". */
   onWarning?: (warning: MapWarning) => void;
 
+  /** Cursor position in WGS84 lng/lat, or null when the pointer leaves the
+   *  map. A prop rather than a `getMap()` call, because the status bar needs
+   *  it on every session and §2.1 asks for escape-hatch uses to stay rare. */
+  onPointerMove?: (lngLat: [number, number] | null) => void;
+
   className?: string;
 
   /** Announced to screen readers in place of "Map". Name the subject — "Map

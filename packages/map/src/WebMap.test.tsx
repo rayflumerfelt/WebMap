@@ -282,6 +282,31 @@ describe('camera', () => {
   });
 });
 
+describe('pointer position', () => {
+  it('reports lng/lat on mousemove', () => {
+    // The status bar shows coordinates in the analysis CRS on every session,
+    // so this is a prop rather than a getMap() call — §2.1 asks for
+    // escape-hatch uses to stay rare and countable.
+    const onPointerMove = vi.fn();
+    render(<WebMap style={STYLE} layerMeta={{}} onPointerMove={onPointerMove} />);
+
+    act(() => latest().emit('mousemove', { lngLat: { lng: -102.08, lat: 31.99 } }));
+
+    expect(onPointerMove).toHaveBeenCalledWith([-102.08, 31.99]);
+  });
+
+  it('reports null when the pointer leaves the map', () => {
+    // Otherwise the status bar keeps showing the last position the cursor was
+    // over, which reads as a live coordinate and is not one.
+    const onPointerMove = vi.fn();
+    render(<WebMap style={STYLE} layerMeta={{}} onPointerMove={onPointerMove} />);
+
+    act(() => latest().emit('mouseout'));
+
+    expect(onPointerMove).toHaveBeenCalledWith(null);
+  });
+});
+
 // --- warnings ---------------------------------------------------------------
 
 describe('warnings', () => {
