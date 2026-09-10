@@ -23,18 +23,18 @@ always stated, because a tick that quietly stands for "mostly" is how a phase ge
 complete twice.
 
 Verified on this date against a live stack: **1,080 Python tests pass and 12 skip** —
-the skips name the service they need — with 669 TypeScript tests (97 style-model, 76 ui,
-37 map, 459 web), and lint, formatting, typechecking and the package-boundary contracts
+the skips name the service they need — with 696 TypeScript tests (97 style-model, 76 ui,
+37 map, 486 web), and lint, formatting, typechecking and the package-boundary contracts
 clean in both languages. Migrations apply, roll back to base and re-apply.
 
-**What is deliberately not counted as done.** The editing subsystem is now wired to the map:
-a geologist can pick the edit tool, select a feature, enter vertex mode and drag a vertex onto
-a neighbour's with the snap indicator showing where it will land. What is *not* there is
-persistence — the dirty buffer, the undo stack and the version check all exist and the endpoint
-that writes them does not, so edits live in the tab. Two smaller gaps go with it: every snap is
-still tile-derived, because §6.6's exact-coordinate protocol and the unsimplified-tile
-configuration are unbuilt, and the working set of §17 is unbuilt, so a feature outside the
-viewport is not editable.
+**What is deliberately not counted as done.** Editing now works end to end: pick the edit tool,
+select a feature, drag a vertex onto a neighbour's, save, and the layer holds a new version
+whose tiles come back changed. What is *not* there is recovery. A concurrent save is detected
+and reported (§5.3) and the edits stay in the buffer, but Refresh and Force are unbuilt, so the
+answer to "someone saved first" is still to redo the work. Nothing survives a browser refresh
+either — §5.4's IndexedDB mirror is unbuilt. And a layer at or above 5,000 features refuses to
+open for editing rather than degrading, which is what §17 asks for and is not the same as the
+viewport working set §17 describes.
 
 | Phase | State |
 |---|---|
@@ -43,7 +43,7 @@ viewport is not editable.
 | 2 — Display | **Built.** 8 of 11 criteria verified; the rest need a browser — see below. |
 | 3 — Claude integration | **Built.** 4 of 9 verified. The visual harness exists now and its goldens do not; `tests/mcp_eval/` runs ten questions against the live tool surface. |
 | 4 — Gridding | **In progress.** 9 of 10 verified. Jobs, contouring, lineage, breaklines, clipping and label anchors are done; the worker's ingest, sync and export tasks are what remain. |
-| 5 — Styling and editing | **In progress.** The backend is largely there — layers and basemaps as shared objects, capability roles, the three preference tiers, palette import/export and attribute summaries. On the front end the nine shared controls, the formatting dialog, all four editing surfaces, and vertex editing on the map — click selection, snapping against rendered features, handles, and move/add/delete — are built. Persistence of an edit is not, nor is drawing new geometry. |
+| 5 — Styling and editing | **In progress.** The backend is largely there — layers and basemaps as shared objects, capability roles, the three preference tiers, palette import/export, attribute summaries, and the feature-edit writer with its version pointer. On the front end the nine shared controls, the formatting dialog, all four editing surfaces, and vertex editing on the map — click selection, snapping against exact geometry, handles, move/add/delete, Save and Discard — are built. Drawing new geometry is not, nor is the operation catalog of `09` §11. |
 | 6 — Aggregation and polish | **Partly done ahead of order.** The aggregation catalog and the clip job landed with Phase 4's work, because both were needed by it. |
 | 7 — Geostatistics | Not started. Specified in `13-kriging.md`; the largest single phase in the plan. |
 
@@ -425,20 +425,30 @@ produces the same wrong surface with nothing said about it.
 - **Screen-space snapping** (`09` §6) — **built**: vertex, edge, intersection and midpoint
   passes in priority order, the pixel-clamped tolerance reporting *which* clamp bound, the drag
   exclusion with its ring wrap, the `queryRenderedFeatures` candidate set with its
-  drag-duration projection cache, dirty geometry substituted for stale tile geometry, and the
-  indicator drawn as the four glyphs §6.7 assigns. What remains is §6.6's exact-coordinate
-  resolution and the unsimplified tiles at edit zooms it depends on — until then every snap is
-  tile-derived and the indicator stays hollow, which is what §6.6 asks it to mean
+  drag-duration projection cache, local geometry substituted for stale tile geometry, and the
+  indicator drawn as the four glyphs §6.7 assigns. §6.6's exact-coordinate resolution came with
+  the working set rather than as coordinate matching: the layer's exact geometry is already in
+  hand and keyed by the same id, so a candidate is resolved by lookup. A feature outside the
+  working set keeps its tile geometry and reports itself inexact, which is what the hollow
+  indicator was always meant to say
 - **The editing surfaces** (`09` §9, §10) — **built**: the menu bar in §9's order with disabled
   items greyed and their shortcuts shown, the command palette that excludes what cannot run and
   matches on descriptions and keywords, the persistent toolbar with its ten-slot budget
   asserted, the contextual operation bar with `Esc`/`Enter`, and the status strip. All four
   render from the one registry, so none of them can disagree about what is enabled
-- **Vertex editing** — **move, add and delete are built**: square handles from their own
-  source, a press that selects and a drag that moves, the three-pixel threshold that keeps a
-  shaky click from moving anything, double-click to delete with the ring minimum refused rather
-  than cascaded, and Z carried through every one of them. Nudge, numeric and bearing entry
-  remain
+- **Vertex editing** — **built**: square handles from their own source, a press that selects
+  and a drag that moves, the three-pixel threshold that keeps a shaky click from moving
+  anything, double-click to delete with the ring minimum refused rather than cascaded, and Z
+  carried through every one of them. Nudge, numeric and bearing entry remain
+- **Persistence** (`09` §13, `adr/0005`) — **built**: `POST /features/{id}/edits` writes the
+  next immutable object and advances the version pointer, which is the commit; the pointer
+  update is conditional on the base version, so two editors who both read version 7 produce one
+  winner and one 409. Save and Discard are wired to the editor. What remains is the recovery
+  half — §5.3's Refresh and Force — and §5.4's IndexedDB mirror
+- **The working set** (`09` §17) — **the cap is built and the viewport query is not**: a
+  session fetches the layer's exact geometry, and a layer at or above 5,000 features refuses to
+  open for editing with a message saying so rather than degrading silently. The viewport query,
+  the re-query on pan and the MVT/GeoJSON source switch remain
 - **Terra Draw for new geometry only** ([`adr/0014`](adr/0014-terra-draw-scoped-to-creation.md)),
   wired to the snap engine through `toCustom`
 - **Topological editing** ([`adr/0013`](adr/0013-topological-editing-within-the-active-layer.md))

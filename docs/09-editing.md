@@ -1062,7 +1062,21 @@ shapefile is unrecoverable, and no editing convenience is worth that.
 
 **Retention.** Every version for 30 days, matching the soft-delete window, then thinned to daily.
 Storage grows with edit count — that is the cost of this model and it needs the cron slot in
-`10` §3.
+`10` §3. **The retention job is not built**; every version written so far is still there.
+
+**Built** as `POST /api/v1/features/{dataset_id}/edits`
+(`webmap_core.services.features.save_feature_edits` over `webmap_io.edits.apply_edits`). Two
+notes from building it:
+
+**The version is checked twice and the second one is the check.** The first read answers the
+client early with a message naming both versions; the `WHERE version = :base` on the pointer
+update is what closes the race. Two editors who both read version 7 both write an object, and
+exactly one advances the pointer.
+
+**An edit to a feature the current version does not hold is refused, not created.** Ids are
+assigned by the writer, so a client-chosen id could collide with one it would hand out later.
+That makes **creation a separate path**, which phase 6 needs and which does not exist yet — the
+writer has no way to say "this is new, give it an id".
 
 ---
 
@@ -1269,20 +1283,23 @@ Each phase independently shippable.
 retrofit.** Undo built in from the first mutation costs almost nothing; undo added afterwards
 means revisiting every operation that already exists.
 
-**Where this stands.** Phases 1–4 and 8 are built and wired to the map: a geologist can pick
-the edit tool, select a feature, enter vertex mode, and drag a vertex onto a neighbour's with
-the snap indicator showing where it will land. Phase 5 is built for move, add and delete.
+**Where this stands.** Phases 1–5 and 8 are built and wired: a geologist can pick the edit
+tool, select a feature, enter vertex mode, drag a vertex onto a neighbour's with the indicator
+showing where it will land, delete one by double-clicking its handle, undo, and save — after
+which the layer holds a new version and the tiles come back changed.
 
-Three things a reader should not infer from that:
+What a reader should not infer from that:
 
-- **Nothing is saved yet.** The dirty buffer, the undo stack and the version check are all
-  there (§5.3), and the endpoint that writes them is not. Edits live in the tab.
-- **Every snap is tile-derived.** §6.6's resolution protocol is unbuilt, so the indicator
-  renders hollow throughout and a snapped coordinate is the tile's, which for an unsimplified
-  edit-zoom tile is the source's — but the tile configuration that guarantees that is also
-  unbuilt.
-- **The working set of §17 is unbuilt.** Features come from whatever the tiles return, so a
-  feature outside the viewport is not editable and there is no 5,000-feature cap yet.
+- **A save is all-or-nothing and has no rebase.** The 409 of §5.3 is detected and reported and
+  the edits stay in the buffer, but Refresh and Force are not built, so recovering from a
+  concurrent save means redoing the work.
+- **The working set is the whole layer, not the viewport.** §17's viewport query, its re-query
+  on pan, and the MVT/GeoJSON source switch are unbuilt; a layer at or above 5,000 features
+  refuses to open for editing rather than degrading. The refusal is the part §17 insists on and
+  it is there.
+- **Nothing survives a browser refresh.** §5.4's IndexedDB mirror is still unbuilt.
+- **A drag moves one vertex.** The coincidence index is built and nothing calls it from the
+  vertex handlers, so topological propagation does not happen yet.
 
-The next pieces, in the order they unblock the rest: persistence (§13), the exact-coordinate
-protocol (§6.6), and rectangle/lasso selection.
+The next pieces, in the order they unblock the rest: drawing new geometry (phase 6, which needs
+a create path through §13's writer), the operation catalog of §11, and §5.4's durability.
