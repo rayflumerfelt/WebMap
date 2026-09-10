@@ -382,7 +382,10 @@ produces the same wrong surface with nothing said about it.
   Fifty-odd commands defined once, with the menu in §9's order, the palette excluding what is
   disabled, per-scope context menus, and `conflicts(state)` to prove no key resolves to two
   enabled commands at once. What remains is the surfaces that render from it
-- **Selection** — multi-feature and vertex scopes, click/rectangle/lasso, active-layer plumbing
+- **Selection** — **the model is built** (`apps/web/src/editing/modes.ts`): multi-feature and
+  vertex scopes, the click/rectangle/lasso sub-state, and every §4 transition rule, including
+  the two-press `Esc` and the active-layer switch that ends the session. What remains is the
+  hit testing that turns a click into a feature id
 - **Edit session** (`09` §5) — **built**: dirty buffer, `Command`/`FeatureDelta`, undo/redo
   atomic over a command's whole delta set, Save/Discard, the Refresh half of the 409 rebase,
   and the snapshot §5.4 mirrors to IndexedDB. The IndexedDB write itself and the recovery

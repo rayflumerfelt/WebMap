@@ -310,6 +310,26 @@ type SelectTool = 'click' | 'rectangle' | 'lasso';   // sub-state of 'select'
   also ends the edit session, which is why §5.2 requires the dirty buffer to be saved or
   discarded first.
 
+**Built** as `apps/web/src/editing/modes.ts` — a reducer, because the content of this machine
+is its transitions: a mode is a string, and what makes it a state machine is what each
+transition does to the selection and the operation.
+
+Two things beyond the rules above, both decided by writing the tests:
+
+**A vertex selection made outside a vertex mode is ignored, not stored.** Stored, it is a
+ghost — invisible now, and back on the next mode change pointing at whatever was selected
+minutes ago. And **changing the feature selection clears the vertex selection**, because those
+vertices belonged to the features that were selected.
+
+**A blocked mode switch is blocked, not auto-applied.** §5.2 says pick one and hold it, and
+the one that cannot silently write to the dirty buffer is the one that cannot surprise anybody.
+`canSwitchMode` is exported so the toolbar greys the buttons rather than letting a user click
+one and watch nothing happen.
+
+`selectionScope` derives what the command registry reads rather than storing it. Two fields
+that could disagree about what is selected is the shape that produces a Delete which deletes
+the wrong thing.
+
 ---
 
 ## 5. Two levels of commitment
