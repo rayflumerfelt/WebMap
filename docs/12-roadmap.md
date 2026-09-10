@@ -23,16 +23,18 @@ always stated, because a tick that quietly stands for "mostly" is how a phase ge
 complete twice.
 
 Verified on this date against a live stack: **1,080 Python tests pass and 12 skip** —
-the skips name the service they need — with 487 TypeScript tests (97 style-model, 76 ui,
-22 map, 292 web), and lint, formatting, typechecking and the package-boundary contracts
+the skips name the service they need — with 669 TypeScript tests (97 style-model, 76 ui,
+37 map, 459 web), and lint, formatting, typechecking and the package-boundary contracts
 clean in both languages. Migrations apply, roll back to base and re-apply.
 
-**What is deliberately not counted as done.** The editing subsystem's *model* is built and
-tested — registry, session, modes, snapping, topology — and none of it is wired to a map yet.
-An operation that mutates geometry needs the MapLibre half: hit testing, the candidate set for
-snapping, the edit-overlay source, and the vertex handlers. The model was built first on
-purpose (`09` §20), and it is worth being precise that "built" here means the rules are right,
-not that a geologist can drag a vertex.
+**What is deliberately not counted as done.** The editing subsystem is now wired to the map:
+a geologist can pick the edit tool, select a feature, enter vertex mode and drag a vertex onto
+a neighbour's with the snap indicator showing where it will land. What is *not* there is
+persistence — the dirty buffer, the undo stack and the version check all exist and the endpoint
+that writes them does not, so edits live in the tab. Two smaller gaps go with it: every snap is
+still tile-derived, because §6.6's exact-coordinate protocol and the unsimplified-tile
+configuration are unbuilt, and the working set of §17 is unbuilt, so a feature outside the
+viewport is not editable.
 
 | Phase | State |
 |---|---|
@@ -41,7 +43,7 @@ not that a geologist can drag a vertex.
 | 2 — Display | **Built.** 8 of 11 criteria verified; the rest need a browser — see below. |
 | 3 — Claude integration | **Built.** 4 of 9 verified. The visual harness exists now and its goldens do not; `tests/mcp_eval/` runs ten questions against the live tool surface. |
 | 4 — Gridding | **In progress.** 9 of 10 verified. Jobs, contouring, lineage, breaklines, clipping and label anchors are done; the worker's ingest, sync and export tasks are what remain. |
-| 5 — Styling and editing | **In progress.** The backend is largely there — layers and basemaps as shared objects, capability roles, the three preference tiers, palette import/export and attribute summaries. On the front end the nine shared controls, the formatting dialog, and the editing model and all four of its surfaces are built; the map-side handlers that mutate geometry are not. |
+| 5 — Styling and editing | **In progress.** The backend is largely there — layers and basemaps as shared objects, capability roles, the three preference tiers, palette import/export and attribute summaries. On the front end the nine shared controls, the formatting dialog, all four editing surfaces, and vertex editing on the map — click selection, snapping against rendered features, handles, and move/add/delete — are built. Persistence of an edit is not, nor is drawing new geometry. |
 | 6 — Aggregation and polish | **Partly done ahead of order.** The aggregation catalog and the clip job landed with Phase 4's work, because both were needed by it. |
 | 7 — Geostatistics | Not started. Specified in `13-kriging.md`; the largest single phase in the plan. |
 
@@ -412,32 +414,39 @@ produces the same wrong surface with nothing said about it.
   Fifty-odd commands defined once, with the menu in §9's order, the palette excluding what is
   disabled, per-scope context menus, and `conflicts(state)` to prove no key resolves to two
   enabled commands at once. What remains is the surfaces that render from it
-- **Selection** — **the model is built** (`apps/web/src/editing/modes.ts`): multi-feature and
-  vertex scopes, the click/rectangle/lasso sub-state, and every §4 transition rule, including
-  the two-press `Esc` and the active-layer switch that ends the session. What remains is the
-  hit testing that turns a click into a feature id
+- **Selection** — **click selection is built** (`apps/web/src/editing/modes.ts`,
+  `useMapEditing.ts`): multi-feature and vertex scopes, every §4 transition rule including the
+  two-press `Esc` and the active-layer switch that ends the session, and the hit test that turns
+  a click into a feature id. Rectangle and lasso are what remain
 - **Edit session** (`09` §5) — **built**: dirty buffer, `Command`/`FeatureDelta`, undo/redo
   atomic over a command's whole delta set, Save/Discard, the Refresh half of the 409 rebase,
   and the snapshot §5.4 mirrors to IndexedDB. The IndexedDB write itself and the recovery
   prompt are what remain
-- **Screen-space snapping** (`09` §6) — **the engine is built**: vertex, edge, intersection and
-  midpoint passes in priority order, the pixel-clamped tolerance reporting *which* clamp bound,
-  and the drag exclusion with its ring wrap. What remains is the MapLibre half — the
-  `queryRenderedFeatures` candidate set, the projection cache during a drag, the indicator
-  source, and §6.6's exact-coordinate resolution with unsimplified tiles at edit zooms
+- **Screen-space snapping** (`09` §6) — **built**: vertex, edge, intersection and midpoint
+  passes in priority order, the pixel-clamped tolerance reporting *which* clamp bound, the drag
+  exclusion with its ring wrap, the `queryRenderedFeatures` candidate set with its
+  drag-duration projection cache, dirty geometry substituted for stale tile geometry, and the
+  indicator drawn as the four glyphs §6.7 assigns. What remains is §6.6's exact-coordinate
+  resolution and the unsimplified tiles at edit zooms it depends on — until then every snap is
+  tile-derived and the indicator stays hollow, which is what §6.6 asks it to mean
 - **The editing surfaces** (`09` §9, §10) — **built**: the menu bar in §9's order with disabled
   items greyed and their shortcuts shown, the command palette that excludes what cannot run and
   matches on descriptions and keywords, the persistent toolbar with its ten-slot budget
   asserted, the contextual operation bar with `Esc`/`Enter`, and the status strip. All four
   render from the one registry, so none of them can disagree about what is enabled
-- **Vertex editing** — handles, move/add/delete, nudge, numeric and bearing entry
+- **Vertex editing** — **move, add and delete are built**: square handles from their own
+  source, a press that selects and a drag that moves, the three-pixel threshold that keeps a
+  shaky click from moving anything, double-click to delete with the ring minimum refused rather
+  than cascaded, and Z carried through every one of them. Nudge, numeric and bearing entry
+  remain
 - **Terra Draw for new geometry only** ([`adr/0014`](adr/0014-terra-draw-scoped-to-creation.md)),
   wired to the snap engine through `toCustom`
 - **Topological editing** ([`adr/0013`](adr/0013-topological-editing-within-the-active-layer.md))
   — **the index and the propagation rules are built**: the coordinate hash over the active
   layer, which operations honour the toggle and why the two that do not say so, and the
-  shared-edge lookup that makes vertex-add propagate. What remains is wiring it into the vertex
-  handlers and the discoverability nudge
+  shared-edge lookup that makes vertex-add propagate. What remains is propagation from the
+  vertex handlers — a move currently changes only the vertex dragged — and the discoverability
+  nudge
 - **Operations catalog** (`09` §11) — split, reshape, combine/explode/dissolve, overlay,
   smooth/simplify, buffer, align
 - Geometry validation blocking on errors, plus **Validate Topology** as a whole-layer job

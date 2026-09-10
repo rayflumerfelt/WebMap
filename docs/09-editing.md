@@ -1241,17 +1241,19 @@ Each phase independently shippable.
 1. **Foundation** — command registry, mode state machine, menus rendered from the registry,
    hotkeys, command palette. No operations yet. — **built**
 2. **Selection** — feature store, both selection scopes, click/rectangle/lasso, modifier
-   inversion, active-layer plumbing, the status strip's selection count. — **the model is
-   built**; the hit testing that turns a click into a feature id is not
+   inversion, active-layer plumbing, the status strip's selection count. — **click selection is
+   built**; rectangle and lasso are not
 3. **Edit session** — dirty buffer, `Command`/`FeatureDelta`, undo/redo, Save/Discard, IndexedDB
    durability, the version check. **Before any mutating operation exists.** — **built**, except
    the IndexedDB write itself: `snapshot()` produces what crosses into it, and nothing stores
    it yet
 4. **Snapping** — the screen-space engine, tolerance conversion, indicator, settings popover,
-   status-strip snap state. Configure unsimplified tiles at edit zooms. — **the engine and the
-   status readout are built**; the `queryRenderedFeatures` candidate set, the indicator source
-   and the tile configuration are not
+   status-strip snap state. Configure unsimplified tiles at edit zooms. — **built**, including
+   the `queryRenderedFeatures` candidate set with its drag cache, dirty-geometry substitution
+   and the map indicator; the settings popover and the unsimplified-tile configuration are not
 5. **Vertex editing** — handles, vertex scope, move/add/delete, the exact-resolution protocol.
+   — **move, add and delete are built** and wired to a drag; the exact-resolution protocol of
+   §6.6 is not, so every snap is still tile-derived and the indicator renders hollow
 6. **Drawing** — Terra Draw for new geometry, wired to the snap engine through `toCustom`.
 7. **Clipboard and simple transforms** — cut/copy/paste, move, rotate, scale.
 8. **Topological editing** — coincidence index, toggle, propagation, the discoverability nudge.
@@ -1267,9 +1269,20 @@ Each phase independently shippable.
 retrofit.** Undo built in from the first mutation costs almost nothing; undo added afterwards
 means revisiting every operation that already exists.
 
-**What "built" means for 1–4 and 8.** The rules are right and tested, and none of it is wired
-to a map: no operation mutates geometry yet. That is the order this section asks for, and it is
-worth stating plainly rather than leaving a reader to infer that a geologist can drag a vertex.
-The next piece of work is the MapLibre half — hit testing, the snap candidate set, the
-`edit-overlay` source of §3.3, and the vertex handlers — after which phases 5 onward have
-something to attach to.
+**Where this stands.** Phases 1–4 and 8 are built and wired to the map: a geologist can pick
+the edit tool, select a feature, enter vertex mode, and drag a vertex onto a neighbour's with
+the snap indicator showing where it will land. Phase 5 is built for move, add and delete.
+
+Three things a reader should not infer from that:
+
+- **Nothing is saved yet.** The dirty buffer, the undo stack and the version check are all
+  there (§5.3), and the endpoint that writes them is not. Edits live in the tab.
+- **Every snap is tile-derived.** §6.6's resolution protocol is unbuilt, so the indicator
+  renders hollow throughout and a snapped coordinate is the tile's, which for an unsimplified
+  edit-zoom tile is the source's — but the tile configuration that guarantees that is also
+  unbuilt.
+- **The working set of §17 is unbuilt.** Features come from whatever the tiles return, so a
+  feature outside the viewport is not editable and there is no 5,000-feature cap yet.
+
+The next pieces, in the order they unblock the rest: persistence (§13), the exact-coordinate
+protocol (§6.6), and rectangle/lasso selection.

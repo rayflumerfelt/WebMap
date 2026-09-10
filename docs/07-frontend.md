@@ -140,13 +140,38 @@ Some operations do not fit declarative props.
 export interface WebMapHandle {
   fitBounds(bounds: LngLatBoundsLike, options?: FitBoundsOptions): void;
   capture(): Promise<Blob>;         // see 06-rendering.md §8
-  queryFeatures(point: PointLike, layerIds?: string[]): MapGeoJSONFeature[];
+  // No point means the whole viewport, which is what the snap engine asks for
+  // once at the start of a drag rather than per pointer move (`09` §6.5).
+  queryFeatures(
+    point?: PointLike | [PointLike, PointLike],
+    layerIds?: string[],
+  ): MapGeoJSONFeature[];
+  project(lngLat: [number, number]): [number, number];
+  unproject(point: [number, number]): [number, number];
+  setEditOverlay(overlay: EditOverlay | null): void;   // `09` §3.3
   getMap(): maplibregl.Map;         // escape hatch; document it as unstable
 }
 ```
 
+`project`/`unproject` return plain tuples rather than MapLibre's `Point` and `LngLat`, which is
+what lets the snapping engine be written in pixels while importing no MapLibre (`09` §6.1).
+
+Two props exist for the same reason and are worth naming here, because both look like something
+`getMap()` could do and neither can be done safely that way:
+
+- **`images`** — raw RGBA glyphs for the style's `icon-image` expressions. A style change empties
+  MapLibre's image registry without telling anyone, and an `icon-image` naming an image that is
+  not registered renders **nothing, with no error**. As a prop they are re-added whenever the
+  style settles.
+- **`onMapPointer`** — pointer gestures with the pixel, the modifier keys, and `preventDefault()`.
+  Separate from `onPointerMove`, which gives a coordinate for the status bar; editing needs the
+  pixel for snapping, the modifiers for shift-click, and `preventDefault` or the map pans out
+  from under a vertex being dragged.
+
 `getMap()` exists because we cannot anticipate everything, but every use of it in `apps/web`
-is a signal that the public API is missing something. Track them.
+is a signal that the public API is missing something. Track them. As of this writing there are
+none: the editing subsystem, which had the strongest claim on one, is served by the three
+methods and two props above.
 
 ### 2.2 Instance lifecycle
 
