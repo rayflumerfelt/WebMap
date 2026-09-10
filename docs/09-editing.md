@@ -609,6 +609,25 @@ const key = (c: Position) => `${c[0].toFixed(7)},${c[1].toFixed(7)}`;
 O(1) per drag. Rebuild on `moveend` and after each save. **This index is also the gap detector
 for §12.2**, so it earns its keep twice.
 
+**Built** as `apps/web/src/editing/topology.ts`. Two things the sketch above leaves out, and
+both bite:
+
+**A closed ring's repeated first coordinate must not be indexed.** It is not a separate vertex,
+and indexed it makes every ring report a coincidence with itself — so every drag propagates to
+a phantom in the same feature.
+
+**Adjacency wraps, and `sharedEdges` has to know the ring's length to see it.** A ring's last
+segment runs from ordinal N-1 back to ordinal 0, so its endpoints are N-1 apart rather than 1.
+An adjacency test that only accepts 1 never recognises that segment — and on the two-lease
+fixture the east lease's shared boundary *is* its closing segment, so a vertex inserted on it
+went into the west lease alone. That is precisely the sliver §7.3 says vertex-add must prevent,
+reproduced by the first version of the code meant to prevent it. `VertexRef` therefore carries
+`ringLength` and `closed`.
+
+A third, smaller: **a shared corner is not a shared edge.** Both endpoints have to coincide.
+Two polygons meeting at one corner share a vertex and no edge, and inserting into both would
+move a boundary that is not there.
+
 ### 7.5 Atomicity
 
 One drag mutates N features: **one undo entry, one transaction.** `Command.deltas` is already a

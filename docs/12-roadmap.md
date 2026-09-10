@@ -399,7 +399,10 @@ produces the same wrong surface with nothing said about it.
 - **Terra Draw for new geometry only** ([`adr/0014`](adr/0014-terra-draw-scoped-to-creation.md)),
   wired to the snap engine through `toCustom`
 - **Topological editing** ([`adr/0013`](adr/0013-topological-editing-within-the-active-layer.md))
-  — coincidence index, propagation on vertex operations, the discoverability nudge
+  — **the index and the propagation rules are built**: the coordinate hash over the active
+  layer, which operations honour the toggle and why the two that do not say so, and the
+  shared-edge lookup that makes vertex-add propagate. What remains is wiring it into the vertex
+  handlers and the discoverability nudge
 - **Operations catalog** (`09` §11) — split, reshape, combine/explode/dissolve, overlay,
   smooth/simplify, buffer, align
 - Geometry validation blocking on errors, plus **Validate Topology** as a whole-layer job
