@@ -182,6 +182,34 @@ held at `visibility = 'team'` in a small restricted team is confidential from th
 organisation *and* survives any one person leaving, with no administrator involved. That is
 the shape to push project work toward; transfer is the safety net for when nobody did.
 
+### Implementation note — transfer needs a privilege this design does not yet grant
+
+Attempted 2026-09-10 and **backed out**, because finishing it means making a security decision
+this ADR does not make.
+
+Transfer exists to recover objects the administrator **cannot read**, and every route to them
+is closed by design:
+
+- **Ordinary service code** reads `NotFound`. The application role is `NOBYPASSRLS`, and the
+  private rows the operation exists to rescue are exactly the ones RLS hides from it. That is
+  the policy working.
+- **A `SECURITY DEFINER` function** owned by the table owner does not help either, and the
+  reason is `FORCE ROW LEVEL SECURITY`, which migration 0004 sets deliberately: policies apply
+  to the owner too, and `row_security = off` is refused under FORCE. Written, tested, and it
+  reported "No layer with id …" for the very object it was called on.
+
+So the operation needs a role with `BYPASSRLS` — narrowly: one that owns two functions and
+nothing else, with `EXECUTE` granted to the application role, so the privilege lives in one
+auditable place rather than in a connection a web process holds open. That is a sound design
+and it is a **new role in the security model**, which belongs in a decision rather than in a
+commit made overnight.
+
+`03-auth-security.md` §11's checklist gains a row for it. What did land is migration 0006:
+`webmap_forbid_ownership_change` now covers `layer` and `basemap`, which revision 0002 could
+not know about — so the two objects the sharing model is *for* were the two whose ownership an
+ordinary UPDATE could change. Nothing exploited it, and that is why it was worth closing: the
+guard exists so a future writer cannot.
+
 ## Consequences
 
 **Local password authentication is new security surface, and it is the largest risk here.**

@@ -9,9 +9,19 @@ need a browser, and the roadmap calls the absence of both "the gap worth
 naming" — the code behind those criteria is written and unit-tested, and none
 of it was demonstrated.
 
+**Playwright's async API, not the sync one, and this is not a style choice.**
+`sync_playwright()` keeps an event loop *running* for the lifetime of its
+context manager. Held open by a session-scoped fixture, that loop is still
+running when pytest-asyncio later tries to set up an async fixture for some
+other test, and `Runner.run()` refuses: "cannot be called from a running event
+loop". The first version of this file did exactly that, and the result was 140
+setup errors across the integration suite from a harness that had *skipped*
+every one of its own tests. The async API composes with `asyncio_mode = "auto"`,
+which the rest of this repository already runs under.
+
 **Desktop is the base case** (`07` §5.1), so the viewport is 1440×900: the
 layout the application is designed for, not a default 1280×720 that would
-exercise the one width the CSS treats as a degraded case. `07` §5.1 also puts a
+exercise the one width the CSS treats as a degraded case. §5.1 also puts a
 minimum-width notice below 1280 px, and a harness running under it would test
 the notice.
 
@@ -23,10 +33,11 @@ that says how to fix it is the difference between "not run" and "broken".
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 #: The web application. Overridable so the harness runs against a container in
 #: CI and a Vite dev server on a workstation.
@@ -75,33 +86,38 @@ def stack() -> tuple[str, str]:
     return WEB_URL, API_URL
 
 
-@pytest.fixture(scope="session")
-def browser() -> Iterator[Any]:
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def browser(stack: tuple[str, str]) -> AsyncIterator[Any]:
     """One Chromium for the session.
 
     Chromium specifically: it is what the render service runs
     (`06-rendering.md` §2), so a difference between what the browser shows and
     what a slide shows is a difference in the application rather than in the
     engine.
+
+    **Depends on `stack` so nothing starts when the stack is down.** pytest
+    resolves fixtures in parameter order, and a `browser` that ran first would
+    launch a browser for a session about to skip every test — which is slow,
+    and was how the sync API's running loop leaked into the rest of the suite.
     """
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright
     except ImportError:  # pragma: no cover — an optional dependency
         pytest.skip(
             "Playwright is not installed. Install it with: "
             "uv sync --group e2e && uv run playwright install chromium"
         )
 
-    with sync_playwright() as playwright:
-        instance = playwright.chromium.launch()
+    async with async_playwright() as playwright:
+        instance = await playwright.chromium.launch()
         try:
             yield instance
         finally:
-            instance.close()
+            await instance.close()
 
 
-@pytest.fixture
-def page(browser: Any, stack: tuple[str, str]) -> Iterator[Any]:
+@pytest_asyncio.fixture(loop_scope="session")
+async def page(browser: Any) -> AsyncIterator[Any]:
     """A fresh page at the design viewport, with console errors collected.
 
     **A console error fails the test that caused it.** A React error boundary
@@ -110,8 +126,8 @@ def page(browser: Any, stack: tuple[str, str]) -> Iterator[Any]:
     is exactly the failure an end-to-end harness exists to catch and the one it
     is easiest to miss.
     """
-    context = browser.new_context(viewport=VIEWPORT, device_scale_factor=1)
-    active = context.new_page()
+    context = await browser.new_context(viewport=VIEWPORT, device_scale_factor=1)
+    active = await context.new_page()
 
     errors: list[str] = []
     active.on(
@@ -127,7 +143,7 @@ def page(browser: Any, stack: tuple[str, str]) -> Iterator[Any]:
             f"passed over a broken application: {errors}"
         )
     finally:
-        context.close()
+        await context.close()
 
 
 @pytest.fixture

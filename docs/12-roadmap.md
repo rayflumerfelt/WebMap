@@ -427,6 +427,12 @@ produces the same wrong surface with nothing said about it.
   endpoints over it — CRUD, duplication by reference, save-any-map-as-basemap, and the `07`
   §6.1 refusal that names the basemaps. **What remains is the map's active layer**, which is
   frontend state, and the `map_session.layers` reshape `adr/0010` calls for
+- **Ownership transfer** (`adr/0010` §5) — attempted and **backed out**, with the reason
+  recorded in that ADR. It needs a narrowly scoped `BYPASSRLS` role: the operation exists to
+  recover objects an administrator cannot read, and both ordinary service code and a
+  `SECURITY DEFINER` function are correctly blocked by RLS and by `FORCE ROW LEVEL SECURITY`.
+  A new role in the security model is a decision, not a commit. Migration 0006 — the
+  ownership-change trigger reaching `layer` and `basemap` — did land
 - **Capability roles**: `webmap_core.services.capabilities` holds the checks —
   `is_global_admin`, per-team `role`, and `require_publish_scope`, which makes
   `visibility = 'org'` administrator-only as `adr/0010` §2 requires. **Wired into layers and
