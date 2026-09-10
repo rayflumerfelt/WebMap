@@ -382,6 +382,14 @@ function labelSpec(s: LabelSymbol, overrides: Record<string, unknown>) {
       'text-size': textSize(s),
       'text-font': s.font,
       'symbol-placement': s.placement,
+      ...(s.rotateField
+        ? {
+            'text-rotate': ['get', s.rotateField],
+            // Map-aligned, or the rotation is applied in screen space and the
+            // label holds its angle while the map turns under it.
+            'text-rotation-alignment': 'map',
+          }
+        : {}),
       // Both flags, deliberately. `text-allow-overlap` stops this layer's own
       // labels being dropped; `text-ignore-placement` keeps them out of the
       // collision index so they cannot displace another layer's. Setting only

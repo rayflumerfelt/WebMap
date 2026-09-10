@@ -170,17 +170,23 @@ def _add_layer(
     if detail.get("bbox_4326"):
         style["sources"][source_id]["bounds"] = detail["bbox_4326"]
 
-    symbology = ref.get("symbology") or _default_symbology(detail)
-    compiled = compile_symbology(
-        symbology,
-        source_id=source_id,
-        source_layer="features",
-        palettes=palettes,
-        id_prefix=f"layer-{index}-{dataset_id[:8]}",
-    )
-    for layer in compiled:
-        _apply_opacity(layer, opacity)
-        style["layers"].append(layer)
+    stored = ref.get("symbology")
+    symbologies = [stored] if stored else _default_symbologies(detail)
+    for position, symbology in enumerate(symbologies):
+        compiled = compile_symbology(
+            symbology,
+            source_id=source_id,
+            source_layer="features",
+            palettes=palettes,
+            # The suffix keeps two symbologies over one dataset from colliding:
+            # a contour set draws its lines and its labels from the same source
+            # and both would otherwise compile to `…-label` and `…-line` under
+            # one prefix, which is fine until two of them are labels.
+            id_prefix=f"layer-{index}-{dataset_id[:8]}" + (f"-{position}" if position else ""),
+        )
+        for layer in compiled:
+            _apply_opacity(layer, opacity)
+            style["layers"].append(layer)
 
 
 def _add_grid(
@@ -259,6 +265,65 @@ def _apply_opacity(layer: dict[str, Any], opacity: float) -> None:
     else:
         paint[property_name] = ["*", existing, opacity]
     layer["paint"] = paint
+
+
+def _is_labelled_contours(detail: dict[str, Any]) -> bool:
+    """Whether this dataset is a contour set with its labels beside it.
+
+    Read off the attribute schema rather than the geometry kind, because
+    `mixed` says only that a dataset holds more than one geometry type. The
+    three columns together are what a labelled contour set has and nothing else
+    does (`adr/0015`).
+    """
+    columns = {str(column.get("name")) for column in (detail.get("attribute_schema") or [])}
+    return {"kind", "bearing", "label"}.issubset(columns)
+
+
+def _default_symbologies(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    """Everything a layer with no stored styling should draw.
+
+    Usually one symbology. A labelled contour set is two, because its lines and
+    the text in their gaps are two MapLibre layers and one symbology describes
+    one geometry — and a contour set that drew its lines and not its labels
+    would be a map with gaps in it for no visible reason.
+    """
+    if _is_labelled_contours(detail):
+        return [
+            {
+                "type": "single",
+                "symbol": {
+                    "geometry": "line",
+                    "color": "#6b4f2a",
+                    "width": 1,
+                    "opacity": 1,
+                    "cap": "round",
+                    "join": "round",
+                },
+            },
+            {
+                "type": "single",
+                "symbol": {
+                    "geometry": "label",
+                    # Null for a line piece and for an unlabelled intermediate
+                    # contour, and MapLibre places no symbol for an empty
+                    # text-field — which is what keeps this layer to the label
+                    # points without a filter.
+                    "field": "label",
+                    "size": 9,
+                    "sizeMode": {"mode": "fixed"},
+                    "color": "#3b2b15",
+                    "haloColor": "#ffffff",
+                    "haloWidth": 0,
+                    "font": ["Inter Regular"],
+                    # Point placement over an anchor we computed, at the middle
+                    # of a gap cut into the line (`adr/0015`).
+                    "placement": "point",
+                    "rotateField": "bearing",
+                    "allowOverlap": True,
+                },
+            },
+        ]
+    return [_default_symbology(detail)]
 
 
 def _default_symbology(detail: dict[str, Any]) -> dict[str, Any]:

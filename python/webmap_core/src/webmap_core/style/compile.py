@@ -324,6 +324,17 @@ def _label_layer(
         "text-size": _text_size(symbol),
         "text-font": symbol["font"],
         "symbol-placement": symbol["placement"],
+        # A label whose orientation was computed with its anchor — a gapped
+        # contour's (`adr/0015`). Map-aligned, or the rotation applies in
+        # screen space and the label holds its angle while the map turns.
+        **(
+            {
+                "text-rotate": ["get", symbol["rotateField"]],
+                "text-rotation-alignment": "map",
+            }
+            if symbol.get("rotateField")
+            else {}
+        ),
         # Both flags, deliberately. `text-allow-overlap` stops this layer's own
         # labels being dropped; `text-ignore-placement` keeps them out of the
         # collision index so they cannot displace another layer's. Setting only

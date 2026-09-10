@@ -1,0 +1,46 @@
+{
+  "name": "label_rotated_contour",
+  "description": "A contour label, point-placed and rotated by a field. `adr/0015`: the contour arrives with a gap already cut into it and a point at the middle of that gap carrying the bearing, so the label is anchored by geometry we computed rather than by MapLibre picking a vertex — which is what `08`'s line-center rule exists to avoid. Two things this pins: `rotateField` compiles to `text-rotate: ['get', field]`, and it brings `text-rotation-alignment: 'map'` with it. The alignment is not decoration: at MapLibre's default the rotation is applied in screen space, so every contour label would hold its angle while the map turned under it.",
+  "symbology": {
+    "type": "single",
+    "symbol": {
+      "geometry": "label",
+      "field": "label",
+      "size": 9,
+      "sizeMode": { "mode": "fixed" },
+      "color": "#3b2b15",
+      "haloColor": "#ffffff",
+      "haloWidth": 0,
+      "font": ["Inter Regular"],
+      "placement": "point",
+      "rotateField": "bearing",
+      "allowOverlap": true
+    }
+  },
+  "palettes": {},
+  "source_id": "contours",
+  "source_layer": "features",
+  "expected_layers": [
+    {
+      "id": "contours-label",
+      "type": "symbol",
+      "source": "contours",
+      "source-layer": "features",
+      "layout": {
+        "text-field": ["get", "label"],
+        "text-size": 12,
+        "text-font": ["Inter Regular"],
+        "symbol-placement": "point",
+        "text-rotate": ["get", "bearing"],
+        "text-rotation-alignment": "map",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      "paint": {
+        "text-color": "#3b2b15",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 0
+      }
+    }
+  ]
+}

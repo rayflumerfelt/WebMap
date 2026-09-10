@@ -336,6 +336,18 @@ beside them, carrying a `bearing`; the label layer is `point`-placed over those.
 above does not apply, because MapLibre is no longer choosing the anchor — we are, and it is in
 the middle of the gap by construction.
 
+`LabelSymbol.rotateField` names the property holding that bearing, and compiles to
+`text-rotate: ['get', field]` **with `text-rotation-alignment: 'map'`**. The alignment is not
+decoration: at MapLibre's default the rotation is applied in screen space, so every contour
+label would hold its angle while the map turned under it. Both compilers emit it and
+`label_rotated_contour` in the shared vectors keeps them saying the same thing.
+
+**A contour layer with no stored styling draws both.** It is the first dataset whose default is
+two symbologies rather than one, because one symbology describes one geometry and a contour set
+that drew its lines and not its labels would be a map with gaps in it for no visible reason.
+The label layer needs no filter: `label` is null on every line piece and on every unlabelled
+intermediate contour, and MapLibre places no symbol for an empty text field.
+
 **All label layers are added after all object layers, so nothing draws over a label.** MapLibre
 paints in array order, so this is the entire mechanism: `compileStyle` holds symbol layers back
 and appends them, preserving draw order among themselves. The basemap is deliberately exempt —

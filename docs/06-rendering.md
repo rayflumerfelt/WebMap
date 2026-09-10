@@ -472,6 +472,29 @@ exposure; a visible stamp is the mitigation that survives copy-paste.
 
 ---
 
+### 9.1 The overlay says when it did not draw
+
+A render whose overlay threw comes back **200, complete, and wrong** — the map is
+there, the legend is not, and nothing in the response says so. That happened: a legend spec
+carrying `min`/`max` where `ColorbarLegend` has `range` threw inside React, and because
+`root.render()` commits asynchronously the shell's `try`/`catch` never saw it.
+
+The shell therefore reports three ways, all into `failed_requests`:
+
+- a `window.onerror` listener, for anything thrown outside the render promise;
+- an `unhandledrejection` listener, for the same in a promise;
+- a check, after the map settles, that an overlay which was *asked for* produced DOM.
+
+The last one is the one that catches this class outright. The image looks finished and is
+missing its legend; nothing else in the pipeline can tell.
+
+**The shell fills in the camera facts.** A scale bar's length depends on latitude and zoom and a
+north arrow's on bearing, and after a `fitBounds` only the map knows them — a caller who named
+bounds cannot. So `scaleBar: true` and `northArrow: true` are legitimate: they mean *show it*,
+and the numbers come from the map that was actually rendered.
+
+---
+
 ## 10. Visual regression testing
 
 Rendering bugs are visual and will not appear in unit tests.

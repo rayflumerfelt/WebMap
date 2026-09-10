@@ -100,6 +100,15 @@ export interface LabelSymbol {
    *  separate stacks, not properties — see `08` §2.3. */
   font: string[];
   placement: 'point' | 'line' | 'line-center';
+  /**
+   * The property holding a rotation in degrees, for a label whose orientation
+   * was computed alongside its anchor — a gapped contour's, `adr/0015`.
+   *
+   * Sets `text-rotation-alignment: 'map'` with it, which is not optional: at
+   * the default the rotation is applied in *screen* space, so the label would
+   * keep its angle while the map turned under it.
+   */
+  rotateField?: string;
   /** Sets `text-allow-overlap` **and** `text-ignore-placement`. Both, or the
    *  layer keeps its own labels but still displaces another layer's. */
   allowOverlap: boolean;
