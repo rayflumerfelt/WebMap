@@ -95,6 +95,7 @@ def minimum_curvature(
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     tolerance: float = DEFAULT_TOLERANCE,
     blocked_edges: tuple[NDArray[np.bool_], NDArray[np.bool_]] | None = None,
+    soft_edges: tuple[NDArray[np.bool_], NDArray[np.bool_]] | None = None,
 ) -> MinimumCurvatureResult:
     """Grid `values` at `points` onto `grid` by minimum curvature.
 
@@ -109,6 +110,19 @@ def minimum_curvature(
     that neighbour, which gives the surface a free edge at the fault — the
     correct physical analogue, since a sealing fault leaves the surface
     unconstrained across it rather than clamped.
+
+    `soft_edges` is the same shape for **breaklines**, and does half as much on
+    purpose. A breakline is continuous in value and discontinuous only in
+    gradient (`CLAUDE.md` §13), so across a soft edge the second-difference
+    rows are dropped — the surface is allowed to kink — while the
+    first-difference rows are kept, which is what stops the two sides drifting
+    apart into a step. Passing the same mask as `blocked_edges` instead would
+    tear the surface along the breakline; passing a fault here would smear its
+    throw. The masks are separate arguments so that mistake has to be typed.
+
+    A breakline also needs its **own elevations** supplied as control points
+    (`faults.breakline_control`), because these masks say only that a kink is
+    permitted, never where it goes.
     """
     coords = np.asarray(points, dtype=float)
     z = np.asarray(values, dtype=float).ravel()
@@ -148,7 +162,7 @@ def minimum_curvature(
             f"coordinate order swap puts them in different hemispheres."
         )
 
-    smoothness = _smoothness_operator(grid, tension, blocked_edges)
+    smoothness = _smoothness_operator(grid, tension, blocked_edges, soft_edges)
 
     # **The least-squares system, not its normal equations.**
     #
@@ -240,6 +254,7 @@ def _smoothness_operator(
     grid: GridDefinition,
     tension: float,
     blocked_edges: tuple[NDArray[np.bool_], NDArray[np.bool_]] | None,
+    soft_edges: tuple[NDArray[np.bool_], NDArray[np.bool_]] | None = None,
 ) -> Any:
     """The operator whose squared norm the surface minimises.
 
@@ -265,6 +280,14 @@ def _smoothness_operator(
     edge is not emitted, so the surface is unconstrained across a sealing
     fault — the correct physical analogue, and the same mechanism as the grid
     boundary rather than a special case beside it.
+
+    **Breaklines use the same rule and only half of it.** A triple spanning a
+    soft edge is dropped here too, so the surface may kink along the line; the
+    first differences in `_gradient_operator` are *not* dropped, so the two
+    sides stay tied together and the kink cannot open into a step. That
+    asymmetry is the entire difference between a fault and a breakline, and it
+    lives in these two functions rather than anywhere a caller can get it
+    wrong.
     """
     import scipy.sparse as sp
 
@@ -273,6 +296,15 @@ def _smoothness_operator(
     vertical_blocked, horizontal_blocked = (
         blocked_edges if blocked_edges is not None else (None, None)
     )
+    vertical_soft, horizontal_soft = soft_edges if soft_edges is not None else (None, None)
+
+    def no_curvature_across(
+        hard: NDArray[np.bool_] | None,
+        soft: NDArray[np.bool_] | None,
+        row: int,
+        col: int,
+    ) -> bool:
+        return _blocked(hard, row, col) or _blocked(soft, row, col)
 
     rows: list[int] = []
     cols: list[int] = []
@@ -283,9 +315,9 @@ def _smoothness_operator(
     # (col-1, col) and (col, col+1), and needs both.
     for row in range(ny):
         for col in range(1, nx - 1):
-            if _blocked(horizontal_blocked, row, col - 1) or _blocked(
-                horizontal_blocked, row, col
-            ):
+            if no_curvature_across(
+                horizontal_blocked, horizontal_soft, row, col - 1
+            ) or no_curvature_across(horizontal_blocked, horizontal_soft, row, col):
                 continue
             rows.extend([row_count] * 3)
             cols.extend(
@@ -301,7 +333,9 @@ def _smoothness_operator(
     # Second differences along y.
     for row in range(1, ny - 1):
         for col in range(nx):
-            if _blocked(vertical_blocked, row - 1, col) or _blocked(vertical_blocked, row, col):
+            if no_curvature_across(
+                vertical_blocked, vertical_soft, row - 1, col
+            ) or no_curvature_across(vertical_blocked, vertical_soft, row, col):
                 continue
             rows.extend([row_count] * 3)
             cols.extend(

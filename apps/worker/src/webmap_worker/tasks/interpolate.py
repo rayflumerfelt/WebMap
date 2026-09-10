@@ -181,11 +181,23 @@ async def _run(
 async def _load_constraints(
     inputs: gridding.ResolvedInputs, crs: CrsContext, object_store: Any, bucket: str
 ) -> list[Any]:
-    """Fault traces, in the analysis frame.
+    """Fault traces and breaklines, in the analysis frame.
 
-    Read as geometry rather than as control: a fault has no Z of its own —
-    "a fault's Z is whatever the surface does on each side" — so only the
-    trace matters here.
+    A **fault** is read as geometry alone: it has no Z of its own — "a fault's
+    Z is whatever the surface does on each side" — so only the trace matters.
+
+    A **breakline** is read as geometry *and* elevations, because it carries
+    its own Z (`CLAUDE.md` §13) and that Z is the only thing that says where
+    the kink in the surface goes. The elevations come from the geometry's own
+    third dimension, which is how a breakline is digitised: a 3D polyline
+    along the terrace edge or channel margin. A breakline with 2D geometry is
+    **refused by name** rather than demoted to a fault — silently turning a
+    soft constraint into a hard one tears a surface that should bend, and
+    nothing downstream would say so.
+
+    `constraint_kind` comes from the feature's properties and defaults to
+    `fault`, which is what an ordinary fault layer carries and what the
+    `InterpolationRequest` field documents.
     """
     import numpy as np
     import shapely
@@ -201,7 +213,7 @@ async def _load_constraints(
         ).fetchall()
 
     constraints: list[Any] = []
-    for wkb, _props in rows:
+    for index, (wkb, props) in enumerate(rows):
         geometry = shapely.from_wkb(bytes(wkb))
         if geometry.geom_type != "LineString":
             # A polygon in a fault layer is a compartment outline, not a
@@ -209,12 +221,68 @@ async def _load_constraints(
             # both, and refusing the whole network over one polygon would make
             # a usable dataset unusable.
             continue
+
+        attributes = _properties(props)
+        kind_name = str(attributes.get("constraint_kind") or "fault").strip().lower()
+        if kind_name not in {"fault", "breakline"}:
+            raise ValueError(
+                f"Feature {index} of the constraint layer has "
+                f"constraint_kind='{kind_name}'. A constraint is either 'fault' "
+                f"(value discontinuous across it) or 'breakline' (value "
+                f"continuous, gradient discontinuous). Fix the column, or leave "
+                f"it empty for a fault."
+            )
+        name = str(attributes.get("name") or f"feature {index}")
+
         coords = np.asarray(geometry.coords, dtype=float)
+        xy = coords[:, :2]
         if inputs.fault_storage_srid != inputs.analysis_srid:
-            x, y = crs.to_analysis(coords[:, 0], coords[:, 1])
-            coords = np.column_stack([x, y])
-        constraints.append(Constraint(geometry=LineString(coords), kind=ConstraintKind.FAULT))
+            x, y = crs.to_analysis(xy[:, 0], xy[:, 1])
+            xy = np.column_stack([x, y])
+
+        if kind_name == "fault":
+            constraints.append(
+                Constraint(geometry=LineString(xy), kind=ConstraintKind.FAULT, name=name)
+            )
+            continue
+
+        if coords.shape[1] < 3:
+            raise ValueError(
+                f"Breakline '{name}' has no elevations. A breakline is a line of "
+                f"known values — digitise it as a 3D polyline, or mark it "
+                f"constraint_kind='fault' if the surface really is discontinuous "
+                f"across it. It is not treated as a fault by default, because "
+                f"that would tear a surface that should only bend."
+            )
+        constraints.append(
+            Constraint(
+                geometry=LineString(xy),
+                kind=ConstraintKind.BREAKLINE,
+                z_values=coords[:, 2],
+                name=name,
+            )
+        )
     return constraints
+
+
+def _properties(raw: Any) -> dict[str, Any]:
+    """A feature's props as a dict, however DuckDB handed them back.
+
+    A JSON column arrives as text and a STRUCT as a mapping, depending on how
+    the parquet was written. Both are normal here, and a silent string would
+    make every `constraint_kind` lookup miss — turning every breakline into a
+    fault with no error anywhere.
+    """
+    import json
+
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else {}
+    if isinstance(raw, dict):
+        return raw
+    return {}
 
 
 def _generator_for(job_id: UUID) -> Any:

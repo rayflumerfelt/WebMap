@@ -56,14 +56,47 @@ def blocked_edges(
     discontinuous only in gradient (`CLAUDE.md` §13), so blocking a link for
     one would cut a surface that should not be cut.
     """
+    return _edges_crossed(
+        [c for c in constraints if c.is_hard and not c.geometry.is_empty], grid
+    )
+
+
+def soft_edges(
+    constraints: list[Constraint], grid: GridDefinition
+) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+    """Which cell-to-cell links a **breakline** crosses.
+
+    Same geometry as `blocked_edges`, opposite meaning, and the difference is
+    the whole distinction in `CLAUDE.md` §13. A hard fault severs the link: the
+    surface propagates no information across it at all. A breakline leaves the
+    link intact and only removes the requirement that the surface be *smooth*
+    across it — value continuous, gradient free to kink.
+
+    So the same mask feeds two different parts of the solver.
+    `minimum_curvature` drops the second-difference rows spanning a blocked
+    link **and** the first-difference rows; across a soft link it drops only
+    the second differences, and the first differences keep the two sides tied
+    together. Treating a breakline as a fault tears a surface that should bend;
+    treating a fault as a breakline smears throw that should be a step, and
+    neither failure is visible on the map.
+
+    Returned in the same `(vertical, horizontal)` shapes so the two can be
+    passed side by side without either caller reshaping anything.
+    """
+    return _edges_crossed(
+        [c for c in constraints if not c.is_hard and not c.geometry.is_empty], grid
+    )
+
+
+def _edges_crossed(
+    constraints: list[Constraint], grid: GridDefinition
+) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
     vertical = np.zeros((grid.ny - 1, grid.nx), dtype=bool)
     horizontal = np.zeros((grid.ny, grid.nx - 1), dtype=bool)
-
-    hard = [c for c in constraints if c.is_hard and not c.geometry.is_empty]
-    if not hard:
+    if not constraints:
         return vertical, horizontal
 
-    for constraint in hard:
+    for constraint in constraints:
         for start_xy, end_xy in _segments(constraint.geometry):
             _mark_segment(start_xy, end_xy, grid, vertical, horizontal)
 
@@ -217,4 +250,73 @@ def control_per_compartment(
     return tally
 
 
-__all__ = ["blocked_edges", "compartments", "control_per_compartment"]
+def breakline_control(
+    constraints: list[Constraint], grid: GridDefinition
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Breakline vertices, densified, as extra control points.
+
+    **A breakline carries its own Z** (`CLAUDE.md` §13), and that Z is the only
+    thing that makes it bend the surface rather than merely permit a bend. The
+    soft-edge mask says "you may kink here"; these points say where to.
+
+    Densified to roughly one point per cell along the line, with Z linearly
+    interpolated between vertices. Without densification a breakline digitised
+    with vertices 40 cells apart constrains 2 cells in 40 and the surface
+    ignores it between them — which looks like the breakline not working, and
+    is really the breakline not being sampled.
+
+    A breakline with no Z cannot be used and is skipped here rather than
+    guessed at; `Constraint` refuses to construct one, so this is a backstop.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+
+    for constraint in constraints:
+        if constraint.is_hard or constraint.z_values is None:
+            continue
+        line = constraint.geometry
+        if line.is_empty or line.length == 0.0:
+            continue
+
+        coords = np.asarray(line.coords, dtype=float)[:, :2]
+        z_values = np.asarray(constraint.z_values, dtype=float).ravel()
+        if len(z_values) != len(coords):
+            raise ValueError(
+                f"Breakline '{constraint.name}' has {len(coords)} vertices and "
+                f"{len(z_values)} elevations. Every vertex needs its own Z — a "
+                f"breakline is a line of known values, not a line with a value."
+            )
+
+        # Distance along the line at each vertex, so Z interpolates by
+        # position rather than by vertex index. A digitised trace is not
+        # evenly spaced, and index interpolation would bunch the elevations
+        # wherever someone clicked densely.
+        steps = np.linalg.norm(np.diff(coords, axis=0), axis=1)
+        station = np.concatenate([[0.0], np.cumsum(steps)])
+        total = float(station[-1])
+        n = max(int(np.ceil(total / grid.cell_size)) + 1, 2)
+        sample = np.linspace(0.0, total, n)
+
+        xs.extend(np.interp(sample, station, coords[:, 0]).tolist())
+        ys.extend(np.interp(sample, station, coords[:, 1]).tolist())
+        zs.extend(np.interp(sample, station, z_values).tolist())
+
+    if not xs:
+        return (
+            np.zeros((0, 2), dtype=np.float64),
+            np.zeros(0, dtype=np.float64),
+        )
+    return (
+        np.column_stack([np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)]),
+        np.asarray(zs, dtype=np.float64),
+    )
+
+
+__all__ = [
+    "blocked_edges",
+    "breakline_control",
+    "compartments",
+    "control_per_compartment",
+    "soft_edges",
+]

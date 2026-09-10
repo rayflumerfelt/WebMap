@@ -319,11 +319,18 @@ fault is gridded with it.
 - [x] Filled bands measure the area between their levels — checked against a closed form on a
       cone, and sitting exactly under the contours drawn over them
 
-**Still owed by Phase 4:** breakline-aware interpolation;
-and the worker's ingest, sync and export tasks.
+**Still owed by Phase 4:** the worker's ingest, sync and export tasks, the label-anchor job
+(the geoprocessing exists; nothing runs it over a dataset), and grid clipping (`08` §5.2,
+specified and not built).
 
 **Universal kriging and cubic spline are done** (`05` §6.2, §6.4). `Method` now has six
 members, all reachable from `webmap_interpolate`.
+
+**Breaklines are honoured** (`05` §6.1). `soft_edges` marks the same links `blocked_edges`
+would, and `minimum_curvature` drops the curvature rows across them while keeping the gradient
+rows — the surface kinks and does not tear. `breakline_control` turns the line's own Z into
+densified control, because the mask permits a kink and says nothing about where it goes. Every
+other method gets the elevations and a warning that it will round the break off.
 
 **The aggregation catalog is done** (`05` §8): fifteen operations in `webmap_geo.aggregate`,
 a job, `POST /api/v1/jobs/aggregate`, and `webmap_aggregate`. **`webmap_fit_variogram` is

@@ -401,6 +401,60 @@ def _assemble_biharmonic(grid, points, values, constraints, tension):
     ...
 ```
 
+#### Breaklines
+
+The soft half of §3.1, and it reuses the same machinery with one row type left in.
+
+```python
+# python/webmap_geo/src/webmap_geo/faults/raster.py
+
+def soft_edges(constraints, grid) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+def breakline_control(constraints, grid) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+```
+
+`soft_edges` finds exactly the links `blocked_edges` would find for the same geometry — the two
+are asserted equal on identical traces — and the difference is entirely what the solver does
+with them:
+
+| | second differences (curvature) | first differences (gradient) |
+|---|---|---|
+| **hard edge** (fault) | dropped | dropped |
+| **soft edge** (breakline) | dropped | **kept** |
+
+Dropping the curvature rows is what permits a kink. Keeping the gradient rows is what stops the
+kink opening into a step, and it is the whole difference between the two constraint types. A
+breakline passed as `blocked_edges` tears a surface that should bend; a fault passed as
+`soft_edges` smears throw that should be a step. They are separate arguments to
+`minimum_curvature` so that mistake has to be typed rather than defaulted into.
+
+**A mask alone does nothing.** It says a kink is *permitted*, never where the kink goes — and a
+surface free to bend anywhere along a line will bend nowhere in particular. The breakline's own
+Z is what places it, which is why a breakline carries elevations and a fault does not.
+`breakline_control` samples them at roughly one point per cell, with Z interpolated by
+**distance along the line** rather than by vertex index: a digitised trace is not evenly
+spaced, and index interpolation bunches the elevations wherever someone clicked densely.
+Without the densification a trace with vertices 44 cells apart constrains 2 cells in 44, which
+reads as the breakline not working and is really the breakline not being sampled.
+
+Those points are appended to the control, so **every method benefits from the elevations** even
+though only minimum curvature honours the kink. That is the confusing case, and it is warned
+about in exactly those terms — the surface follows the line and looks right, and only the break
+is missing:
+
+> 1 breakline(s) contributed 44 control points, but idw smooths across them. A breakline marks
+> a gradient discontinuity — a terrace edge, a channel margin — and only minimum_curvature
+> honours it as one; here the surface will round the break off.
+
+`n_control_points` in the lineage stays the number the user supplied; `n_breakline_points` is
+separate, because a grid that reports 264 control points when a geologist provided 220 is a
+provenance record nobody can reconcile.
+
+**Reading them from a layer.** `constraint_kind` in the feature's properties selects the type
+and defaults to `fault`. A breakline takes its elevations from the geometry's own third
+dimension — how a terrace edge or channel margin is digitised — and a breakline with 2D
+geometry is **refused by name** rather than demoted to a fault. Silent demotion would tear a
+surface that should bend, and nothing downstream would say so.
+
 ### 6.2 Ordinary and universal kriging
 
 > **The geostatistics subsystem is specified in `13-kriging.md`.** This section is the

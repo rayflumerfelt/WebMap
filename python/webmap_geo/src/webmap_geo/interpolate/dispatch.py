@@ -29,7 +29,13 @@ from numpy.typing import NDArray
 from webmap_geo import __version__
 from webmap_geo.exceptions import DegenerateInput
 from webmap_geo.faults.network import Constraint
-from webmap_geo.faults.raster import blocked_edges, compartments, control_per_compartment
+from webmap_geo.faults.raster import (
+    blocked_edges,
+    breakline_control,
+    compartments,
+    control_per_compartment,
+    soft_edges,
+)
 from webmap_geo.grid import GridDefinition
 from webmap_geo.interpolate.kriging import cross_validate, ordinary_kriging
 from webmap_geo.interpolate.minimum_curvature import minimum_curvature
@@ -141,7 +147,20 @@ def interpolate(
         )
 
     hard = [c for c in (constraints or []) if c.is_hard]
+    soft = [c for c in (constraints or []) if not c.is_hard]
     blocked = blocked_edges(hard, grid) if hard else None
+    kinkable = soft_edges(soft, grid) if soft else None
+
+    # **A breakline's own elevations become control points**, densified to
+    # roughly one per cell. The soft-edge mask only permits a kink; without the
+    # Z there is nothing to say where the kink goes, and the surface passes
+    # through the line as if it were not there. Appended rather than merged so
+    # `n_control_points` in the lineage still counts what the user supplied.
+    breakline_xy, breakline_z = breakline_control(soft, grid)
+    n_supplied = len(coords)
+    if len(breakline_xy):
+        coords = np.vstack([coords, breakline_xy])
+        z = np.concatenate([z, breakline_z])
 
     warnings: list[str] = []
     variance: NDArray[np.float64] | None = None
@@ -156,9 +175,11 @@ def interpolate(
             "nx": grid.nx,
             "ny": grid.ny,
         },
-        "n_control_points": len(coords),
+        "n_control_points": n_supplied,
         "n_constraints": len(constraints or []),
         "n_hard_constraints": len(hard),
+        "n_soft_constraints": len(soft),
+        "n_breakline_points": len(breakline_xy),
     }
 
     if method is Method.ORDINARY_KRIGING:
@@ -281,7 +302,9 @@ def interpolate(
             )
 
     elif method is Method.MINIMUM_CURVATURE:
-        curvature = minimum_curvature(coords, z, grid, tension=tension, blocked_edges=blocked)
+        curvature = minimum_curvature(
+            coords, z, grid, tension=tension, blocked_edges=blocked, soft_edges=kinkable
+        )
         surface = curvature.estimate
         lineage["tension"] = tension
         lineage["iterations"] = curvature.n_iterations
@@ -308,6 +331,21 @@ def interpolate(
         warnings.append(
             "Nearest-neighbour is a coverage diagnostic, not a surface. Use it "
             "to see where control exists, not to contour."
+        )
+
+    if soft and method is not Method.MINIMUM_CURVATURE:
+        # Precise about what *did* happen, because the half-honoured case is
+        # the confusing one. The breakline's elevations were used — they are
+        # densely sampled known values and every method benefits from them —
+        # so the surface follows the line. What it will not do is kink there:
+        # it crosses smoothly, rounding off the very feature the breakline was
+        # drawn to record.
+        warnings.append(
+            f"{len(soft)} breakline(s) contributed {len(breakline_xy)} control "
+            f"points, but {method.value} smooths across them. A breakline marks "
+            f"a gradient discontinuity — a terrace edge, a channel margin — and "
+            f"only minimum_curvature honours it as one; here the surface will "
+            f"round the break off."
         )
 
     diagnostics = _diagnostics(
