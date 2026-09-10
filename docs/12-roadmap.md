@@ -377,14 +377,25 @@ produces the same wrong surface with nothing said about it.
 - Geometry validation blocking on errors, plus **Validate Topology** as a whole-layer job
 - Copy-on-write version commit; the 409 names the changed features (`adr/0005`, amended twice)
 - Attribute editing, including bulk edit and dissolve resolution strategies
-- **Layers and basemaps as shared objects** (`adr/0010`): `layer`, `basemap`,
-  `basemap_layer`, duplication, and the map's active layer. **The schema exists** as of
-  revision `0004_layers_basemaps` — tables, RLS with `FORCE` and all four policies, the
-  `ON DELETE RESTRICT` that makes a shared layer un-deletable while a basemap uses it, and the
-  capability columns. The services and endpoints over it are what remain
-- **Capability roles**: `app_user.is_global_admin`, `team_member.role`, and the
-  administration screens they gate
-- **Default basemaps** across the user / team / global tiers, keyed on presentation
+- **Layers and basemaps as shared objects** (`adr/0010`): **done on the backend.** Revision
+  `0004_layers_basemaps` created the tables, RLS with `FORCE` and all four policies, and the
+  `ON DELETE RESTRICT` that makes a shared layer un-deletable while a basemap uses it;
+  `webmap_core.services.layers` and `/api/v1/layers`, `/api/v1/basemaps` are the services and
+  endpoints over it — CRUD, duplication by reference, save-any-map-as-basemap, and the `07`
+  §6.1 refusal that names the basemaps. **What remains is the map's active layer**, which is
+  frontend state, and the `map_session.layers` reshape `adr/0010` calls for
+- **Capability roles**: `webmap_core.services.capabilities` holds the checks —
+  `is_global_admin`, per-team `role`, and `require_publish_scope`, which makes
+  `visibility = 'org'` administrator-only as `adr/0010` §2 requires. **Wired into layers and
+  basemaps only.** Extending it to the older ownable services (project, dataset, palette,
+  style template, session, render) is a deliberate behaviour change on existing endpoints and
+  is its own commit. The administration screens they gate are not built
+- **Default basemaps** across the user / team / global tiers, keyed on presentation: **done.**
+  `webmap_core.services.preferences` resolves user → team → global, exhausting each tier
+  before descending, breaking multi-team ties alphabetically by `team.slug`, and falling
+  through a default that names a basemap the caller cannot resolve. Revision
+  `0005_user_default_basemaps` fixed the user tier, whose column revision 0004 never actually
+  added — `CREATE TABLE IF NOT EXISTS` on a table that already existed
 - **Formatting dialogs and shared controls** (`07` §6.2-6.3): colour modes, line, text,
   size-by-column, null colour, index-contour rules, live legend preview
 - **Label formatting** (`08` §2.4): the size-mode control and its reference zoom, the zoom

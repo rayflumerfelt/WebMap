@@ -54,6 +54,16 @@ class AuditAction(StrEnum):
     GRANT_REVOKED = "grant.revoked"
     OWNERSHIP_TRANSFERRED = "ownership.transferred"
 
+    LAYER_CREATED = "layer.created"
+    LAYER_UPDATED = "layer.updated"
+    LAYER_DELETED = "layer.deleted"
+
+    BASEMAP_CREATED = "basemap.created"
+    BASEMAP_UPDATED = "basemap.updated"
+    BASEMAP_DELETED = "basemap.deleted"
+
+    PREFERENCES_UPDATED = "preferences.updated"
+
     EXPORT_CREATED = "export.created"
     RENDER_CREATED = "render.created"
     JOB_SUBMITTED = "job.submitted"

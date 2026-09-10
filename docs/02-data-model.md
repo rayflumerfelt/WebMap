@@ -587,6 +587,24 @@ alphabetically by `team.slug`** and the interface names the team it came from.
 Most-recently-updated was the alternative and is worse: a colleague editing a preference would
 change someone else's map with no visible cause.
 
+A default naming a basemap the caller **cannot currently resolve** — deleted, or never shared
+with them — **falls through to the next candidate** rather than resolving to nothing. This is
+not in the ADR and follows from it: the tiers exist so a default always lands somewhere, and
+the person whose default broke is rarely the person who broke it. Setting a default is checked
+the other way round, at write time: a default must name a basemap the setter can see, or an
+administrator could set a global default nobody else can open while the preferences screen
+showed one set.
+
+**Migration note.** Revision `0004_layers_basemaps` created `team_preferences` and
+`global_preferences` and asserted `user_preferences` with `CREATE TABLE IF NOT EXISTS`. The
+table already existed from the initial schema, so the assertion did nothing and the user tier
+kept its pre-`adr/0010` column, `default_basemap_layers` — a JSONB array of *dataset* ids.
+Revision `0005_user_default_basemaps` adds `default_basemaps` and drops the old column without
+converting it: a basemap is now an ordered set of `layer` rows, each with an owner, a
+visibility, a presentation and symbology, and synthesising those four for every entry would
+mean guessing how each dataset was drawn. `CREATE TABLE IF NOT EXISTS` asserts that a table
+exists, never that it has the shape written underneath it.
+
 ### 3.7a Layers and basemaps
 
 A **layer** is a dataset plus how it is drawn — the thing a geologist names, shares and

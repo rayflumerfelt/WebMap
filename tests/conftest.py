@@ -160,7 +160,13 @@ async def clean_database(migrator_engine: AsyncEngine) -> AsyncIterator[None]:
     async with migrator_engine.begin() as conn:
         await conn.execute(
             text(
+                # `adr/0010`'s tables belong here too. A basemap surviving into
+                # the next test would make a delete refusal fire in a test that
+                # never created a basemap, and the failure would point at the
+                # wrong file.
                 "TRUNCATE audit_event, lineage, dataset_version, fault_network, "
+                "basemap_layer, basemap, layer, user_preferences, "
+                "team_preferences, global_preferences, "
                 "dataset, map_session, render, style_template, palette, project, "
                 "access_grant, team_member, team, app_user RESTART IDENTITY CASCADE"
             )

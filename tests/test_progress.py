@@ -214,6 +214,14 @@ async def test_a_solver_overshooting_its_estimate_cannot_pass_its_phase() -> Non
 
 def test_a_kind_with_no_phases_fails_at_construction() -> None:
     """Rather than reporting nothing for a whole run, which reads as a hang —
-    the exact failure this module exists to prevent."""
-    with pytest.raises(KeyError, match="aggregate"):
-        ProgressReporter(Recorder(), uuid4(), "aggregate")
+    the exact failure this module exists to prevent.
+
+    The kind is deliberately one that cannot ever be registered. This test
+    originally used "aggregate", which was unregistered when it was written and
+    stopped being so the day the aggregation worker landed: the test then failed
+    while both the code and the test were saying the right thing, which is the
+    worst kind of red. A sentinel that no job could plausibly be named cannot
+    go stale that way.
+    """
+    with pytest.raises(KeyError, match="not-a-job-kind"):
+        ProgressReporter(Recorder(), uuid4(), "not-a-job-kind")

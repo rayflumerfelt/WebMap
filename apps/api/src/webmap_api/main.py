@@ -22,6 +22,9 @@ from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
 from webmap_api.routes.glyphs import router as glyphs_router
 from webmap_api.routes.jobs import router as jobs_router
+from webmap_api.routes.layers import basemaps_router
+from webmap_api.routes.layers import router as layers_router
+from webmap_api.routes.preferences import router as preferences_router
 from webmap_api.routes.projects import router as projects_router
 from webmap_api.routes.renders import router as renders_router
 from webmap_api.routes.sessions import router as sessions_router
@@ -209,6 +212,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(analysis_router)
     app.include_router(glyphs_router)
+    app.include_router(layers_router)
+    app.include_router(basemaps_router)
+    app.include_router(preferences_router)
 
     return app
 

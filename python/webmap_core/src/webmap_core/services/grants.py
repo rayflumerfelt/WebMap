@@ -26,7 +26,21 @@ from webmap_core.services.directory import display_name_for
 #: `access_grant.object_type` is TEXT, and a typo would create grants that
 #: silently never match, which reads as "sharing does not work".
 GRANTABLE = frozenset(
-    {"project", "dataset", "style_template", "palette", "map_session", "render"}
+    {
+        "project",
+        "dataset",
+        "style_template",
+        "palette",
+        "map_session",
+        "render",
+        # `adr/0010`. Their RLS policies (migration 0004) already consult
+        # `access_grant` with these object types, so leaving them out here
+        # would make the policy reachable and the grant unwritable — sharing a
+        # layer would fail with "not a grantable object type" while the
+        # database was ready for it.
+        "layer",
+        "basemap",
+    }
 )
 
 
