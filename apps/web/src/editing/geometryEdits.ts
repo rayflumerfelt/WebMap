@@ -188,19 +188,23 @@ export function insertVertex(
 }
 
 function interpolateZ(start: Position, end: Position, position: [number, number]): Position {
-  const startZ = start[2];
-  const endZ = end[2];
+  // A position carrying a Z necessarily carries an x and a y, which is what
+  // makes the assertions below safe — `noUncheckedIndexedAccess` cannot see
+  // the implication, and a `?? 0` here would put a fabricated coordinate into
+  // a breakline rather than failing.
+  const [startZ, endZ] = [start[2], end[2]];
   if (startZ === undefined || endZ === undefined) return [position[0], position[1]];
 
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
+  const [startX, startY] = [start[0]!, start[1]!];
+  const dx = end[0]! - startX;
+  const dy = end[1]! - startY;
   const lengthSquared = dx * dx + dy * dy;
   // A zero-length segment has no "along": both endpoints are the same place,
   // so either Z is as good as the other and the first is the one that exists.
   const along =
     lengthSquared === 0
       ? 0
-      : ((position[0] - start[0]) * dx + (position[1] - start[1]) * dy) / lengthSquared;
+      : ((position[0] - startX) * dx + (position[1] - startY) * dy) / lengthSquared;
 
   return [position[0], position[1], startZ + (endZ - startZ) * Math.min(Math.max(along, 0), 1)];
 }
@@ -250,8 +254,10 @@ export function removeVertex(geometry: Geometry, ring: number, ordinal: number):
   next.splice(ordinal, 1);
   if (flattened.closed && ordinal === 0) {
     // The ring now starts at what was vertex 1; its closing coordinate has to
-    // follow, or the ring is open.
-    next[next.length - 1] = withXy(next[next.length - 1], next[0]![0], next[0]![1]);
+    // follow, or the ring is open. The minimum check above guarantees there is
+    // still a first vertex to follow.
+    const first = next[0]!;
+    next[next.length - 1] = withXy(next[next.length - 1], first[0]!, first[1]!);
   }
 
   return rebuild(geometry, replaceRing(flattened.rings, ring, next));
