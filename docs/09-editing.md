@@ -683,7 +683,17 @@ type ContextScope = 'feature' | 'vertex' | 'edge' | 'empty' | 'selection';
 - A disabled command still appears in the **menu**, greyed, so it stays discoverable and its
   shortcut is visible. It is **excluded from the palette**, where a disabled row is noise.
 - Shortcuts derive from the registry. Never register a hotkey independently.
-- Use `mod`, not `ctrl`/`cmd`; `useHotkeys` handles the platform difference.
+- Use `mod`, not `ctrl`/`cmd`; the hotkey layer handles the platform difference.
+
+`apps/web/src/editing/hotkeys.ts` is that layer, and it **resolves rather than registers**: it
+finds every command claiming a chord, keeps the ones the current state enables, and runs it if
+exactly one survives. Two survivors run nothing and are reported — a registry bug rather than a
+runtime one, and picking the first would make the key mean whichever command happened to be
+defined earlier. `mod` matches Ctrl *or* Meta rather than branching on platform, because a
+Windows user on a Mac keyboard and a remote session with a mismatched modifier both otherwise
+lose every shortcut, and nothing here distinguishes the two. The default is prevented only when
+something actually ran, so the browser keeps Ctrl+F — and an ambiguous chord is left alone
+too, rather than turning one bug into two.
 
 **Built** as `apps/web/src/editing/{types,predicates,registry}.ts`, ahead of every surface as
 this section requires. Three things worth recording:

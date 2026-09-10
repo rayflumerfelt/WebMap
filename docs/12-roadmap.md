@@ -15,22 +15,29 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 
 ## Current status
 
-Updated 2026-09-10 (Phase 4 in progress). A phase is complete only when every criterion
-passes; a criterion met with a caveat says so rather than being ticked quietly.
+Updated 2026-09-10 (Phases 4 and 5 in progress). A phase is complete only when every
+criterion passes; a criterion met with a caveat says so rather than being ticked quietly.
 
-Verified on this date against a live stack: 906 Python tests including the full integration
-suite, 320 TypeScript tests, and lint, formatting, typechecking and the package-boundary
-contracts clean in both languages.
+Verified on this date against a live stack: the full Python suite including the integration
+tests, 487 TypeScript tests (97 style-model, 76 ui, 22 map, 292 web), and lint, formatting, typechecking and the package-boundary
+contracts clean in both languages. Migrations apply, roll back to base and re-apply.
+
+**What is deliberately not counted as done.** The editing subsystem's *model* is built and
+tested — registry, session, modes, snapping, topology — and none of it is wired to a map yet.
+An operation that mutates geometry needs the MapLibre half: hit testing, the candidate set for
+snapping, the edit-overlay source, and the vertex handlers. The model was built first on
+purpose (`09` §14), and it is worth being precise that "built" here means the rules are right,
+not that a geologist can drag a vertex.
 
 | Phase | State |
 |---|---|
 | 0 — Foundations | **Complete.** All criteria verified. |
 | 1 — Identity and data plane | **Complete.** Two caveats in "Carried forward" below. |
 | 2 — Display | **Built.** 8 of 11 criteria verified; the rest need a browser — see below. |
-| 3 — Claude integration | **Built.** 4 of 9 verified; the visual harness and the evaluations are empty directories. |
-| 4 — Gridding | **In progress.** 7 of 10 verified. Jobs, contouring and lineage are done; see the list at the end of that phase for what is owed. |
-| 5 — Styling and editing | Not started. Scope grew with `adr/0010` — layers, basemaps and capability roles. |
-| 6 — Aggregation and polish | Not started. |
+| 3 — Claude integration | **Built.** 4 of 9 verified. The visual harness exists now and its goldens do not; `tests/mcp_eval/` runs ten questions against the live tool surface. |
+| 4 — Gridding | **In progress.** 9 of 10 verified. Jobs, contouring, lineage, breaklines, clipping and label anchors are done; the worker's ingest, sync and export tasks are what remain. |
+| 5 — Styling and editing | **In progress.** The backend is largely there — layers and basemaps as shared objects, capability roles, the three preference tiers, palette import/export and attribute summaries. On the front end the nine shared controls, the formatting dialog, and the editing model and all four of its surfaces are built; the map-side handlers that mutate geometry are not. |
+| 6 — Aggregation and polish | **Partly done ahead of order.** The aggregation catalog and the clip job landed with Phase 4's work, because both were needed by it. |
 | 7 — Geostatistics | Not started. Specified in `13-kriging.md`; the largest single phase in the plan. |
 
 **The gap worth naming** was unwritten *harnesses*, and both are now built.
