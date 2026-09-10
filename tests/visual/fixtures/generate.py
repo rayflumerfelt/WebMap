@@ -51,26 +51,56 @@ def structure(x: float, y: float) -> float:
     return dip + closure
 
 
+def crossing(y: float, level: float) -> float | None:
+    """Where this row crosses the level, by bisection.
+
+    **Not by taking the nearest column of a scan.** That was the first version,
+    and it snapped every vertex to one of 241 columns, which turns a smooth
+    contour into a staircase. The staircase is invisible at a glance and fatal
+    to labelling: MapLibre drops a line label when the path bends more than
+    `text-max-angle` between glyphs, so the two index contours that ran through
+    the closure — the curved ones, the only interesting ones — came out
+    unlabelled while the straight ones were fine.
+
+    The scan survives as a bracket finder, because the closure makes the
+    surface non-monotonic along a row and bisection needs a sign change to
+    work with.
+    """
+    previous_x = WEST
+    previous = structure(WEST, y) - level
+    for column in range(1, 241):
+        x = lerp(WEST, EAST, column / 240)
+        current = structure(x, y) - level
+        if previous == 0.0:
+            return previous_x
+        if (previous < 0.0) != (current < 0.0):
+            low, high = previous_x, x
+            for _ in range(40):
+                middle = (low + high) / 2.0
+                if (structure(low, y) - level < 0.0) != (structure(middle, y) - level < 0.0):
+                    high = middle
+                else:
+                    low = middle
+            return (low + high) / 2.0
+        previous_x, previous = x, current
+    return None
+
+
 def contour_lines() -> list[dict[str, Any]]:
     """Contours as polylines sampled along the surface's own level sets.
 
-    Traced coarsely on purpose — this is a picture to compare against itself,
-    not a contouring test, and `webmap_geo.contour` has its own.
+    Coarse in the *number of vertices* — this is a picture to compare against
+    itself, not a contouring test, and `webmap_geo.contour` has its own — but
+    each vertex sits where the surface actually crosses the level.
     """
     features: list[dict[str, Any]] = []
     for index, level in enumerate(range(-12800, -8800, 200)):
         points = []
         for step in range(121):
             y = lerp(SOUTH, NORTH, step / 120)
-            # Solve for x along this row by scanning; coarse is fine.
-            best_x, best_error = None, 1e9
-            for column in range(241):
-                x = lerp(WEST, EAST, column / 240)
-                error = abs(structure(x, y) - level)
-                if error < best_error:
-                    best_x, best_error = x, error
-            if best_x is not None and best_error < 40.0:
-                points.append([round(best_x, 6), round(y, 6)])
+            x = crossing(y, level)
+            if x is not None:
+                points.append([round(x, 7), round(y, 7)])
         if len(points) >= 2:
             features.append(
                 {
@@ -412,12 +442,24 @@ write(
                         {"position": 1.0, "color": "#fde725"},
                     ],
                 },
-                "min": 20,
-                "max": 110,
+                # `range`, not `min`/`max`: this is a `ColorbarLegend` from
+                # `@webmap/style-model`, and the first version of this fixture
+                # invented its own field names. The component destructures
+                # `spec.range`, so it threw — and a React render error is
+                # asynchronous, so the overlay simply never appeared and the
+                # service reported success.
+                "range": [20, 110],
+                "unit": "ft",
                 "ticks": [20, 50, 80, 110],
             },
+            # `True` means "show it"; the shell fills in latitude, zoom and
+            # bearing from the map it actually rendered, because after a
+            # `fitBounds` nothing else knows them.
             "scaleBar": True,
-            "northArrow": True,
+            # A north arrow is omitted on a north-up map unless asked for, which
+            # is the component's own rule. This case is the overlay-capture
+            # check, so it asks.
+            "northArrow": {"always": True},
         },
     },
 )
