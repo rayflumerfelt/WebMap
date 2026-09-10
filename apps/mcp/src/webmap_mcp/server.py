@@ -559,6 +559,152 @@ async def webmap_contour(
     return job_submitted(submitted, what="Contouring job", detail=detail)
 
 
+@mcp.tool(annotations=SUBMITS_JOB)
+async def webmap_aggregate(
+    op: Annotated[
+        str,
+        Field(
+            description=(
+                "The operation. One layer: buffer, centroid, convex_hull, "
+                "concave_hull, dissolve, aggregate_points, hexbin, voronoi. Two "
+                "layers: clip, erase, intersect, union, spatial_join, "
+                "summarize_within.\n\n"
+                "Three pairs are commonly confused and produce different results "
+                "from the same inputs: CLIP keeps the left layer's attributes and "
+                "feature count, INTERSECT carries both layers' attributes and "
+                "multiplies features by overlap. DISSOLVE removes shared "
+                "boundaries and changes the geometry; combining features into a "
+                "multi-part feature does not. SPATIAL_JOIN repeats a feature once "
+                "per match rather than looking one value up."
+            )
+        ),
+    ],
+    dataset_ids: Annotated[
+        list[UUID],
+        Field(
+            description=(
+                "One or two layers. For two-layer operations the first is the one "
+                "being transformed and the second is the mask, overlay or join "
+                "target."
+            ),
+            min_length=1,
+            max_length=2,
+        ),
+    ],
+    output_name: Annotated[
+        str | None, Field(None, description="Name for the resulting layer.")
+    ] = None,
+    distance: Annotated[
+        float | None,
+        Field(
+            None,
+            description=(
+                "For buffer: the distance in the layer's own units - feet for a "
+                "state-plane layer, metres for UTM. Negative erodes."
+            ),
+        ),
+    ] = None,
+    cell_size: Annotated[
+        float | None,
+        Field(
+            None,
+            gt=0,
+            description="For hexbin and aggregate_points: cell spacing in layer units.",
+        ),
+    ] = None,
+    by: Annotated[
+        str | None,
+        Field(
+            None, description="For dissolve: group by this attribute instead of merging all."
+        ),
+    ] = None,
+    predicate: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "For spatial_join: intersects (default), contains, within, "
+                "touches, crosses or overlaps."
+            ),
+        ),
+    ] = None,
+    stats: Annotated[
+        list[dict[str, str]] | None,
+        Field(
+            None,
+            description=(
+                "For summarize_within, hexbin and aggregate_points. A list of "
+                '{"op": "count|sum|mean|min|max", "name": "output_column", '
+                '"field": "source_column"}. `field` is omitted for count.'
+            ),
+        ),
+    ] = None,
+    ratio: Annotated[
+        float | None,
+        Field(
+            None,
+            ge=0,
+            le=1,
+            description="For concave_hull: 0 is tightest, 1 is the convex hull.",
+        ),
+    ] = None,
+    on_surface: Annotated[
+        bool | None,
+        Field(
+            None,
+            description=(
+                "For centroid: place the point inside the polygon rather than at "
+                "the centre of mass. A crescent's centroid falls outside it."
+            ),
+        ),
+    ] = None,
+) -> str:
+    """Run a spatial aggregation over one or two vector layers.
+
+    Buffer, dissolve, clip, erase, intersect, union, spatial join,
+    summarize-within, centroids, hulls, Voronoi cells and binning. Returns a
+    job handle; the output is a new vector layer.
+
+    Both layers must be stored in the same coordinate system, and every
+    distance is in that system's units. Ask for the layers with
+    webmap_describe_dataset first if you are unsure which units apply.
+    """
+    sources = [await _get(f"/api/v1/datasets/{value}") for value in dataset_ids]
+    detail = [f"- **Operation**: {op}"]
+    detail.append("- **Inputs**: " + ", ".join(str(s.get("name")) for s in sources))
+    if distance is not None:
+        detail.append(f"- **Distance**: {distance:g}")
+    if cell_size is not None:
+        detail.append(f"- **Cell size**: {cell_size:g}")
+    if by:
+        detail.append(f"- **Grouped by**: {by}")
+
+    params = _clean_params(
+        {
+            "distance": distance,
+            "cell_size": cell_size,
+            "by": by,
+            "predicate": predicate,
+            "ratio": ratio,
+            "on_surface": on_surface,
+        }
+    )
+
+    submitted = await _post(
+        "/api/v1/jobs/aggregate",
+        _clean_params(
+            {
+                "op": op,
+                "dataset_ids": [str(value) for value in dataset_ids],
+                "params": params,
+                "stats": stats,
+                "output_name": output_name,
+            }
+        ),
+    )
+    return job_submitted(submitted, what="Aggregation job", detail=detail)
+
+
 # --- Jobs --------------------------------------------------------------------
 
 

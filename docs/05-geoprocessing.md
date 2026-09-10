@@ -754,20 +754,31 @@ analysis-CRS rule below was enforced by nothing. See
 ```python
 # python/webmap_geo/src/webmap_geo/aggregate/__init__.py
 
-def aggregate(
-    op: str,
-    frame: AnalysisFrame,
-    inputs: list[pyarrow.Table],
-    **params,
-) -> pyarrow.Table:
+@dataclass(frozen=True)
+class FeatureSet:
+    geometry: NDArray[np.object_]      # shapely
+    props: list[dict[str, Any]]
+    frame: AnalysisFrame
+
+
+def aggregate(op: str, inputs: list[FeatureSet], **params) -> FeatureSet:
     """Dispatch a spatial aggregation.
 
-    Arrays arrive already in `frame`. The AnalysisFrame is what makes the
+    Arrays arrive already in their frame. The AnalysisFrame is what makes the
     analysis-CRS rule checkable rather than aspirational: `distance` is in
-    frame.units, and the value is echoed into the lineage record, so a buffer
+    frame.units, and the frame is echoed into the lineage record, so a buffer
     that was run in degrees is visible after the fact instead of merely wrong.
     """
 ```
+
+**The frame travels on the value rather than beside it.** An earlier sketch of this signature
+took `frame` as a separate argument and `pyarrow.Table` operands. Carrying it on the
+`FeatureSet` is what lets an overlay between two layers in different frames *raise* —
+`FrameMismatch` — instead of returning an empty result, which is the shape the bug takes:
+coordinates in different frames do not overlap, so the honest-looking answer is "these layers
+do not touch". `FeatureSet.to_arrow()` and `.from_arrow()` keep the Arrow boundary for callers
+that want it; the common path writes straight to `webmap_io.write_features`, which already
+takes Shapely and dicts.
 
 | Operation | Implementation | Notes |
 |---|---|---|
@@ -780,14 +791,23 @@ def aggregate(
 | aggregate_points | binning + stats | |
 | centroid | `ST_Centroid` / `ST_PointOnSurface` | Offer both; `PointOnSurface` guarantees inside |
 | convex_hull | `ST_ConvexHull` | |
-| concave_hull | `ST_ConcaveHull` | Param sensitive; expose target percent |
+| concave_hull | **Shapely** `concave_hull` | Not in DuckDB — see below. Param sensitive; expose ratio |
 | voronoi | `ST_VoronoiDiagram` | Clip to extent |
 | hexbin | generated grid + join | Offer H3 as an alternative indexing scheme |
+| erase / difference | Shapely difference | The complement of clip; `09` §9 exposes it as Erase |
+| union (two layers) | clip + erase + intersect | Left-only, right-only and the shared piece, split |
 
-Every function above was checked present in duckdb 1.5.5 spatial before this table was
-written. **Anything added later needs the same check** — losing PostGIS means losing the SQL
-escape hatch, so an operation DuckDB does not cover has to be written against Shapely here
-rather than reached for in a query.
+**`ST_ConcaveHull` is the one that failed that check.** Every other function named above
+exists in duckdb 1.5.5 spatial; concave hull does not, so it is Shapely's — which is exactly
+what this paragraph prescribes, and worth recording because the table previously asserted
+otherwise. **Anything added later needs the same check**, by calling it: losing PostGIS means
+losing the SQL escape hatch, so an operation DuckDB does not cover has to be written against
+Shapely here rather than reached for in a query.
+
+**Engine choice follows the shape of the work** (the routing rule `09` §2.3 states): a
+per-feature transform is vectorised Shapely, and the genuinely set-based operations — dissolve,
+spatial join, summarize-within — do their matching through a prepared spatial index rather than
+a Python loop over pairs.
 
 **Rule:** every operation runs in the project analysis CRS. Buffering in EPSG:4326 produces
 distances in degrees, which vary with latitude and are never what anyone wanted.

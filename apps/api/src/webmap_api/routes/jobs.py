@@ -11,7 +11,7 @@ recoverable, a running worker with no job row is not.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from arq.connections import ArqRedis
@@ -21,6 +21,7 @@ from pydantic import Field
 from webmap_api.dependencies import CurrentPrincipal, ScopedConn
 from webmap_core.logging import get_logger
 from webmap_core.models import Visibility, WebMapModel
+from webmap_core.services import aggregation as aggregation_service
 from webmap_core.services import contours as contour_service
 from webmap_core.services import gridding as grid_service
 from webmap_core.services import jobs as service
@@ -132,6 +133,49 @@ class ContourRequestModel(WebMapModel):
         )
 
 
+class StatModel(WebMapModel):
+    """One output column of a summarisation (`05` §8)."""
+
+    op: Literal["count", "sum", "mean", "min", "max"]
+    name: str = Field(min_length=1, max_length=64)
+    field: str | None = None
+
+
+class AggregateRequestModel(WebMapModel):
+    """A spatial aggregation over one or two stored layers.
+
+    `params` is deliberately open: the fifteen operations in the catalog take
+    different arguments — a distance, a ratio, a predicate, a cell size — and a
+    union of every one of them as optional top-level fields would be a schema
+    where most fields are meaningless for any given call. It is validated by
+    the operation itself, which is where the knowledge of what each takes
+    lives, and a bad argument comes back as a 400 naming the operation.
+    """
+
+    op: str = Field(min_length=1, max_length=32)
+    dataset_ids: list[UUID] = Field(min_length=1, max_length=2)
+    params: dict[str, Any] = Field(default_factory=dict)
+    stats: list[StatModel] | None = None
+    output_name: str | None = None
+    project_id: UUID | None = None
+    visibility: Visibility = Visibility.TEAM
+    owner_team_id: UUID | None = None
+
+    def to_request(self) -> aggregation_service.AggregateRequest:
+        params = dict(self.params)
+        if self.stats is not None:
+            params["stats"] = [stat.model_dump() for stat in self.stats]
+        return aggregation_service.AggregateRequest(
+            op=self.op,
+            dataset_ids=self.dataset_ids,
+            params=params,
+            output_name=self.output_name,
+            project_id=self.project_id,
+            visibility=self.visibility,
+            owner_team_id=self.owner_team_id,
+        )
+
+
 def queue(request: Request) -> ArqRedis:
     """The arq pool, created at startup.
 
@@ -221,6 +265,31 @@ async def submit_contour(
         queue(request),
         kind="contour",
         task="contour_task",
+        parameters=body.to_request().to_parameters(),
+    )
+
+
+@router.post("/aggregate", response_model=Submitted, status_code=202)
+async def submit_aggregate(
+    body: AggregateRequestModel,
+    principal: CurrentPrincipal,
+    conn: ScopedConn,
+    request: Request,
+) -> Submitted:
+    """Run a spatial aggregation over one or two layers.
+
+    A job rather than an inline call. Most of these finish in under a second,
+    but `10-jobs-async.md` §6's rule is about the tail: a dissolve over a
+    50,000-feature coverage is minutes, and the caller cannot tell which they
+    asked for from the request. One path, always asynchronous, is simpler than
+    a threshold that guesses.
+    """
+    return await _submit(
+        conn,
+        principal,
+        queue(request),
+        kind="aggregate",
+        task="aggregate_task",
         parameters=body.to_request().to_parameters(),
     )
 

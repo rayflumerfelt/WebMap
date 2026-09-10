@@ -55,6 +55,15 @@ PHASES: dict[str, list[tuple[str, float]]] = {
     # fill. The ratio is not stable across surfaces — a smooth cone fills in
     # half the time, a fragmented one in twice — so these are equal weights
     # rather than a false precision.
+    # Aggregation is dominated by reading the layers in and writing them out;
+    # the operation itself is a vectorised Shapely call or an indexed join over
+    # geometry already in memory. Weighted accordingly rather than by which
+    # step sounds like the work.
+    "aggregate": [
+        ("Loading layers", 0.45),
+        ("Aggregating", 0.25),
+        ("Writing features", 0.30),
+    ],
     "contour_filled": [
         ("Loading grid", 0.10),
         ("Choosing levels", 0.03),
