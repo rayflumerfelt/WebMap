@@ -62,6 +62,26 @@ export function handleId(vertex: SelectedVertex): string {
 }
 
 /**
+ * The vertex a handle id addresses, or `null` if it is not one.
+ *
+ * Parsed from the right: a feature id is opaque and may itself contain a
+ * colon, while the last two segments are always the ring and the ordinal.
+ * Splitting from the left instead would address a vertex of the wrong feature,
+ * which is a wrong edit rather than a failed one.
+ */
+export function parseHandleId(id: string): SelectedVertex | null {
+  const parts = id.split(':');
+  if (parts.length < 3) return null;
+
+  const ordinal = Number(parts.pop());
+  const ring = Number(parts.pop());
+  const featureId = parts.join(':');
+  if (!Number.isInteger(ring) || !Number.isInteger(ordinal) || featureId === '') return null;
+
+  return { featureId, ring, ordinal };
+}
+
+/**
  * The vertex handles for one feature.
  *
  * A closed ring's last coordinate repeats its first, and gets no handle: two
