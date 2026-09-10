@@ -555,6 +555,42 @@ maps, diverging ramps (RdBu, BrBG) for anomaly and difference maps, and a spectr
 structure because that is what geologists expect even though it is perceptually poor. Include
 the perceptual caveat as a tooltip rather than removing the option.
 
+**Built** as `webmap_core.style.palette_io`, `webmap_core.services.palettes`, and
+`POST /api/v1/palettes/import` / `GET /api/v1/palettes/{id}/export.{fmt}`. The `PaletteIO`
+control uploads the file's text rather than parsing it, so there is one implementation: a
+`.cpt` with hard breaks, named colours and B/F/N lines is exactly the format where two parsers
+disagree quietly, and the disagreement shows up as a map that looks slightly wrong.
+
+Five things the format descriptions do not tell you, each found by writing the reader against
+files the tools actually produce:
+
+**Positions are rescaled by their own range, not divided by a constant.** A `.cpt` written over
+depths of −8,000 to 2,000 is a perfectly good ramp and its z-values mean nothing here; what
+matters is order and spacing. Normalising in the reader is what lets `colour_at` be one
+function instead of one per source format.
+
+**A `.cpt` writes both ends of every slice**, so consecutive slices name the shared boundary
+twice. Kept, the palette has two stops at one position and `colour_at` divides by a zero
+interval.
+
+**`B`, `F` and `N` are clamp and nodata colours, not stops.** Folding them in adds a stop at
+each end the file never had.
+
+**QGIS keeps the ramp's endpoints outside its `stops` property** — in `color1` and `color2` —
+so a reader that only walks `stops` produces a ramp missing both ends. It has also written
+properties two ways across versions, `<prop k= v=>` and `<Option name= value=>`; a reader that
+knows one silently finds no endpoints on half the files people have.
+
+**Alpha is read and discarded**, in both `.clr` and QGIS. Per-stop transparency belongs to the
+layer's opacity, which the formatting dialog owns, and a palette imported into three layers
+must not silently override it.
+
+The format is **passed, never sniffed**: a `.clr` and a `.cpt` overlap in shape, and a wrong
+guess produces plausible colours in the wrong places rather than an error.
+
+QGIS ramps are read but not written. A QGIS style file carries a whole symbology rather than a
+ramp, and emitting a partial one would be worse than emitting none.
+
 ---
 
 ### 5.2 Colouring a grid

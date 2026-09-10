@@ -24,6 +24,7 @@ from webmap_api.routes.glyphs import router as glyphs_router
 from webmap_api.routes.jobs import router as jobs_router
 from webmap_api.routes.layers import basemaps_router
 from webmap_api.routes.layers import router as layers_router
+from webmap_api.routes.palettes import router as palettes_router
 from webmap_api.routes.preferences import router as preferences_router
 from webmap_api.routes.projects import router as projects_router
 from webmap_api.routes.renders import router as renders_router
@@ -215,6 +216,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(layers_router)
     app.include_router(basemaps_router)
     app.include_router(preferences_router)
+    app.include_router(palettes_router)
 
     return app
 
