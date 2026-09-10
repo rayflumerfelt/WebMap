@@ -9,6 +9,7 @@ last bin rather than in a forty-first.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +27,7 @@ from webmap_geo.attributes import (
 from webmap_geo.exceptions import DegenerateInput
 
 
-def a_layer(tmp_path: Path, props: list[dict[str, object]]) -> str:
+def a_layer(tmp_path: Path, props: Sequence[Mapping[str, object]]) -> str:
     """A minimal features file: an id and the props map the readers look in."""
     table = pa.table(
         {

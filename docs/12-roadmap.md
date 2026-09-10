@@ -33,11 +33,17 @@ contracts clean in both languages.
 | 6 — Aggregation and polish | Not started. |
 | 7 — Geostatistics | Not started. Specified in `13-kriging.md`; the largest single phase in the plan. |
 
-**The gap worth naming** is not unwritten code — it is unwritten *harnesses*.
-`tests/visual/golden/` and `tests/e2e/` each contain nothing but a `.gitkeep`, and
-between them they gate criteria across Phases 2, 3 and 6: everything that needs a
-browser at a real resolution or a rendered image compared against a golden. The code
-behind those criteria is written and unit-tested. None of it is *demonstrated*.
+**The gap worth naming** was unwritten *harnesses*, and both are now built.
+`tests/visual/` renders six cases through the render service and compares them against
+goldens; `tests/e2e/` drives Playwright against the running application at `07` §5.1's
+1440 px design width. Between them they gate criteria across Phases 2, 3 and 6:
+everything that needs a browser at a real resolution or a rendered image.
+
+**`tests/visual/golden/` is still empty, deliberately.** A golden is a reference image,
+and one nobody reviewed makes every later diff meaningless — so generating them is a
+person's job with `make update-goldens`, and until then every case *skips with
+instructions* rather than passing. A green suite that checked nothing would be worse
+than the empty directory was.
 
 `tests/mcp_eval/` is no longer among them — ten questions run against the live tool
 surface — but it tests reachability rather than tool *selection*, which is the half
@@ -91,7 +97,7 @@ something to check, and are empty until their phase. They are not oversights:
 | `webmap_io.connectors` (file share, PostGIS) | 6 — **but the directory is empty**: no `__init__.py`, so it is not importable and no contract names it |
 | `webmap_io` readers for `.grd`, ZMAP+, KML, DXF | 6 |
 | Export and loss reporting (`11-file-io.md` §4.2, §7) | 6 |
-| `tests/visual/golden`, `tests/e2e` | 2, 3 — **overdue**, see above |
+| `tests/visual/golden` (the images; the harness is built) | 2, 3 — needs a person to generate and review them |
 
 ---
 

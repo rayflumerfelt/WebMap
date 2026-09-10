@@ -123,6 +123,12 @@ known-first-party = [
 # Alembic generates this shape; the module-level `revision` identifiers are
 # the framework's contract, not ours to rename.
 "infra/migrations/versions/*.py" = ["N999", "E402"]
+# `print` is banned in application code because structlog is the interface
+# (CLAUDE.md §7.5). These are standalone generators a person runs by hand, and
+# structured JSON on a terminal is worse output for a human than the line it
+# would replace. The rule stays on everywhere it means something.
+"scripts/*.py" = ["T201"]
+"tests/visual/fixtures/generate.py" = ["T201"]
 
 [tool.mypy]
 python_version = "3.12"

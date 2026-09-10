@@ -71,7 +71,7 @@ def _api_routes(node: Any) -> list[APIRoute]:
     nothing.
     """
     found: list[APIRoute] = []
-    for route in getattr(node, "routes", []):
+    for route in getattr(node, "routes", None) or []:
         if isinstance(route, APIRoute):
             found.append(route)
         elif hasattr(route, "original_router"):
@@ -83,6 +83,17 @@ def _api_routes(node: Any) -> list[APIRoute]:
         else:
             found.extend(_api_routes(route))
     return found
+
+
+def _methods(route: APIRoute) -> set[str]:
+    """A route's HTTP methods.
+
+    Typed `set[str] | None` on `APIRoute`, and None in practice only for a
+    WebSocket route — which cannot appear here, since those are not `APIRoute`.
+    An empty set rather than an assertion, so a future FastAPI that widens the
+    type does not fail this file for a reason unrelated to what it checks.
+    """
+    return set(route.methods or ())
 
 
 def _dependency_calls(dependant: Dependant) -> set[Any]:
@@ -106,7 +117,7 @@ def test_the_adr_0010_routes_are_registered() -> None:
     """A router that is written and never included is a 404 nobody finds until
     the frontend is wired to it."""
     routes = _api_routes(create_app())
-    paths = {(route.path, method) for route in routes for method in route.methods}
+    paths = {(route.path, method) for route in routes for method in _methods(route)}
 
     expected = {
         ("/api/v1/layers", "GET"),
@@ -164,7 +175,7 @@ def test_every_data_route_depends_on_a_principal() -> None:
         if route.path in PUBLIC:
             continue
         if not PRINCIPAL_SOURCES & _dependency_calls(route.dependant):
-            offenders.append(f"{sorted(route.methods)} {route.path}")
+            offenders.append(f"{sorted(_methods(route))} {route.path}")
 
     assert not offenders, (
         "These routes do not depend on a verified principal. Either they are "
