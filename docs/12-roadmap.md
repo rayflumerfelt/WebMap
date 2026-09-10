@@ -410,8 +410,13 @@ produces the same wrong surface with nothing said about it.
   through a default that names a basemap the caller cannot resolve. Revision
   `0005_user_default_basemaps` fixed the user tier, whose column revision 0004 never actually
   added — `CREATE TABLE IF NOT EXISTS` on a table that already existed
-- **Formatting dialogs and shared controls** (`07` §6.2-6.3): colour modes, line, text,
-  size-by-column, null colour, index-contour rules, live legend preview
+- **Formatting dialogs and shared controls** (`07` §6.2-6.3): **the nine shared controls and
+  the dialog that composes them are built** — colour modes, line, marker, text, halo, the zoom
+  window, null colour and the live legend preview. What remains is the data behind three of
+  them: the distinct-values endpoint `CategoryTable` reads (with its cardinality refusal), the
+  histogram `RampEditor` draws under the ramp, and `webmap_core.style.palette_io` for
+  `PaletteIO`. Size-by-column and index-contour rules are rule-based symbology and are not
+  built
 - **Label formatting** (`08` §2.4): the size-mode control and its reference zoom, the zoom
   window that is the only thinning control once collision detection is off, and consuming the
   precomputed anchor source Phase 4 produces

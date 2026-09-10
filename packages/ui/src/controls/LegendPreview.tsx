@@ -29,8 +29,8 @@ export interface LegendPreviewProps {
   meta: LayerMetadata;
   palettes: Record<string, Palette>;
   /** Start on the dark ground — for a layer that sits over imagery. */
-  defaultDark?: boolean;
-  className?: string;
+  defaultDark?: boolean | undefined;
+  className?: string | undefined;
 }
 
 /** The two grounds. Neither is the panel's own colour, on purpose: a legend

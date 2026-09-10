@@ -36,8 +36,8 @@ export interface MarkerPickerProps {
   value: MarkerValue;
   onChange(value: MarkerValue): void;
   /** Sprite names this deployment actually has, for the `sprite` shape. */
-  sprites?: string[];
-  className?: string;
+  sprites?: string[] | undefined;
+  className?: string | undefined;
 }
 
 const SHAPES: Array<{ id: MarkerShape; name: string }> = [

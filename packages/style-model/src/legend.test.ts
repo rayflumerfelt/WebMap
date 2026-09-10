@@ -189,3 +189,21 @@ function line(color: string) {
     join: 'round',
   } as const;
 }
+
+describe('an unclassified graduated layer', () => {
+  it('labels a class by its position rather than crashing', () => {
+    // `Graduated.breaks` is present *after* classification runs, so an empty
+    // array is the state a layer is in between choosing the mode and the
+    // classifier returning. Reading `breaks[0]` there used to throw inside
+    // `formatBreak`, which took the whole formatting dialog down.
+    expect(classLabel([], 0, 5)).toBe('Class 1');
+    expect(classLabel([], 2, 5)).toBe('Class 3');
+    expect(classLabel([], 4, 5)).toBe('Class 5');
+  });
+
+  it('still labels a classified layer from its breaks', () => {
+    expect(classLabel([10, 20, 30, 40], 0, 5)).toBe('< 10');
+    expect(classLabel([10, 20, 30, 40], 2, 5, 'ft')).toBe('20 – 30 ft');
+    expect(classLabel([10, 20, 30, 40], 4, 5)).toBe('≥ 40');
+  });
+});

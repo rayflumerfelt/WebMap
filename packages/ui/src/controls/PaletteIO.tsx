@@ -30,8 +30,8 @@ export interface PaletteIOProps {
   /** Suggested download name, without an extension. */
   name: string;
   /** Set while an import is in flight, and cleared by the caller. */
-  error?: string | null;
-  className?: string;
+  error?: string | null | undefined;
+  className?: string | undefined;
 }
 
 const ACCEPT = '.clr,.cpt,.xml,.json';

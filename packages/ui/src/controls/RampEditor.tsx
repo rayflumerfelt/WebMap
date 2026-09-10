@@ -29,13 +29,13 @@ export interface RampEditorProps {
    * the attribute-summary endpoint. Omit and the strip renders without an
    * underlay — the ramp is still editable, it is just harder to judge.
    */
-  histogram?: number[];
+  histogram?: number[] | undefined;
   /** The data range the histogram spans, for the axis labels. */
-  domain?: [number, number];
+  domain?: [number, number] | undefined;
   /** Shown under the strip. Use it for the perceptual caveat on a spectral
    *  ramp — `08` §5.1 keeps the option and warns rather than removing it. */
-  note?: string;
-  className?: string;
+  note?: string | undefined;
+  className?: string | undefined;
 }
 
 /** How many samples the preview strip draws. Enough to look continuous at any

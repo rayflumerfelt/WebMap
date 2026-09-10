@@ -32,10 +32,10 @@ export interface IntervalEditorProps {
   bands: IntervalBand[];
   onChange(bands: IntervalBand[]): void;
   /** The layer's data range, used for the derived labels and the warning. */
-  domain?: [number, number];
+  domain?: [number, number] | undefined;
   /** Unit suffix for the derived labels — 'ft', '%', 'mD'. */
-  unit?: string;
-  className?: string;
+  unit?: string | undefined;
+  className?: string | undefined;
 }
 
 export function IntervalEditor({

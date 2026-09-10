@@ -34,7 +34,7 @@ export interface FontPickerProps {
   onChange(value: string[]): void;
   /** What `GET /static/glyphs` returned. */
   families: FontFamily[];
-  className?: string;
+  className?: string | undefined;
 }
 
 /** Split a stack name into its family and the face words after it. */

@@ -553,7 +553,29 @@ Sections the requirement did not name but the model needs, all already in `Symbo
   and it is the single most important piece of contour formatting.
 
 Every dialog shows a **live legend preview**. `deriveLegend` already exists, and it is the
-cheapest way to catch a palette that looks fine in the editor and illegible on the map.
+cheapest way to catch a palette that looks fine in the editor and illegible on the map. It
+draws over a light or a dark ground rather than over the panel's own colour, because a legend
+that vanishes into the dialog is the failure it exists to catch and that can only be seen
+against something the map might actually be.
+
+**Built** as `apps/web/src/symbology/FormattingDialog.tsx`, composing the §6.3 controls.
+Building it turned up one defect and settled two things the section left open:
+
+`classLabel` crashed on a graduated layer whose `breaks` were still empty — the state a layer
+is in between choosing the mode and the classifier returning, which `Graduated.breaks`
+documents as normal. `breaks[0]!` read undefined and `formatBreak` threw, taking the whole
+dialog down instead of showing a legend that is not filled in yet. A class with no break to
+name is now labelled by its position.
+
+**Switching colour mode keeps the symbol.** Going from a fixed colour to categories is a change
+in how the colour is *decided*, not a reset of the layer, so the outline width and marker shape
+someone set survive it. On a categorized layer, editing the shared shape applies it to every
+category while each keeps its own colour — a categorized layer varies one property, and a
+legend whose entries differ in two is not readable as a set.
+
+**A cleared zoom limit means no limit, not zero.** Zero is a real zoom level, so the field
+deletes the key rather than writing `undefined`; `exactOptionalPropertyTypes` makes the
+difference a type error rather than a subtle one.
 
 ### 6.3 Shared controls
 
@@ -571,6 +593,18 @@ can be lifted into another one. Each takes a value and an `onChange` and nothing
 | `FontPicker` | Family, weight, style — disables what the family lacks |
 | `PaletteIO` | Import and export, `.clr` / `.cpt` / QGIS XML (`08` §5.1) |
 | `LegendPreview` | Every mode, in every dialog |
+
+**All nine are built**, in `packages/ui/src/controls/`. Style objects rather than a stylesheet:
+the package builds with `tsc` and ships `dist/index.js`, so a `.css` import would need a
+bundler in every consumer and the lift-into-another-application premise would be gone. Sizes
+read the host's density tokens (`--row-h`, `--control-h`, `--hit-slop`) with the same numbers
+as fallbacks, so a lifted control looks right on its own and picks up the host's density when
+there is one.
+
+`PaletteIO` parses nothing — the file's text goes to the server, where
+`webmap_core.style.palette_io` is the single implementation. A `.cpt` with hard breaks, named
+colours and B/F/N lines is exactly the format where two parsers disagree quietly, and the
+disagreement shows up as a map that looks slightly wrong.
 
 ---
 

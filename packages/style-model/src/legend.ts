@@ -141,9 +141,31 @@ export function classLabel(
   unit?: string,
 ): string {
   const suffix = unit ? ` ${unit}` : '';
-  if (index === 0) return `< ${formatBreak(breaks[0]!)}${suffix}`;
-  if (index === count - 1) return `≥ ${formatBreak(breaks[breaks.length - 1]!)}${suffix}`;
-  return `${formatBreak(breaks[index - 1]!)} – ${formatBreak(breaks[index]!)}${suffix}`;
+
+  // **A class with no break to name is labelled by its position.** `breaks` is
+  // documented as present *after* classification runs, so an empty array is a
+  // real state — the one a layer sits in between choosing graduated mode and
+  // the classifier returning. Reading `breaks[0]` there yields undefined and
+  // `formatBreak` throws, which took the whole formatting dialog down instead
+  // of showing a legend that is not filled in yet.
+  const at = (position: number): string | null => {
+    const value = breaks[position];
+    return value === undefined ? null : formatBreak(value);
+  };
+
+  if (index === 0) {
+    const upper = at(0);
+    return upper === null ? `Class 1` : `< ${upper}${suffix}`;
+  }
+  if (index === count - 1) {
+    const lower = at(breaks.length - 1);
+    return lower === null ? `Class ${count}` : `≥ ${lower}${suffix}`;
+  }
+  const lower = at(index - 1);
+  const upper = at(index);
+  return lower === null || upper === null
+    ? `Class ${index + 1}`
+    : `${lower} – ${upper}${suffix}`;
 }
 
 /**

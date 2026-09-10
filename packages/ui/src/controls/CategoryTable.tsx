@@ -39,13 +39,13 @@ export interface CategoryTableProps {
   otherColor: string | null;
   onOtherChange(color: string | null): void;
   /** Distinct values the query found but did not return. */
-  remaining?: number;
+  remaining?: number | undefined;
   /**
    * Set when the column's cardinality was too high to enumerate. The rows are
    * then whatever the user has added by hand, and the control says so.
    */
-  refused?: { distinct: number; limit: number } | null;
-  className?: string;
+  refused?: { distinct: number; limit: number } | null | undefined;
+  className?: string | undefined;
 }
 
 /** The default *Other* colour. Light grey: present, and obviously not a

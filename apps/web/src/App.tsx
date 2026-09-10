@@ -24,7 +24,8 @@ import { Toolbar } from './shell/Toolbar.js';
 import type { ToolId } from './shell/Toolbar.js';
 import { DEFAULT_PREFS, loadPrefs, savePrefs } from './shell/panelPrefs.js';
 import type { PanelKey, PanelPrefs } from './shell/panelPrefs.js';
-import { SymbologyPanel } from './symbology/SymbologyPanel.js';
+import { FormattingDialog } from './symbology/FormattingDialog.js';
+import { groupIntoFamilies } from './symbology/fontFamilies.js';
 import { useSessionStore } from './stores/sessionStore.js';
 
 export interface AppProps {
@@ -47,6 +48,14 @@ export interface AppProps {
   /** Feature count per dataset, from session metadata. Decides whether the
    *  attribute panel asks for attributes at all. */
   featureCounts?: Record<string, number | null>;
+  /** Columns per dataset, for the formatting dialog's field pickers. From the
+   *  dataset's registered `attribute_schema`. */
+  attributeSchemas?: Record<string, Array<{ name: string; type: 'text' | 'number' }>>;
+  /** Font **stack** names from `GET /static/glyphs` — grouped into families
+   *  here, because a stack is what MapLibre asks for and a family is what a
+   *  person picks. Injected rather than fetched so the shell renders with no
+   *  API in reach. */
+  glyphStacks?: string[];
 }
 
 export function App({
@@ -58,6 +67,8 @@ export function App({
   crsWkt,
   api,
   featureCounts = {},
+  attributeSchemas = {},
+  glyphStacks = [],
 }: AppProps = {}) {
   const layers = useSessionStore((state) => state.layers);
   const view = useSessionStore((state) => state.view);
@@ -68,6 +79,7 @@ export function App({
   const sessionName = useSessionStore((state) => state.shortCode);
 
   const [prefs, setPrefs] = useState<PanelPrefs>(DEFAULT_PREFS);
+  const fontFamilies = useMemo(() => groupIntoFamilies(glyphStacks), [glyphStacks]);
   const [activeTool, setActiveTool] = useState<ToolId>('tool.select');
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
 
@@ -227,15 +239,22 @@ export function App({
         </>
       }
       symbology={
-        <SymbologyPanel
-          layerName={selectedLayer?.name ?? null}
-          symbology={selectedLayer?.symbology ?? null}
-          onChange={(symbology) => {
-            if (selectedLayerId) {
-              useSessionStore.getState().updateSymbology(selectedLayerId, symbology);
+        selectedLayer && selectedLayerId ? (
+          <FormattingDialog
+            layerName={selectedLayer.name}
+            symbology={selectedLayer.symbology}
+            onChange={(symbology) =>
+              useSessionStore.getState().updateSymbology(selectedLayerId, symbology)
             }
-          }}
-        />
+            fields={attributeSchemas[selectedLayer.datasetId] ?? []}
+            palettes={palettes}
+            fonts={fontFamilies}
+          />
+        ) : (
+          <p style={{ fontSize: 12, opacity: 0.7, margin: 12 }}>
+            Select a layer to edit how it is drawn.
+          </p>
+        )
       }
       attributes={
         api ? (

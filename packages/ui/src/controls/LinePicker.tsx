@@ -33,7 +33,7 @@ export interface LineValue {
 export interface LinePickerProps {
   value: LineValue;
   onChange(value: LineValue): void;
-  className?: string;
+  className?: string | undefined;
 }
 
 /**
