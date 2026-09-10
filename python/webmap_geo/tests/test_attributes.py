@@ -1,4 +1,4 @@
-"""Paged attribute reads. `07-frontend.md` §9.
+"""Paged attribute reads. `07-frontend.md` §10.
 
 The property that matters is that paging is *coherent*: every row appears
 exactly once across the pages, and no row appears twice. Parquet gives no

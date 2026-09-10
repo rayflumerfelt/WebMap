@@ -10,7 +10,7 @@ This file lives at the repository root. Claude Code reads it automatically; add
 ## 1. What this project is
 
 Geospatial mapping for subsurface geologists, with an MCP server exposing it to Claude.
-Specifications live in `docs/00-overview.md` through `docs/12-roadmap.md`. **Read the relevant
+Specifications live in `docs/00-overview.md` through `docs/13-kriging.md`. **Read the relevant
 spec before implementing a feature.** They contain decisions with rationale; re-deriving them
 wastes time and usually lands somewhere worse.
 

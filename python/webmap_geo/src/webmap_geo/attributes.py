@@ -1,4 +1,4 @@
-"""Attribute reads from the data plane. `07-frontend.md` §9.
+"""Attribute reads from the data plane. `07-frontend.md` §10.
 
 Separate from `tiles.py` because it reads **no geometry**. That is the whole
 point: an attribute table needs values and a row count, and pulling geometry it

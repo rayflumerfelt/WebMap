@@ -1,6 +1,6 @@
 # 12 — Roadmap
 
-Six phases. Each has a demoable outcome and explicit acceptance criteria. A phase is not
+Seven phases. Each has a demoable outcome and explicit acceptance criteria. A phase is not
 complete until every criterion passes.
 
 Estimates assume a small team with AI assistance. Treat them as relative weights, not
@@ -31,6 +31,7 @@ contracts clean in both languages.
 | 4 — Gridding | **In progress.** 7 of 10 verified. Jobs, contouring and lineage are done; see the list at the end of that phase for what is owed. |
 | 5 — Styling and editing | Not started. Scope grew with `adr/0010` — layers, basemaps and capability roles. |
 | 6 — Aggregation and polish | Not started. |
+| 7 — Geostatistics | Not started. Specified in `13-kriging.md`; the largest single phase in the plan. |
 
 **The gap worth naming** is not unwritten code — it is unwritten *harnesses*.
 `tests/visual/golden/` and `tests/e2e/` each contain nothing but a `.gitkeep`, and
@@ -484,3 +485,57 @@ colleagues who were never meant to see each other's work.
 longest phase and the differentiator. Nothing in `adr/0001` through `adr/0008` makes
 fault-constrained interpolation easier or shorter. Do not let a cheaper Phase 1 create the
 impression that the whole plan compressed.
+
+---
+
+## Phase 7 — Geostatistics (8–10 weeks)
+
+Specified in full in `13-kriging.md`, which also carries the build order (§19) and the
+reasoning behind each acceptance criterion below. The largest single phase in this plan, and
+the one with the most ways to produce plausible output that is wrong.
+
+**Deliverables**
+
+- Structured flags (`13` §16) replacing free-text warnings across `webmap_geo`
+- Declustering, target transforms, covariate screening
+- Variography: directional, variogram maps, nested and Matérn models, anisotropy significance
+- **REML fitting for trend residuals** ([`adr/0011`](adr/0011-reml-for-trend-residual-variograms.md)),
+  before any trend code exists
+- Simple, universal/KED, indicator and block kriging beside the existing ordinary kriging
+- Trend estimation: preset forms, the sandboxed expression parser, GLS, the GLS↔REML loop
+- **Regression kriging** — the first end-to-end estimator and the first useful deliverable
+- **Regression indicator kriging** and the `LocalCDF`, persisted as a multi-band grid
+- Spatially-blocked validation: CRPS, PIT, threshold accuracy, Krige slope, four baselines
+- Attribution diagnostics (`13` §12), variance budget first
+- SGS, connectivity statistics, UK/KED
+- The job, the API route, the MCP tool
+- The geostatistics workbench (`07` §9), including ECharts as a new frontend dependency
+
+**Acceptance**
+
+- [ ] Synthetic recovery: the GLS↔REML loop recovers a known θ within its standard errors, and
+      REML recovers range, sill and nugget with **less bias than WLS** on the same data
+- [ ] Bias demonstration: a method-of-moments fit to the same residual materially
+      underestimates the range — the test that fails if REML is ever "simplified" away
+- [ ] Simple kriging with a global neighbourhood interpolates exactly at data points, with
+      zero variance
+- [ ] Order-relation correction returns a monotone CDF in [0, 1] for any input, over a
+      property test rather than examples
+- [ ] The hyperbolic upper tail integrates to 1 and matches at the last threshold;
+      negative-support input triggers the fallback rather than producing a number
+- [ ] PIT of a correctly specified Gaussian model is uniform by KS test
+- [ ] No block-CV fold has a training point within the block buffer of a test point
+- [ ] Declustering matches a reference implementation on a GSLIB dataset
+- [ ] A run reproduces bit-identically from its lineage record alone
+- [ ] `TREND_ABSORBED` fires on a synthetic case built so the covariates are spatial proxies,
+      and does not fire on one built so they are not
+- [ ] The trend-only baseline winning is reported above the map, not buried in a metrics table
+- [ ] Changing the quantile, the exceedance threshold or the reference scenario updates the
+      map with **no server call** (`07` §9.1)
+- [ ] A tail-dependent quantile is labelled as such wherever it appears, including in the
+      layer name
+
+**Risk.** The failure mode this phase is most exposed to is not a crash — it is a run that
+completes, looks authoritative, and has let the trend absorb the spatial signal. `13` §12.4 and
+§13 exist for that, and the acceptance criteria above test the detectors rather than only the
+estimators. Watch for the detectors being weakened to make a demo look cleaner.

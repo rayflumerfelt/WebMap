@@ -47,7 +47,7 @@ Twenty tools in six groups.
 | Group | Tools |
 |---|---|
 | Discovery | `webmap_list_projects`, `webmap_list_datasets`, `webmap_search_datasets`, `webmap_describe_dataset` |
-| Analysis | `webmap_interpolate`, `webmap_contour`, `webmap_aggregate`, `webmap_fit_variogram` |
+| Analysis | `webmap_interpolate`, `webmap_contour`, `webmap_krige`, `webmap_aggregate`, `webmap_fit_variogram` |
 | Rendering | `webmap_render_map`, `webmap_get_render`, `webmap_suggest_maps` |
 | Sessions | `webmap_open_session`, `webmap_get_session`, `webmap_update_session` |
 | Styling | `webmap_list_palettes`, `webmap_list_style_templates` |
@@ -59,7 +59,7 @@ Twenty tools in six groups.
 |---|---|---|---|---|
 | `webmap_list_*`, `webmap_search_*`, `webmap_describe_*`, `webmap_get_*` | ✓ | ✗ | ✓ | ✗ |
 | `webmap_suggest_maps`, `webmap_fit_variogram` | ✓ | ✗ | ✓ | ✗ |
-| `webmap_interpolate`, `webmap_contour`, `webmap_aggregate` | ✗ | ✗ | ✗ | ✗ |
+| `webmap_interpolate`, `webmap_contour`, `webmap_krige`, `webmap_aggregate` | ✗ | ✗ | ✗ | ✗ |
 | `webmap_render_map`, `webmap_open_session` | ✗ | ✗ | ✗ | ✗ |
 | `webmap_update_session`, `webmap_export_dataset` | ✗ | ✗ | ✓ | ✗ |
 | `webmap_delete_dataset` | ✗ | **✓** | ✓ | ✗ |

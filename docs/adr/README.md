@@ -37,3 +37,15 @@ survived with amendments recorded in their own files: **0002** — its single-wr
 was overstated, since DuckDB here is a query engine over immutable Parquet rather than a
 database file — and **0005**, where copy-on-write stays and optimistic concurrency returns on
 the version pointer alone.
+
+**0011 and 0012 cover the geostatistics subsystem** added by `13-kriging.md`. 0012 is a
+boundary decision rather than a geostatistical one: the toolkit arrived specified as a
+standalone package with its own CRS model, grid type, run manifest and figure rendering, and
+adopting it as written would have given WebMap two of each. It lives in `webmap_geo`, on the
+contracts that already exist — which is 0003 and 0004 applied to a new body of work rather
+than a new position.
+
+0011 is the one to read before touching variogram code. It records why a least-squares fit to
+a fitted-trend residual biases sill and range downward, why that bias feeds itself inside the
+GLS loop, and why two CI tests exist whose only job is to fail if someone removes REML later.
+

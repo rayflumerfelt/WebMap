@@ -403,6 +403,13 @@ def _assemble_biharmonic(grid, points, values, constraints, tension):
 
 ### 6.2 Ordinary and universal kriging
 
+> **The geostatistics subsystem is specified in `13-kriging.md`.** This section is the
+> interpolator a structure map needs, in the form `webmap_interpolate` dispatches to. `13`
+> specifies the rest of the family — simple, universal/KED, indicator and block kriging,
+> regression kriging, and regression indicator kriging with a global parametric trend — along
+> with declustering, covariate screening, local CDFs, attribution diagnostics and
+> spatially-blocked validation.
+
 One hard requirement at this scale: local neighborhoods.
 
 ```python
@@ -473,6 +480,22 @@ later. It is not implemented today, and this section does not describe it as tho
 
 Kriging without variogram analysis is kriging with made-up parameters. Both an automatic path
 (for Claude) and an interactive path (for the geologist) are required.
+
+> **`13-kriging.md` §7 extends this in three ways, and supersedes it in one.**
+>
+> Extends: nested structures and Matérn beside the single-structure `FittedVariogram` below;
+> directional variograms and variogram maps; equal-count lag binning with pair counts
+> returned, because a variogram plot without them invites trust in a tail built from nine
+> pairs.
+>
+> Supersedes: **the anisotropy detection described here accepts whatever ellipse the eight
+> azimuths produce.** `13` §7.6 accepts one only if the range ratio is significant against a
+> bootstrap null, and reports the p-value — an anisotropy azimuth quoted without one looks
+> like a measurement.
+>
+> And a rule this section does not have: WLS is the right fitter for a variogram of **raw
+> data**, and the wrong one for the residual of a fitted trend, where it underestimates sill
+> and range self-reinforcingly. See [`adr/0011`](adr/0011-reml-for-trend-residual-variograms.md).
 
 ```python
 # python/webmap_geo/variogram.py

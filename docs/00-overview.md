@@ -179,6 +179,7 @@ Claude, and every map in it carries provenance sufficient to reproduce it a year
 | `10-jobs-async.md` | Queue, status protocol, progress, quotas |
 | `11-file-io.md` | Format matrix, connectors, shapefile caveats |
 | `12-roadmap.md` | Phased milestones with acceptance criteria |
+| `13-kriging.md` | Variography, the kriging family, regression indicator kriging |
 | `CLAUDE.md` | Conventions and guardrails for agentic development |
 
 ## 10. Reading order for implementers

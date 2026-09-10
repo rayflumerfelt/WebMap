@@ -632,7 +632,278 @@ datasets have been deleted, and one that has expired.
 
 ---
 
-## 9. Performance
+## 9. Geostatistics workbench
+
+The controls for `13-kriging.md`. The map itself is already built — §2 renders the grids this
+produces, `08` §5.2 colours them, and `05` §7 contours them. This section is everything
+around it: the parameter, diagnostic and validation surfaces that turn a batch geostatistics
+engine into something a geologist will explore.
+
+### 9.1 Three tiers of interaction
+
+**The single most important organising idea here.** Every control belongs to exactly one
+tier, and the tiers must *feel* different. Getting this wrong is how tools like this become
+unpleasant: if changing a P90 threshold spins a job queue, people stop exploring — and
+exploration is the entire value of a distributional output.
+
+| Tier | Cost | Controls | Pattern |
+|---|---|---|---|
+| **Free** | Recomputed in the browser from the stored local CDF. No server call. | Quantile, `P(Z > z)` threshold, reference scenario, colour ramp, stretch | Live sliders. **No Apply button.** Updates on drag. |
+| **Cheap** | Re-krige the preview grid only. Under a second (`13` §11.3). | Neighbourhood (min/max n, radius, sectors), grid resolution, variogram overrides | Preview on drag; **Apply** promotes to full resolution. |
+| **Expensive** | Full refit. A new job, a new dataset, a new lineage record. | Covariate set, trend form, target transform, threshold count and placement, declustering | Explicit **Run**. Produces a *new* result; never mutates the current one. |
+
+**Why the free tier is genuinely free.** The trend enters the model as a location shift
+(`13` §6), so changing the reference scenario is arithmetically adding a constant to every
+node before reading the CDF. Quantiles and exceedance probabilities are lookups into
+`LocalCDF.probs`, which the client already holds. None of it needs the server.
+
+This is not a UI convenience — it is the reason the model was specified with a global trend
+and a per-node CDF rather than as a surface. A design that made P10/P50/P90 three separate
+server runs would produce the same maps and a tool nobody explores.
+
+### 9.2 The local CDF on the client
+
+`13` §4.4 persists the local CDF as a multi-band grid, one band per threshold. For the free
+tier the client fetches the band stack once per run — the same permission check as any tile
+request, no new storage.
+
+Size is the constraint that decides the tier boundary. A 500 × 500 grid with 7 thresholds is
+1.75 M values: **7 MB as float32, 3.5 MB as float16**. Acceptable once per run, and it makes
+every derived surface instant.
+
+- Above `SOFT_CELL_LIMIT` (4 M cells, `13` §11.0) the payload stops being reasonable and the
+  free tier degrades: quantile and exceedance surfaces are derived server-side and delivered
+  as ordinary tiles. **Say so in the UI** — a slider that was instant and becomes a spinner
+  reads as a bug unless the reason is on screen.
+- Compute quantiles and exceedances in a **Web Worker**, so a drag never blocks the main
+  thread.
+- Derived surfaces are never stored (`13` §4.4). Storing P50 beside the distribution it came
+  from guarantees the two drift.
+
+### 9.3 Charting: ECharts
+
+A charting library is a new dependency for `apps/web`, and this is what justifies it: the
+workbench needs a variogram plot with draggable model handles, small multiples, a heatmap, a
+reliability curve and a PIT histogram. ECharts covers all of them, including the ones that
+looked like they would need d3.
+
+**The one non-trivial case** is draggable sill / range / nugget handles on the model curve:
+the `graphic` component with `draggable: true`, positioning handles via
+`chart.convertToPixel({ seriesIndex: 0 }, [x, y])` and reading drags back with
+`convertFromPixel`. Imperative rather than declarative — roughly forty lines — but a
+documented pattern rather than a fight. The same technique gives the draggable readout line
+on the CDF inspector (§9.7).
+
+| Chart | Feature |
+|---|---|
+| Variogram points sized by pair count | `scatter` with `symbolSize` as a function of the datum |
+| Fitted model curve | `line`, `smooth: false`, densely sampled |
+| Per-threshold indicator small multiples | Several `grid` objects in one instance |
+| Correlation matrix | `heatmap` + `visualMap` |
+| Shaded tail regions; PIT uniform reference band | `markArea` |
+| 1:1 line on the Krige-slope scatter | `markLine` |
+| Coefficient trajectory | `line`, `animation: false` for live updates |
+| Large sample scatter | `large: true` with progressive rendering |
+
+Three practical notes, each of which costs an afternoon if discovered late:
+
+1. **Theme is fixed at init.** `echarts.init(dom, theme)` cannot be changed by `setOption`.
+   Key the wrapper component on the Mantine colour scheme so React remounts it, or build
+   colours from Mantine CSS variables at option-build time.
+2. **Resize is manual.** Wire a `ResizeObserver` to `chart.resize()`. This matters most inside
+   `Drawer` and `Tabs`, where a chart initialised while hidden gets zero dimensions and stays
+   broken.
+3. **Import from `echarts/core`**, registering only what is used. The barrel is about a
+   megabyte, and `09-editing.md`-scale bundles are already the thing §10 watches.
+
+Write one `<EChart option={} />` wrapper handling init, `setOption`, the `ResizeObserver`,
+disposal and theme keying. After that, touch the instance API only in the variogram workbench
+and the CDF inspector.
+
+### 9.4 TrendBuilder
+
+The most substantial component, and the one that saves the most time. Its job is to get
+`f(X; θ)` **defined and proven sane** before anyone spends a run. Every failure in `13` §8.4
+is cheaper to catch here than after a five-iteration GLS/REML loop.
+
+**What makes it work:** on every change it runs a throwaway **OLS fit with declustering
+weights** — one least-squares call, no covariance matrix, no kriging, sub-second for thousands
+of samples. That yields real coefficients, real residuals and real diagnostics to render live,
+instead of a form that validates syntax and nothing else. `POST /api/v1/trend/preview`,
+debounced at ~300 ms.
+
+**Step 1 — covariates.** Multi-select from the dataset's numeric columns. Live: correlation
+heatmap, design-matrix condition number and per-covariate VIF, and the spatial-proxy check
+(`13` §5.4). This is where a user discovers that proppant and fluid intensity are nearly
+collinear — the moment to drop one is here, not after a run raises `COVAR_COLLINEAR`.
+
+**Step 2 — form.** A `SegmentedControl` across three modes:
+
+- *Preset* — cards for power, saturating, additive-saturating, Cobb-Douglas and log-linear,
+  each with the formula rendered and a one-line description of the response shape.
+- *Expression* — a text input parsed **server-side** through the sandboxed sympy path
+  (`13` §8.3). A client-side parse is a convenience, never the source of truth. Live feedback
+  shows the parsed expression, a chip list splitting free symbols into **covariates** (matched
+  to selected columns) and **parameters** (everything else, which become θ), autocomplete over
+  covariate names and the allow-listed functions, and inline errors. Run stays disabled until
+  it validates server-side.
+- *Import* — paste a discovered expression (`13` §9). With several seeds supplied, show them
+  side by side: seed instability means the interpretability is illusory, and the user should
+  see that here rather than meet `SR_UNSTABLE` three dialogs later.
+
+**Step 3 — θ₀ and bounds.** Prefilled from the preset, collapsed by default.
+
+**Step 4 — preview.** The part that earns the dialog:
+
+- **Partial dependence curves**, one per covariate, evaluated over that covariate's observed
+  range with the others held at declustered medians, with a **rug plot** of the data
+  underneath and the region outside the covariate hull shaded. **Mark any sign reversal in the
+  numerical derivative in red.** `TREND_NONMONOTONE` is instantly legible as a curve that
+  turns over and nearly illegible as a warning string — and symbolic-regression expressions do
+  this constantly.
+- **Coefficient table** — estimate, standard error, and a flag on any coefficient whose
+  interval spans zero or that sits in the smallest singular vectors of `JᵀJ`.
+- **Observed vs predicted** with the 1:1 line, and **residual vs fitted** to catch
+  heteroscedasticity the transform did not handle.
+- **Residual bubble map thumbnail.** Not a real diagnostic — the proper standardised-residual
+  map needs LOO kriging (`13` §12.1) — but coherent same-sign patches here are an early
+  warning that the global trend will strain, and it costs nothing.
+- **Variance share** — the fraction of declustered target variance the trend explains. If it
+  is very high, say so now: `TREND_ABSORBED` is likely and the map will be regression-driven.
+
+**Two boundaries to enforce in code.** TrendBuilder never fits a variogram, never runs the GLS
+loop and never kriges — that constraint is what keeps it fast enough to be live. And its OLS
+coefficients are a **preview, not the answer**: the real θ comes from the GLS/REML loop and
+will differ, because the loop corrects exactly the clustering bias weighted OLS only
+approximates (`13` §8.1). Label them as a preview, and after a run completes **show OLS and
+GLS side by side** — a large gap is itself informative.
+
+### 9.5 Variogram workbench
+
+The one place experts will judge this tool.
+
+- Empirical points **sized by pair count**, fitted curve overlaid. A variogram plot without
+  pair counts invites trust in a tail built from nine pairs.
+- Sill, range and nugget as both numeric inputs and draggable handles (§9.3).
+- A permanent readout of the **auto-selected value beside any override**, with one-click reset.
+- `Tabs`: omnidirectional | directional | variogram map. The directional tab overlays the
+  azimuths with the fitted ellipse and **states the bootstrap p-value** (`13` §7.6), because an
+  anisotropy azimuth quoted without it looks like a measurement.
+- **For RIK, a small-multiples strip of per-threshold indicator variograms**, plus a chart of
+  fitted range against threshold quantile. That second chart is the entire argument for
+  indicators — if range grows with threshold, connected highs are real. Put it on screen.
+- Model family selector showing the REML likelihood of each candidate, so selection is visible
+  rather than magic.
+
+**Dragging fits by WLS; Apply runs REML** ([`adr/0011`](adr/0011-reml-for-trend-residual-variograms.md)).
+REML is an optimisation with a Cholesky per evaluation and cannot live under a slider.
+
+### 9.6 Flag panel
+
+Given that `13` §1 makes findings text-first with figures as evidence, this is arguably more
+important than the map.
+
+- A persistent docked panel, grouped by severity.
+- Each flag: the code as a `Badge`, the message, and two actions — **jump to figure**, **jump
+  to the parameter that caused it**.
+- `TREND_ABSORBED`, `COVAR_CONFOUND` and `TREND_ONLY_WINS` render as **full-width alerts above
+  the map**, not list items. These are the findings a non-expert cannot recover unaided.
+
+### 9.7 Local CDF inspector, and the reference scenario
+
+Click a grid node → a panel showing the recovered CDF and PDF at that node, the kriged
+threshold positions marked, **the extrapolated tail regions shaded distinctly** with the tail
+model and ω named in place, and a draggable vertical line reading out `P(Z > z)` and the
+quantile at the cursor.
+
+This is what makes a distributional output comprehensible to someone who has only seen
+single-value maps, and it is pure client-side arithmetic.
+
+The **reference scenario dialog** is a slider per covariate, each bounded by the observed range
+with the region outside the covariate hull shaded, plus a *typical* preset setting everything
+to declustered medians. Live map update, free tier. Give it prominence rather than burying it
+in settings — *"the target at a reference configuration"* is the question users actually have.
+
+### 9.8 Data health, progress, validation, attribution
+
+**Data health** runs before anyone commits to a job: declustering weight map, covariate
+correlation heatmap with the condition number, spatial-proxy table, and the target histogram
+before and after transform.
+
+**Job progress** uses the existing polling contract (`10-jobs-async.md`) — the response says
+how long to wait, and the same contract serves MCP. What changes is the rendering: a
+`Timeline` with the real stages from `13` §14.3 rather than a spinner, because the trend loop
+and per-threshold kriging give genuine structure. **Draw the coefficient trajectory live**
+during the trend iterations; it doubles as the `13` §8.4 diagnostic, so it is free.
+
+> Server-Sent Events would give smoother progress than polling. They are not adopted here:
+> `10-jobs-async.md` specifies polling with a backoff hint, MCP depends on that contract, and
+> a progress bar updating once a second is not the bottleneck. Revisit as a change to `10`,
+> not as a second progress mechanism beside it.
+
+**Validation panel:** the baseline table at the top, then the PIT histogram with a uniform
+reference band, the CRPS bar chart across the four baselines, the reliability curve, and the
+Krige-slope scatter with a 1:1 line. **If trend-only wins, state it in plain language above
+everything else** (`13` §13).
+
+**Attribution panels:** the four-way joint classification (`13` §12.3) as a map layer with a
+real legend — ideally interactive, clicking a quadrant to isolate it; the confound report as a
+table, one row per covariate, one number, sorted descending; and the trend-versus-residual
+variance ratio as a diverging ramp centred at 1, swipeable against P50.
+
+### 9.9 Run manager
+
+A table of runs — target, trend form, covariates, key metrics, flag counts. Select two to
+diff: **a lineage diff showing only what changed**, side-by-side or swipe maps, and the metric
+deltas.
+
+Without this, parameter exploration is unfalsifiable — a user changes four things, likes the
+result, and cannot say which change did it.
+
+Because the run configuration and the lineage record are the same shape (`13` §4.6), export is
+a serialisation and import is a hydration. **Import needs two guards, both required:** a
+schema-version check that fails cleanly rather than half-loading, and a **dataset hash check**
+that warns prominently when the parameters were recorded against different data. Show an
+import summary before applying, and offer *apply parameters only* so a user can inspect before
+committing to an expensive tier.
+
+### 9.10 Cross-cutting rules
+
+- Every auto-selected parameter carries a visible **"auto" badge** and a one-click reset. If
+  users cannot tell what they have overridden, they will override things by accident and not
+  know why the map changed.
+- Any quantile flagged `LocalCDF.tail_dependent(q)` carries an inline warning **wherever it
+  appears, including in the layer name**. P95 and P99 are the numbers people quote in meetings
+  and the numbers most determined by an assumption (`13` §10.4).
+- **Masked areas must be visually distinct from low values** — a hatch or stipple, not the
+  bottom of the ramp — with the reason in the legend ("beyond 1× variogram range from any
+  sample"). A hole that looks like a rendering bug gets reported as one. This is a requirement
+  on `08` §5.2's grid rendering, not on this panel.
+- **The colour scale must be lockable across runs.** Auto-restretching per run silently makes
+  every map look equally decisive, which defeats run comparison — the same argument as the
+  display range in `08` §5.2.
+
+### 9.11 Build order
+
+1. The `<EChart>` wrapper, and the run-configuration store shaped to the lineage record.
+2. Data health panel — the first real screen, and it needs no estimator.
+3. TrendBuilder steps 1–3 against `/trend/preview`.
+4. TrendBuilder step 4 previews. **First genuinely valuable milestone.**
+5. Run submission, polling and result caching.
+6. Free-tier controls: quantile, exceedance, scenario, with the Web Worker CDF math.
+7. Local CDF inspector.
+8. Flag panel.
+9. Variogram workbench — read-only, then overrides, then draggable handles.
+10. Validation and attribution panels.
+11. Run manager and diff.
+12. Report download and parameter export/import.
+
+Milestone 6 is where the tool starts feeling live; milestone 8 is where it starts being
+trustworthy.
+
+---
+
+## 10. Performance
 
 - **Never put >5,000 features through a GeoJSON source.** The switch to MVT is automatic and
   decided server-side (`06-rendering.md` §7.1). The client honors what the style says.
@@ -648,7 +919,7 @@ const EditingTools = lazy(() => import('@webmap/map/editing'));
 
 ---
 
-## 10. Accessibility floor
+## 11. Accessibility floor
 
 Not optional, and cheap if done from the start.
 
@@ -673,7 +944,7 @@ so the clickable area exceeds the painted area. Precision at 26 px rows depends 
 
 ---
 
-## 11. Testing
+## 12. Testing
 
 | Layer | Tool | Scope |
 |---|---|---|
