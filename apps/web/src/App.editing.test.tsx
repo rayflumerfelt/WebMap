@@ -131,6 +131,66 @@ describe('starting an edit session', () => {
     expect(useEditStore.getState().mode.activeLayerId).toBe('other');
   });
 
+  it('offers Discard where it asks the user to save or discard', () => {
+    // §5.2 makes save-or-discard the user's decision, so the message that
+    // asks is where the action belongs.
+    useEditStore.getState().activateLayer({
+      layerId: 'other',
+      baseVersion: 1,
+      geometry: 'line',
+      canEdit: true,
+      features: [{ id: 'f', geometry: { type: 'Point', coordinates: [0, 0] }, properties: {} }],
+    });
+    useEditStore.getState().applyCommand({
+      id: 'c1',
+      label: 'Move Vertex',
+      deltas: [
+        {
+          featureId: 'f',
+          before: { id: 'f', geometry: { type: 'Point', coordinates: [0, 0] }, properties: {} },
+          after: { id: 'f', geometry: { type: 'Point', coordinates: [1, 1] }, properties: {} },
+        },
+      ],
+      timestamp: 0,
+    });
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+
+    render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: /discard 1 unsaved edit/i }));
+
+    expect(useEditStore.getState().session!.dirty.size).toBe(0);
+  });
+
+  it('keeps the edits when the confirm is declined', () => {
+    useEditStore.getState().activateLayer({
+      layerId: 'other',
+      baseVersion: 1,
+      geometry: 'line',
+      canEdit: true,
+      features: [{ id: 'f', geometry: { type: 'Point', coordinates: [0, 0] }, properties: {} }],
+    });
+    useEditStore.getState().applyCommand({
+      id: 'c1',
+      label: 'Move Vertex',
+      deltas: [
+        {
+          featureId: 'f',
+          before: { id: 'f', geometry: { type: 'Point', coordinates: [0, 0] }, properties: {} },
+          after: { id: 'f', geometry: { type: 'Point', coordinates: [1, 1] }, properties: {} },
+        },
+      ],
+      timestamp: 0,
+    });
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
+
+    render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: /discard 1 unsaved edit/i }));
+
+    expect(useEditStore.getState().session!.dirty.size).toBe(1);
+  });
+
   it('can be dismissed once read', () => {
     // The reasons here need acting on — save the other layer, wait for
     // metadata — so the message stays until the user is done with it.

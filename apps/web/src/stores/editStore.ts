@@ -30,7 +30,9 @@ import { INITIAL, isVertexMode, reduce, selectionScope } from '../editing/modes.
 import type { ModeEvent, ModeState } from '../editing/modes.js';
 import {
   apply,
+  commit,
   current,
+  discard,
   isDirty,
   openSession,
   redo as redoSession,
@@ -80,6 +82,13 @@ export interface EditStoreState {
   applyCommand(command: Command): void;
   undo(): void;
   redo(): void;
+  /** A save landed: the dirty features become the exact ones and the version
+   *  pointer moves. The request itself is `editing/persistence.ts`'s — this
+   *  store does no I/O, for the reason `sessionStore` does none either. */
+  markSaved(version: number): void;
+  /** §5.2's Discard. The confirmation is the caller's; this is the part that
+   *  cannot be undone. */
+  discardEdits(): void;
   dispatch(event: ModeEvent): void;
   setSnap(patch: Partial<SnapSettings>): void;
   toggle(flag: EditFlag): void;
@@ -161,6 +170,20 @@ export const useEditStore = create<EditStoreState>()((set, get) => ({
   redo() {
     const session = get().session;
     if (!session || !redoSession(session)) return;
+    set((state) => ({ revision: state.revision + 1 }));
+  },
+
+  markSaved(version) {
+    const session = get().session;
+    if (!session) return;
+    commit(session, version);
+    set((state) => ({ revision: state.revision + 1 }));
+  },
+
+  discardEdits() {
+    const session = get().session;
+    if (!session || !isDirty(session)) return;
+    discard(session);
     set((state) => ({ revision: state.revision + 1 }));
   },
 

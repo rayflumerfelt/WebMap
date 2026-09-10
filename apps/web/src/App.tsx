@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AttributePanel } from './attributes/AttributePanel.js';
 import { editMapImages } from './editing/overlay.js';
+import { discardEdits, pendingCount, saveEdits } from './editing/persistence.js';
 import { useMapEditing } from './editing/useMapEditing.js';
 import { ApiClient } from './api/client.js';
 import { cursorTransform } from './crs/analysisCrs.js';
@@ -167,6 +168,10 @@ export function App({
   // --- editing ---------------------------------------------------------------
 
   const editLayerId = useEditStore((state) => state.mode.activeLayerId);
+  // Recomputed whenever the store changes, which includes every bump of the
+  // session's revision counter — the session itself is mutated in place, so
+  // its identity says nothing.
+  const editCount = useEditStore((state) => state.session?.dirty.size ?? 0);
   const [editError, setEditError] = useState<string | null>(null);
 
   // The compiled layers drawing the layer being edited. `compileStyle` gives
@@ -180,12 +185,49 @@ export function App({
       .map((layer) => layer.id);
   }, [style, editLayerId]);
 
+  // The dataset the edit session's version pointer belongs to. A layer is a
+  // view of a dataset (`adr/0010`), and the version lives on the dataset.
+  const editDatasetId = layers.find((layer) => layer.id === editLayerId)?.datasetId ?? null;
+
   const editing = useMapEditing({
     map: mapRef,
     baseLayerIds: editBaseLayerIds,
     enabled: activeTool === 'tool.edit',
     onError: setEditError,
   });
+
+  /**
+   * Write the edit session's pending changes.
+   *
+   * Only the *editor's* save. The session document — layers, camera,
+   * symbology — autosaves on its own debounce (§3), and conflating the two
+   * would make `mod+s` mean two different things depending on which panel had
+   * focus.
+   */
+  const saveEditSession = useCallback(async () => {
+    if (pendingCount() === 0) return;
+    if (!api || !editDatasetId) {
+      setEditError('Editing needs a live session: there is no API client to save through.');
+      return;
+    }
+
+    const outcome = await saveEdits(api, editDatasetId);
+    if (outcome.status === 'saved') {
+      setEditError(null);
+      return;
+    }
+    if (outcome.status === 'conflict') {
+      // §5.3: the edits are still in the buffer. Refresh and Force are the
+      // two answers, and neither is built — saying so is better than a
+      // message that implies the save merely needs retrying.
+      setEditError(
+        `${outcome.message} Your edits are still here. Rebasing them onto the ` +
+          `newer version is not built yet — copy anything you cannot redo.`,
+      );
+      return;
+    }
+    if (outcome.status === 'failed') setEditError(outcome.message);
+  }, [api, editDatasetId]);
 
   /**
    * Open an edit session on the selected layer.
@@ -256,6 +298,15 @@ export function App({
         case 'tool.measure':
           setActiveTool(command);
           return;
+        case 'session.save':
+          void saveEditSession();
+          return;
+        case 'edit.undo':
+          useEditStore.getState().undo();
+          return;
+        case 'edit.redo':
+          useEditStore.getState().redo();
+          return;
         case 'tool.cancel':
           // The editor gets the press first: §4's two-press rule gives the
           // first Escape to a drag in flight, and only the second leaves the
@@ -277,15 +328,14 @@ export function App({
           // supplies one once dataset metadata is loaded.
           return;
         default:
-          // session.save, edit.undo/redo, search, palette and render are wired
-          // in the session route, which has the API client. Falling through
-          // here rather than throwing: an unhandled command is a missing
-          // feature, not a crash.
+          // search, palette and render are wired in the session route, which
+          // has the API client. Falling through here rather than throwing: an
+          // unhandled command is a missing feature, not a crash.
           void store;
           return;
       }
     },
-    [editing, startEditing, togglePanel],
+    [editing, saveEditSession, startEditing, togglePanel],
   );
 
   useShortcuts(runCommand);
@@ -345,6 +395,28 @@ export function App({
           {editError ? (
             <div role="status" style={editBanner}>
               {editError}
+              {editCount > 0 ? (
+                // §5.2 asks the user to save or discard, so the message that
+                // asks is where Discard belongs. It is the one action in the
+                // editor that cannot be undone, hence the confirm.
+                <button
+                  type="button"
+                  style={dismiss}
+                  onClick={() => {
+                    const plural = editCount === 1 ? 'edit' : 'edits';
+                    if (
+                      globalThis.confirm?.(
+                        `Discard ${editCount} unsaved ${plural}? This cannot be undone.`,
+                      )
+                    ) {
+                      discardEdits();
+                      setEditError(null);
+                    }
+                  }}
+                >
+                  Discard {editCount} unsaved {editCount === 1 ? 'edit' : 'edits'}
+                </button>
+              ) : null}
               <button type="button" onClick={() => setEditError(null)} style={dismiss}>
                 Dismiss
               </button>
