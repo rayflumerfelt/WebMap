@@ -151,9 +151,7 @@ def load_fixture(case: str) -> dict[str, Any]:
         )
     spec = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(spec, dict):
-        raise TypeError(
-            f"{path.name} is a {type(spec).__name__}, not a render spec object."
-        )
+        raise TypeError(f"{path.name} is a {type(spec).__name__}, not a render spec object.")
     return spec
 
 
