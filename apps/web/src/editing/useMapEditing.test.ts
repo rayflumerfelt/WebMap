@@ -57,7 +57,7 @@ function fakeHandle() {
         // here and a test that expected it to would be testing nothing.
         id: 'lease',
         layer: { id: 'faults-line' },
-        geometry: { type: 'Point', coordinates: [0, 0] },
+        geometry: { type: 'Point', coordinates: [3, 0] },
         properties: {},
       },
     ] as never[];
@@ -332,6 +332,32 @@ describe('snapping', () => {
     expect(rendered.result.current.snap?.type).toBe('vertex');
   });
 
+  it('reports a snap onto the working set as exact', () => {
+    // §6.6 by lookup: the working set is the exact geometry, so a candidate
+    // resolved from it needs no reconciliation — and the indicator fills in,
+    // which is what tells the user the coordinate is the real one.
+    enterVertexMode();
+    useEditStore.getState().setSnap({ enabled: true, layerIds: ['faults-line'] });
+    const { rendered } = setup();
+
+    act(() => rendered.result.current.onMapPointer(pointer('move', 100, 2) as never));
+
+    expect(rendered.result.current.snap?.isExact).toBe(true);
+  });
+
+  it('reports a snap onto a feature outside the working set as tile-derived', () => {
+    // 'lease' is in the fake's query result and not in the session, which is
+    // what a layer past the 5,000-feature cap looks like.
+    enterVertexMode();
+    useEditStore.getState().setSnap({ enabled: true, layerIds: ['faults-line'] });
+    const { rendered } = setup();
+
+    act(() => rendered.result.current.onMapPointer(pointer('move', 297, 2) as never));
+
+    expect(rendered.result.current.snap?.featureId).toBe('lease');
+    expect(rendered.result.current.snap?.isExact).toBe(false);
+  });
+
   it('drops the vertex on the snap, not on the cursor', () => {
     // The point of snapping: the committed coordinate is the target's, and a
     // commit that used the raw pointer would leave the sliver behind anyway.
@@ -340,13 +366,13 @@ describe('snapping', () => {
     const { rendered } = setup();
 
     act(() => rendered.result.current.onMapPointer(pointer('down', 100, 0) as never));
-    act(() => rendered.result.current.onMapPointer(pointer('move', 3, 2) as never));
-    act(() => rendered.result.current.onMapPointer(pointer('up', 3, 2) as never));
+    act(() => rendered.result.current.onMapPointer(pointer('move', 297, 2) as never));
+    act(() => rendered.result.current.onMapPointer(pointer('up', 297, 2) as never));
 
     const geometry = useEditStore.getState().session!.dirty.get('fault')!.geometry as {
       coordinates: number[][];
     };
-    expect(geometry.coordinates[1]).toEqual([0, 0]);
+    expect(geometry.coordinates[1]).toEqual([3, 0]);
     expect(rendered.result.current.snap?.featureId).toBe('lease');
   });
 

@@ -45,6 +45,10 @@ import { deleteVerticesCommand, moveVertexCommand } from './vertexCommands.js';
  *  the hit slop is what makes a small glyph comfortable to grab. */
 const HANDLE_HIT_PX = 8;
 
+/** Shared empties, so a snap pass with no session allocates nothing. */
+const EMPTY_DIRTY: ReadonlyMap<string, Feature | null> = new Map();
+const EMPTY_EXACT: ReadonlyMap<string, Feature> = new Map();
+
 export interface MapEditingOptions {
   map: { current: WebMapHandle | null };
   /** The style layers drawing the active layer — hit-tested for selection, and
@@ -140,13 +144,17 @@ export function useMapEditing(options: MapEditingOptions): MapEditing {
   /** One snap pass. Returns where the pointer should be treated as being. */
   const runSnap = useCallback(
     (point: Pixel, vertex: SelectedVertex | null): [number, number] => {
-      const { store: live, view: camera } = stateRef.current;
+      const { store: live, view: camera, baseLayerIds: layerIds } = stateRef.current;
       const session = live.session;
       const outcome = engine.snapAt({
         pointer: point,
         camera: { latitude: camera.center[1], zoom: camera.zoom },
-        dirty: session?.dirty ?? new Map(),
-        activeLayerId: live.mode.activeLayerId ?? '',
+        local: {
+          dirty: session?.dirty ?? EMPTY_DIRTY,
+          exact: session?.exactCache ?? EMPTY_EXACT,
+          layerIds,
+          activeLayerId: live.mode.activeLayerId ?? '',
+        },
         ...(vertex ? { drag: dragContextFor(vertex) } : {}),
       });
 

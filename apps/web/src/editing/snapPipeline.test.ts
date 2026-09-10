@@ -12,19 +12,31 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueriedFeature } from './mapBridge.js';
 import type { Feature } from './session.js';
 import { MAX_PX, MIN_PX } from './snap.js';
+import type { SnapCandidate } from './snap.js';
 import {
   DEFAULT_SNAP_SETTINGS,
   createSnapEngine,
   tolerancesFor,
-  withDirty,
+  withLocal,
 } from './snapPipeline.js';
-import type { SnapDeps, SnapRequest, SnapSettings } from './snapPipeline.js';
+import type { LocalGeometry, SnapDeps, SnapRequest, SnapSettings } from './snapPipeline.js';
 
 /** A hundred pixels per degree, so every expected pixel is arithmetic. */
 const project = ([lng, lat]: [number, number]): [number, number] => [lng * 100, lat * 100];
 const unproject = ([x, y]: [number, number]): [number, number] => [x / 100, y / 100];
 
 const MIDLAND = { latitude: 31.99, zoom: 18 };
+
+/** The active layer's local geometry, empty unless a test fills it. */
+function local(overrides: Partial<LocalGeometry> = {}): LocalGeometry {
+  return {
+    dirty: new Map(),
+    exact: new Map(),
+    layerIds: ['leases'],
+    activeLayerId: 'leases',
+    ...overrides,
+  };
+}
 
 function line(id: string, coordinates: number[][], layerId = 'leases'): QueriedFeature {
   return { id, layer: { id: layerId }, geometry: { type: 'LineString', coordinates } };
@@ -62,8 +74,7 @@ function harness(
     request: (partial = {}) => ({
       pointer: { x: 0, y: 0 },
       camera: MIDLAND,
-      dirty: new Map(),
-      activeLayerId: 'leases',
+      local: local(),
       ...partial,
     }),
   };
@@ -105,72 +116,121 @@ describe('tolerancesFor', () => {
   });
 });
 
-describe('withDirty', () => {
+describe('withLocal', () => {
   const dirty = new Map<string, Feature | null>([
     ['moved', dirtyLine('moved', [[5, 5], [6, 6]])],
   ]);
 
+  const tile = (featureId: string, layerId = 'leases'): SnapCandidate => ({
+    featureId,
+    layerId,
+    rings: [[{ x: 0, y: 0 }]],
+  });
+
   it('replaces the tile copy of an edited feature', () => {
     // The tile copy is stale by definition. Snapping to it would put the new
     // boundary where the old one used to be — the sliver §6 exists to prevent.
-    const candidates = withDirty(
-      [
-        { featureId: 'moved', layerId: 'leases', rings: [[{ x: 0, y: 0 }]] },
-        { featureId: 'still', layerId: 'leases', rings: [[{ x: 1, y: 1 }]] },
-      ],
-      dirty,
-      'leases',
+    const candidates = withLocal(
+      [tile('moved'), tile('still')],
+      local({ dirty }),
       project,
     );
 
-    expect(candidates.map((candidate) => candidate.featureId)).toEqual(['still', 'moved']);
-    expect(candidates[1]!.rings[0]![0]).toEqual({ x: 500, y: 500 });
+    expect(candidates.map((candidate) => candidate.featureId)).toEqual(['moved', 'still']);
+    expect(candidates[0]!.rings[0]![0]).toEqual({ x: 500, y: 500 });
   });
 
-  it('marks dirty candidates exact', () => {
+  it('marks a dirty candidate exact', () => {
     // The local edit buffer is the exact geometry for a pending edit (§3.3);
     // there is nothing more authoritative to resolve it against.
-    const [candidate] = withDirty([], dirty, 'leases', project);
+    const [candidate] = withLocal([tile('moved')], local({ dirty }), project);
 
     expect(candidate!.exact).toBe(true);
+  });
+
+  it('replaces an untouched feature with the working set’s geometry', () => {
+    // §6.6 by lookup rather than coordinate matching: the working set *is* the
+    // exact geometry, so there is nothing to reconcile — and the indicator
+    // fills in, which is what `isExact` means to the user.
+    const candidates = withLocal(
+      [tile('parcel')],
+      local({ exact: new Map([['parcel', dirtyLine('parcel', [[7, 7], [8, 8]])]]) }),
+      project,
+    );
+
+    expect(candidates[0]!.exact).toBe(true);
+    expect(candidates[0]!.rings[0]![0]).toEqual({ x: 700, y: 700 });
+  });
+
+  it('leaves a feature outside the working set on its tile geometry', () => {
+    // Which is what a layer past the 5,000-feature cap looks like: drawn from
+    // tiles, snappable, and honestly reported as inexact.
+    const candidates = withLocal([tile('far-away')], local(), project);
+
+    expect(candidates[0]!.exact).toBeUndefined();
+    expect(candidates[0]!.rings[0]![0]).toEqual({ x: 0, y: 0 });
   });
 
   it('removes a pending delete from the candidate set', () => {
     // Immediately, rather than when the save lands: a feature the user has
     // deleted must stop pulling their cursor.
-    const candidates = withDirty(
-      [{ featureId: 'gone', layerId: 'leases', rings: [[{ x: 0, y: 0 }]] }],
-      new Map<string, Feature | null>([['gone', null]]),
-      'leases',
+    const candidates = withLocal(
+      [tile('gone')],
+      local({ dirty: new Map<string, Feature | null>([['gone', null]]) }),
       project,
     );
 
     expect(candidates).toEqual([]);
   });
 
-  it('drops the tile copy whatever layer it came back in', () => {
-    // A feature can be returned under a second layer id — a highlight layer
-    // over the same source. Keying the removal on the layer would leave the
-    // stale copy snappable through it.
-    const candidates = withDirty(
-      [{ featureId: 'moved', layerId: 'leases-highlight', rings: [[{ x: 0, y: 0 }]] }],
-      dirty,
-      'leases',
+  it('adds a dirty feature the tile query did not return', () => {
+    // A feature dragged out of the query box is still being edited, and
+    // losing it as a snap target mid-drag is the bug this covers.
+    const candidates = withLocal([], local({ dirty }), project);
+
+    expect(candidates.map((candidate) => candidate.featureId)).toEqual(['moved']);
+  });
+
+  it('leaves another layer’s feature 42 alone', () => {
+    // Ids are assigned per dataset, so layer A's feature 42 and layer B's
+    // feature 42 both exist. Substituting across layers would move a snap
+    // target onto a different feature entirely.
+    const candidates = withLocal(
+      [tile('moved', 'faults')],
+      local({ dirty }),
+      project,
+    );
+
+    const other = candidates.find((candidate) => candidate.layerId === 'faults');
+    expect(other!.rings[0]![0]).toEqual({ x: 0, y: 0 });
+    expect(other!.exact).toBeUndefined();
+  });
+
+  it('substitutes through a second layer over the same source', () => {
+    // A highlight layer drawn from the same source is one of the active
+    // layer's own, so its copy is stale in exactly the same way.
+    const candidates = withLocal(
+      [tile('moved', 'leases-highlight')],
+      local({ dirty, layerIds: ['leases', 'leases-highlight'] }),
       project,
     );
 
     expect(candidates).toHaveLength(1);
-    expect(candidates[0]!.layerId).toBe('leases');
+    expect(candidates[0]!.rings[0]![0]).toEqual({ x: 500, y: 500 });
   });
 
-  it('keeps going past a dirty geometry it cannot ring', () => {
-    const candidates = withDirty(
+  it('keeps going past a local geometry it cannot ring', () => {
+    const candidates = withLocal(
       [],
-      new Map<string, Feature | null>([
-        ['odd', { id: 'odd', geometry: { type: 'GeometryCollection', geometries: [] }, properties: {} }],
-        ['fine', dirtyLine('fine', [[1, 1], [2, 2]])],
-      ]),
-      'leases',
+      local({
+        dirty: new Map<string, Feature | null>([
+          [
+            'odd',
+            { id: 'odd', geometry: { type: 'GeometryCollection', geometries: [] }, properties: {} },
+          ],
+          ['fine', dirtyLine('fine', [[1, 1], [2, 2]])],
+        ]),
+      }),
       project,
     );
 

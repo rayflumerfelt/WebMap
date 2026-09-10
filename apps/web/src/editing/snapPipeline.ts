@@ -100,10 +100,8 @@ export interface CameraContext {
 export interface SnapRequest {
   pointer: Pixel;
   camera: CameraContext;
-  /** The active layer's pending edits. Deletes — `null` — remove a candidate
-   *  rather than leaving the tile copy snappable. */
-  dirty: ReadonlyMap<string, Feature | null>;
-  activeLayerId: string;
+  /** The active layer's local geometry — pending edits and the working set. */
+  local: LocalGeometry;
   drag?: DragContext | undefined;
 }
 
@@ -139,53 +137,106 @@ export interface SnapEngine {
   endDrag(): void;
 }
 
+/** The active layer's local geometry, which beats anything a tile says. */
+export interface LocalGeometry {
+  /** Pending edits. `null` is a delete. */
+  dirty: ReadonlyMap<string, Feature | null>;
+  /** The working set: the layer's exact geometry as the server holds it
+   *  (§17). Empty until it has been fetched. */
+  exact: ReadonlyMap<string, Feature>;
+  /** The style layers drawing the active layer. **Substitution is confined to
+   *  these**: feature ids are assigned per dataset, so layer A's feature 42
+   *  and layer B's feature 42 both exist, and replacing one with the other's
+   *  geometry would move a snap target onto a different feature entirely. */
+  layerIds: readonly string[];
+  /** The layer id the substituted candidates are reported under. */
+  activeLayerId: string;
+}
+
 /**
- * Dirty geometry substituted for tile geometry, and dirty features added.
+ * Local geometry substituted for tile geometry.
  *
- * Two rules, both §6.4:
+ * Three rules, §6.4 and §6.6:
  *
- * - A feature in the dirty buffer is **removed** from the tile-derived set
- *   whatever layer it came back in, then re-added from the buffer if it still
- *   exists. A pending delete therefore stops being a snap target immediately,
- *   rather than the moment the save lands.
- * - Dirty candidates are `exact: true`. The local edit buffer *is* the exact
- *   geometry for a pending edit (§3.3) — there is nothing more authoritative
- *   to resolve them against.
+ * - A feature in the **dirty buffer** replaces its tile copy, which is stale by
+ *   definition. A pending delete removes it outright, so it stops being a snap
+ *   target at once rather than when the save lands.
+ * - A feature in the **working set** replaces its tile copy too, and the
+ *   candidate is `exact: true`. That is §6.6's resolution, done by lookup
+ *   rather than by coordinate matching — the working set *is* the exact
+ *   geometry, so there is nothing to reconcile.
+ * - Both are confined to the active layer's own style layers. Anything else
+ *   keeps its tile geometry and stays `exact: false`.
  *
- * Every dirty feature is added, not only those near the pointer. A dirty buffer
- * holds one session's edits; testing them all costs less than the bookkeeping
- * to decide which are in range, and getting that bookkeeping wrong means a
- * vertex the user just moved silently stops being snappable.
+ * Every dirty feature is added whether or not the tile query returned it, and
+ * every local feature is projected: the working set is capped at 5,000
+ * features (§17), so this is bounded, and it runs once per drag rather than
+ * per frame because the caller caches it.
  */
-export function withDirty(
+export function withLocal(
   candidates: readonly SnapCandidate[],
-  dirty: ReadonlyMap<string, Feature | null>,
-  activeLayerId: string,
+  local: LocalGeometry,
   project: Project,
 ): SnapCandidate[] {
-  const kept = candidates.filter((candidate) => !dirty.has(candidate.featureId));
+  const mine = new Set(local.layerIds);
+  const replaced = new Set<string>();
 
-  for (const [id, feature] of dirty) {
-    if (feature === null) continue;
-    let rings;
-    try {
-      rings = ringsOf(feature.geometry as Geometry);
-    } catch {
-      // A geometry the model cannot ring is not a snap target. It is still a
-      // perfectly good edit — a GeometryCollection pasted in, say — so this
-      // must not take the rest of the pass down with it.
+  const kept: SnapCandidate[] = [];
+  for (const candidate of candidates) {
+    if (!mine.has(candidate.layerId)) {
+      kept.push(candidate);
       continue;
     }
-    if (rings.rings.length === 0) continue;
+    const feature = local.dirty.has(candidate.featureId)
+      ? local.dirty.get(candidate.featureId)
+      : local.exact.get(candidate.featureId);
+    if (feature === undefined) {
+      // Not local at all — a feature outside the working set, which happens
+      // whenever the layer is larger than the cap and drawn from tiles.
+      kept.push(candidate);
+      continue;
+    }
+    replaced.add(candidate.featureId);
+    const substituted = feature === null ? null : toCandidate(candidate.featureId, feature, local, project);
+    if (substituted) kept.push(substituted);
+  }
 
-    kept.push({
-      featureId: id,
-      layerId: activeLayerId,
-      rings: rings.rings.map((ring) => ring.map(([x, y]) => toPixel(project([x, y])))),
-      exact: true,
-    });
+  // Dirty features the tile query did not return: a feature dragged out of
+  // the query box is still being edited, and losing it as a snap target
+  // mid-drag is the bug this covers.
+  for (const [id, feature] of local.dirty) {
+    if (feature === null || replaced.has(id)) continue;
+    const candidate = toCandidate(id, feature, local, project);
+    if (candidate) kept.push(candidate);
   }
   return kept;
+}
+
+function toCandidate(
+  featureId: string,
+  feature: Feature,
+  local: LocalGeometry,
+  project: Project,
+): SnapCandidate | null {
+  let rings;
+  try {
+    rings = ringsOf(feature.geometry as Geometry);
+  } catch {
+    // A geometry the model cannot ring is not a snap target. It is still a
+    // perfectly good feature — a GeometryCollection pasted in, say — so this
+    // must not take the rest of the pass down with it.
+    return null;
+  }
+  if (rings.rings.length === 0) return null;
+
+  return {
+    featureId,
+    layerId: local.activeLayerId,
+    rings: rings.rings.map((ring) => ring.map(([x, y]) => toPixel(project([x, y])))),
+    // Dirty or exact, both are authoritative: the buffer is the exact geometry
+    // for a pending edit (§3.3) and the working set is the server's own.
+    exact: true,
+  };
 }
 
 function toPixel(point: [number, number]): Pixel {
@@ -257,10 +308,9 @@ export function createSnapEngine(deps: SnapDeps, getSettings: () => SnapSettings
         return { result: null, lngLat: raw, tolerance, candidateCount: 0 };
       }
 
-      let candidates = withDirty(
+      let candidates = withLocal(
         tileCandidates(request, tolerance),
-        request.dirty,
-        request.activeLayerId,
+        request.local,
         deps.project,
       );
 
