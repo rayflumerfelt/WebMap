@@ -147,3 +147,127 @@ describe('deleteVerticesCommand', () => {
     expect(() => deleteVerticesCommand(session(), [])).toThrow(/nothing to delete/);
   });
 });
+
+describe('topological propagation', () => {
+  /**
+   * Two squares sharing the boundary at x = 10 — adjacent leases, the case
+   * `09` §7 exists for.
+   */
+  const WEST: Feature = {
+    id: 'west',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+          [0, 0],
+        ],
+      ],
+    },
+    properties: {},
+  };
+
+  const EAST: Feature = {
+    id: 'east',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [10, 0],
+          [20, 0],
+          [20, 10],
+          [10, 10],
+          [10, 0],
+        ],
+      ],
+    },
+    properties: {},
+  };
+
+  function leases(): EditSession {
+    return openSession('leases', 1, [WEST, EAST]);
+  }
+
+  const cornerOfWest = { featureId: 'west', ring: 0, ordinal: 1 };
+
+  function ringOf(feature: Feature | null): number[][] {
+    return (feature!.geometry as { coordinates: number[][][] }).coordinates[0]!;
+  }
+
+  it('moves the neighbour’s coincident vertex with it', () => {
+    // Without this the neighbour keeps the old line and the gap between them
+    // is invisible until somebody runs Validate a week later.
+    const command = moveVertexCommand(leases(), cornerOfWest, [11, -1], {
+      topological: true,
+    });
+
+    expect(command.deltas).toHaveLength(2);
+    const east = command.deltas.find((delta) => delta.featureId === 'east')!;
+    expect(ringOf(east.after)[0]).toEqual([11, -1]);
+    // And its closing coordinate, because they are one vertex.
+    expect(ringOf(east.after).at(-1)).toEqual([11, -1]);
+  });
+
+  it('leaves the neighbour alone with the toggle off', () => {
+    // Off by default (§7): a geologist who has not asked for topology gets
+    // exactly the edit they made.
+    const command = moveVertexCommand(leases(), cornerOfWest, [11, -1]);
+
+    expect(command.deltas).toHaveLength(1);
+  });
+
+  it('says how many features moved, for the undo tooltip', () => {
+    const command = moveVertexCommand(leases(), cornerOfWest, [11, -1], {
+      topological: true,
+    });
+
+    expect(command.label).toBe('Move Vertex (2 features)');
+  });
+
+  it('does not propagate to a vertex that merely sits nearby', () => {
+    // §7.2: coincidence is an equality test at about a centimetre, not the
+    // snap tolerance. Reusing the snap radius is the mistake that moves an
+    // unrelated vertex twelve feet away.
+    const apart: Feature = {
+      ...EAST,
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [10.5, 0],
+            [20, 0],
+            [20, 10],
+            [10.5, 10],
+            [10.5, 0],
+          ],
+        ],
+      },
+    };
+
+    const command = moveVertexCommand(
+      openSession('leases', 1, [WEST, apart]),
+      cornerOfWest,
+      [11, -1],
+      { topological: true },
+    );
+
+    expect(command.deltas).toHaveLength(1);
+  });
+
+  it('propagates from where an earlier edit left the vertex', () => {
+    // The index is built over `current()`, so a second drag of the same corner
+    // finds the neighbour at the position the first drag moved it to — not at
+    // the one the session opened with.
+    const live = leases();
+    apply(live, moveVertexCommand(live, cornerOfWest, [11, -1], { topological: true }));
+
+    const second = moveVertexCommand(live, cornerOfWest, [12, -2], { topological: true });
+
+    expect(second.deltas).toHaveLength(2);
+    const east = second.deltas.find((delta) => delta.featureId === 'east')!;
+    expect(ringOf(east.after)[0]).toEqual([12, -2]);
+  });
+});

@@ -230,7 +230,11 @@ export function useMapEditing(options: MapEditingOptions): MapEditing {
           live.dispatch({ type: 'operationResolved' });
           if (!live.session) return;
           try {
-            live.applyCommand(moveVertexCommand(live.session, intent.vertex, lngLat));
+            live.applyCommand(
+              moveVertexCommand(live.session, intent.vertex, lngLat, {
+                topological: live.topologicalEditing,
+              }),
+            );
           } catch (error) {
             onError?.(error instanceof Error ? error.message : String(error));
           }

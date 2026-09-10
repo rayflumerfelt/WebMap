@@ -19,9 +19,12 @@
 import type { Geometry } from 'geojson';
 
 import { insertVertex, removeVertex, setVertex } from './geometryEdits.js';
+import { ringsOf } from './mapBridge.js';
 import type { SelectedVertex } from './overlay.js';
 import { current } from './session.js';
 import type { Command, EditSession, Feature, FeatureDelta } from './session.js';
+import { buildIndex, coincident, others, propagates } from './topology.js';
+import type { Position, VertexRef } from './topology.js';
 
 /** Ids exist to key the undo stack, so uniqueness is all they need. */
 function commandId(): string {
@@ -43,26 +46,116 @@ function delta(before: Feature, geometry: Geometry): FeatureDelta {
   return { featureId: before.id, before, after: { ...before, geometry } };
 }
 
-/** Move one vertex to a coordinate. The command a drag commits. */
+/**
+ * Move one vertex to a coordinate. The command a drag commits.
+ *
+ * With `topological` on, every vertex of the active layer coincident with the
+ * one being moved moves with it (`09` §7, `adr/0013`). That is the difference
+ * between editing a lease boundary and editing one side of it: without it the
+ * neighbour keeps the old line and the gap between them is invisible until
+ * somebody runs Validate a week later.
+ *
+ * **Coincidence is an equality test at 1 cm, not the snap tolerance** (§7.2).
+ * Reusing the snap radius here is the mistake that moves an unrelated vertex
+ * twelve feet away, so the index is built from the coordinate hash and nothing
+ * else.
+ */
 export function moveVertexCommand(
   session: EditSession,
   vertex: SelectedVertex,
   position: [number, number],
+  options: { topological?: boolean } = {},
 ): Command {
   const before = required(session, vertex.featureId, 'move a vertex');
-  const geometry = setVertex(
-    before.geometry as Geometry,
-    vertex.ring,
-    vertex.ordinal,
-    position,
-  );
+  const deltas = [
+    delta(before, setVertex(before.geometry as Geometry, vertex.ring, vertex.ordinal, position)),
+  ];
+
+  if (propagates('vertex.move', options.topological ?? false)) {
+    const origin = positionOf(before, vertex);
+    if (origin) {
+      for (const ref of others(coincident(indexOf(session), origin), toRef(vertex, before))) {
+        // A feature that cannot be read or moved is skipped rather than
+        // failing the drag: propagation is an addition to the edit the user
+        // asked for, and losing the whole move because a neighbour is
+        // malformed would be the worse trade.
+        const neighbour = current(session, ref.featureId);
+        if (!neighbour) continue;
+        try {
+          deltas.push(
+            delta(
+              neighbour,
+              setVertex(neighbour.geometry as Geometry, ref.ring, ref.ordinal, position),
+            ),
+          );
+        } catch {
+          continue;
+        }
+      }
+    }
+  }
 
   return {
     id: commandId(),
-    label: 'Move Vertex',
-    deltas: [delta(before, geometry)],
+    label: deltas.length === 1 ? 'Move Vertex' : `Move Vertex (${deltas.length} features)`,
+    deltas,
     timestamp: Date.now(),
   };
+}
+
+/** The coordinate a vertex currently sits at, in layer units. */
+function positionOf(feature: Feature, vertex: SelectedVertex): Position | null {
+  try {
+    return ringsOf(feature.geometry as Geometry).rings[vertex.ring]?.[vertex.ordinal] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function toRef(vertex: SelectedVertex, feature: Feature): VertexRef {
+  let ringLength = 0;
+  let closed = false;
+  try {
+    const rings = ringsOf(feature.geometry as Geometry);
+    closed = rings.closed;
+    const ring = rings.rings[vertex.ring];
+    ringLength = ring ? (closed ? ring.length - 1 : ring.length) : 0;
+  } catch {
+    // Left at zero: `others` compares ids, rings and ordinals only, so a
+    // ring length it could not determine changes nothing about the filter.
+  }
+  return { ...vertex, ringLength, closed };
+}
+
+/**
+ * The coincidence index over the session's **current** features.
+ *
+ * Built per command rather than cached, and that is a deliberate trade: a
+ * cache would have to be invalidated on every edit, every working-set arrival
+ * and every undo, and a stale coincidence index propagates a move onto a
+ * vertex that is no longer there. The working set is capped at 5,000 features
+ * (§17), which is the bound that makes rebuilding affordable.
+ */
+function indexOf(session: EditSession) {
+  const features: Array<{ featureId: string; rings: Position[][]; closed: boolean }> = [];
+  const seen = new Set<string>();
+
+  const add = (feature: Feature | null, id: string) => {
+    if (!feature || seen.has(id)) return;
+    seen.add(id);
+    try {
+      const rings = ringsOf(feature.geometry as Geometry);
+      features.push({ featureId: id, rings: rings.rings, closed: rings.closed });
+    } catch {
+      // Not indexable, not a propagation target. The edit itself still works.
+    }
+  };
+
+  // Dirty first, so an edited feature is indexed at where it is now rather
+  // than where the session found it.
+  for (const [id] of session.dirty) add(current(session, id), id);
+  for (const [id] of session.exactCache) add(current(session, id), id);
+  return buildIndex(features);
 }
 
 /** Add a vertex on a segment. Vertex-add mode's click. */
