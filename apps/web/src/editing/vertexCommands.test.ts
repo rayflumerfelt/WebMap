@@ -93,6 +93,109 @@ describe('addVertexCommand', () => {
   });
 });
 
+describe('addVertexCommand, topologically', () => {
+  // Two squares sharing the boundary from (10, 0) to (10, 10).
+  const WEST: Feature = {
+    id: 'west',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+          [0, 0],
+        ],
+      ],
+    },
+    properties: {},
+  };
+
+  const EAST: Feature = {
+    id: 'east',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [10, 0],
+          [20, 0],
+          [20, 10],
+          [10, 10],
+          [10, 0],
+        ],
+      ],
+    },
+    properties: {},
+  };
+
+  function ringOf(feature: Feature | null): number[][] {
+    return (feature!.geometry as { coordinates: number[][][] }).coordinates[0]!;
+  }
+
+  it('inserts into every feature sharing the edge', () => {
+    // §7.3 calls skipping this the classic half-implementation: it does not
+    // open a gap immediately, it guarantees one on the next drag.
+    const command = addVertexCommand(
+      openSession('leases', 1, [WEST, EAST]),
+      'west',
+      0,
+      1,
+      [10, 5],
+      { topological: true },
+    );
+
+    expect(command.deltas).toHaveLength(2);
+    expect(ringOf(command.deltas[0]!.after)).toHaveLength(6);
+    const east = command.deltas.find((delta) => delta.featureId === 'east')!;
+    expect(ringOf(east.after)).toContainEqual([10, 5]);
+    expect(ringOf(east.after).at(-1)).toEqual(ringOf(east.after)[0]);
+  });
+
+  it('inserts into one feature with the toggle off', () => {
+    const command = addVertexCommand(
+      openSession('leases', 1, [WEST, EAST]),
+      'west',
+      0,
+      1,
+      [10, 5],
+    );
+
+    expect(command.deltas).toHaveLength(1);
+  });
+
+  it('does not insert into a feature that shares only a corner', () => {
+    // Two polygons meeting at one point share a vertex and no edge, and
+    // inserting into both would move a boundary that is not there.
+    const corner: Feature = {
+      id: 'corner',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [10, 10],
+            [20, 10],
+            [20, 20],
+            [10, 10],
+          ],
+        ],
+      },
+      properties: {},
+    };
+
+    const command = addVertexCommand(
+      openSession('leases', 1, [WEST, corner]),
+      'west',
+      0,
+      1,
+      [10, 5],
+      { topological: true },
+    );
+
+    expect(command.deltas).toHaveLength(1);
+  });
+});
+
 describe('deleteVerticesCommand', () => {
   it('deletes descending, so the ordinals stay valid', () => {
     // Removing vertex 1 renumbers vertex 2. An ascending pass deletes the

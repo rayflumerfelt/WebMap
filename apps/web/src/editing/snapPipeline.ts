@@ -103,6 +103,22 @@ export interface SnapRequest {
   /** The active layer's local geometry — pending edits and the working set. */
   local: LocalGeometry;
   drag?: DragContext | undefined;
+  /**
+   * Settings for this pass only.
+   *
+   * Vertex-add needs an edge pass whether or not snapping is switched on
+   * (§11.6: "project onto the nearest edge of a selected feature"), and that
+   * is a different question from where the cursor should land while drawing.
+   */
+  override?: Partial<SnapSettings> | undefined;
+  /**
+   * Restrict candidates to these features.
+   *
+   * Also vertex-add: a click near a *neighbour's* boundary must not splice a
+   * vertex into the neighbour, because the feature the user selected is the
+   * one they are editing.
+   */
+  onlyFeatureIds?: readonly string[] | undefined;
 }
 
 export interface ToleranceReport {
@@ -275,9 +291,11 @@ export function createSnapEngine(deps: SnapDeps, getSettings: () => SnapSettings
   // for one box says nothing about another.
   let cached: SnapCandidate[] | null = null;
 
-  function tileCandidates(request: SnapRequest, tolerance: ToleranceReport): SnapCandidate[] {
-    const settings = getSettings();
-
+  function tileCandidates(
+    request: SnapRequest,
+    tolerance: ToleranceReport,
+    settings: SnapSettings,
+  ): SnapCandidate[] {
     if (request.drag) {
       if (cached === null) {
         // The whole viewport, once. A box around the pointer would have to be
@@ -300,7 +318,9 @@ export function createSnapEngine(deps: SnapDeps, getSettings: () => SnapSettings
       cached = null;
     },
     snapAt(request: SnapRequest): SnapOutcome {
-      const settings = getSettings();
+      const settings = request.override
+        ? { ...getSettings(), ...request.override }
+        : getSettings();
       const tolerance = tolerancesFor(settings, request.camera);
       const raw = deps.unproject([request.pointer.x, request.pointer.y]);
 
@@ -309,10 +329,15 @@ export function createSnapEngine(deps: SnapDeps, getSettings: () => SnapSettings
       }
 
       let candidates = withLocal(
-        tileCandidates(request, tolerance),
+        tileCandidates(request, tolerance, settings),
         request.local,
         deps.project,
       );
+
+      if (request.onlyFeatureIds) {
+        const wanted = new Set(request.onlyFeatureIds);
+        candidates = candidates.filter((candidate) => wanted.has(candidate.featureId));
+      }
 
       const drag = request.drag;
       if (drag && !settings.snapToSelf) {

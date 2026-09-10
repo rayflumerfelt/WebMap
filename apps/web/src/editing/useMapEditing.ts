@@ -38,7 +38,11 @@ import type { Feature } from './session.js';
 import type { Pixel, SnapResult } from './snap.js';
 import { createSnapEngine } from './snapPipeline.js';
 import type { DragContext, SnapDeps, ToleranceReport } from './snapPipeline.js';
-import { deleteVerticesCommand, moveVertexCommand } from './vertexCommands.js';
+import {
+  addVertexCommand,
+  deleteVerticesCommand,
+  moveVertexCommand,
+} from './vertexCommands.js';
 
 /** How close to a handle a press counts as being on it. Generous on purpose:
  *  §11.6 keeps the handle glyph small so it does not hide the geometry, and
@@ -251,6 +255,63 @@ export function useMapEditing(options: MapEditingOptions): MapEditing {
     [engine, onError, previewAt, runSnap],
   );
 
+  /**
+   * Vertex-add's click: project onto the nearest edge of a **selected**
+   * feature and splice at that segment (§11.6).
+   *
+   * The pass is forced to edge-only and to the selection, whatever the snap
+   * settings say. Where the cursor lands while adding a vertex is not the same
+   * question as whether snapping is switched on, and a click near a
+   * neighbour's boundary must not splice a vertex into the neighbour.
+   */
+  const addVertexAt = useCallback(
+    (point: Pixel) => {
+      const { store: live, view: camera, baseLayerIds: layerIds } = stateRef.current;
+      const session = live.session;
+      if (!session || live.mode.selectedFeatureIds.length === 0) return;
+
+      const outcome = engine.snapAt({
+        pointer: point,
+        camera: { latitude: camera.center[1], zoom: camera.zoom },
+        local: {
+          dirty: session.dirty,
+          exact: session.exactCache,
+          layerIds,
+          activeLayerId: live.mode.activeLayerId ?? '',
+        },
+        override: {
+          enabled: true,
+          vertex: false,
+          edge: true,
+          intersection: false,
+          midpoint: false,
+          layerIds,
+        },
+        onlyFeatureIds: live.mode.selectedFeatureIds,
+      });
+
+      const hit = outcome.result;
+      if (!hit || hit.ring === undefined || hit.segmentIndex === undefined) {
+        onError?.(
+          'Click on the boundary of the selected feature to add a vertex — ' +
+            'nothing editable was under the cursor.',
+        );
+        return;
+      }
+
+      try {
+        live.applyCommand(
+          addVertexCommand(session, hit.featureId, hit.ring, hit.segmentIndex, outcome.lngLat, {
+            topological: live.topologicalEditing,
+          }),
+        );
+      } catch (error) {
+        onError?.(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [engine, onError],
+  );
+
   const onMapPointer = useCallback(
     (event: MapPointerEvent) => {
       if (!enabledRef.current) return;
@@ -305,7 +366,12 @@ export function useMapEditing(options: MapEditingOptions): MapEditing {
         case 'click': {
           // Only when no gesture claimed the press: a drop is not a click on
           // whatever happened to be underneath.
-          if (gestureRef.current.kind !== 'idle' || vertexMode) return;
+          if (gestureRef.current.kind !== 'idle') return;
+          if (live.mode.mode === 'vertex-add') {
+            addVertexAt(point);
+            return;
+          }
+          if (vertexMode) return;
           const features = map.current?.queryFeatures(queryBox(point, HANDLE_HIT_PX), [
             ...stateRef.current.baseLayerIds,
           ]);
@@ -332,7 +398,7 @@ export function useMapEditing(options: MapEditingOptions): MapEditing {
         }
       }
     },
-    [engine, handleAt, map, onError, perform, runSnap, schedule],
+    [addVertexAt, engine, handleAt, map, onError, perform, runSnap, schedule],
   );
 
   const onEscape = useCallback(() => {

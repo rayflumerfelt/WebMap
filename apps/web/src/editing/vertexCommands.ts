@@ -23,7 +23,7 @@ import { ringsOf } from './mapBridge.js';
 import type { SelectedVertex } from './overlay.js';
 import { current } from './session.js';
 import type { Command, EditSession, Feature, FeatureDelta } from './session.js';
-import { buildIndex, coincident, others, propagates } from './topology.js';
+import { buildIndex, coincident, others, propagates, sharedEdges } from './topology.js';
 import type { Position, VertexRef } from './topology.js';
 
 /** Ids exist to key the undo stack, so uniqueness is all they need. */
@@ -158,23 +158,79 @@ function indexOf(session: EditSession) {
   return buildIndex(features);
 }
 
-/** Add a vertex on a segment. Vertex-add mode's click. */
+/**
+ * Add a vertex on a segment. Vertex-add mode's click.
+ *
+ * With `topological` on, the vertex is inserted into **every feature sharing
+ * that edge**, which §7.3 is emphatic about: skipping it is the classic
+ * half-implementation, because it does not open a gap immediately — it
+ * guarantees one on the next drag, and the gap is invisible until somebody
+ * runs Validate a week later.
+ *
+ * "Shares that edge" means both endpoints coincide, not one. Two polygons
+ * meeting at a single corner share a vertex and no edge, and inserting into
+ * both would move a boundary that is not there — which is `sharedEdges`'s
+ * whole job.
+ */
 export function addVertexCommand(
   session: EditSession,
   featureId: string,
   ring: number,
   segmentIndex: number,
   position: [number, number],
+  options: { topological?: boolean } = {},
 ): Command {
   const before = required(session, featureId, 'add a vertex');
-  const geometry = insertVertex(before.geometry as Geometry, ring, segmentIndex, position);
+  const deltas = [
+    delta(before, insertVertex(before.geometry as Geometry, ring, segmentIndex, position)),
+  ];
+
+  if (propagates('vertex.add', options.topological ?? false)) {
+    const rings = ringsOfOrNull(before);
+    const coordinates = rings?.rings[ring];
+    const start = coordinates?.[segmentIndex];
+    const end = coordinates?.[segmentIndex + 1];
+
+    if (start && end) {
+      for (const edge of sharedEdges(indexOf(session), start, end)) {
+        if (edge.featureId === featureId) continue;
+        const neighbour = current(session, edge.featureId);
+        if (!neighbour) continue;
+        try {
+          deltas.push(
+            delta(
+              neighbour,
+              insertVertex(
+                neighbour.geometry as Geometry,
+                edge.ring,
+                edge.afterOrdinal,
+                position,
+              ),
+            ),
+          );
+        } catch {
+          // Same trade as a propagating move: the edit the user asked for
+          // still lands.
+          continue;
+        }
+      }
+    }
+  }
 
   return {
     id: commandId(),
-    label: 'Add Vertex',
-    deltas: [delta(before, geometry)],
+    label: deltas.length === 1 ? 'Add Vertex' : `Add Vertex (${deltas.length} features)`,
+    deltas,
     timestamp: Date.now(),
   };
+}
+
+function ringsOfOrNull(feature: Feature): { rings: Position[][]; closed: boolean } | null {
+  try {
+    return ringsOf(feature.geometry as Geometry);
+  } catch {
+    return null;
+  }
 }
 
 /**

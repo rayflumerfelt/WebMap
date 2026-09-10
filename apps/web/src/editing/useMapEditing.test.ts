@@ -297,6 +297,71 @@ describe('double-click on a handle', () => {
   });
 });
 
+describe('vertex-add mode', () => {
+  function enterVertexAdd() {
+    const store = useEditStore.getState();
+    store.dispatch({ type: 'selectFeatures', ids: ['fault'] });
+    store.dispatch({ type: 'setMode', mode: 'vertex-add' });
+  }
+
+  it('splices a vertex into the segment under the click', () => {
+    // §11.6: project onto the nearest edge of a selected feature and splice at
+    // the correct segment index.
+    enterVertexAdd();
+    const { rendered } = setup();
+
+    act(() => rendered.result.current.onMapPointer(pointer('click', 50, 0) as never));
+
+    const geometry = useEditStore.getState().session!.dirty.get('fault')!.geometry as {
+      coordinates: number[][];
+    };
+    expect(geometry.coordinates).toEqual([
+      [0, 0],
+      [0.5, 0],
+      [1, 0],
+      [2, 0],
+    ]);
+  });
+
+  it('works with snapping switched off', () => {
+    // Where the cursor lands while adding a vertex is a different question
+    // from whether snapping is on, and a vertex-add that silently did nothing
+    // because of a toolbar toggle would read as a broken tool.
+    enterVertexAdd();
+    useEditStore.getState().setSnap({ enabled: false });
+    const { rendered } = setup();
+
+    act(() => rendered.result.current.onMapPointer(pointer('click', 50, 0) as never));
+
+    expect(useEditStore.getState().session!.dirty.size).toBe(1);
+  });
+
+  it('says so when the click was nowhere near the selected feature', () => {
+    enterVertexAdd();
+    const onError = vi.fn();
+    const { rendered } = setup({ onError });
+
+    act(() => rendered.result.current.onMapPointer(pointer('click', 50, 400) as never));
+
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/boundary of the selected/i));
+    expect(useEditStore.getState().session!.dirty.size).toBe(0);
+  });
+
+  it('does not splice into a feature the user did not select', () => {
+    // 'lease' is under the cursor and unselected; §11.6 adds to the selected
+    // feature, and adding to a neighbour would move a boundary the user is not
+    // editing.
+    enterVertexAdd();
+    const onError = vi.fn();
+    const { rendered } = setup({ onError });
+
+    act(() => rendered.result.current.onMapPointer(pointer('click', 300, 0) as never));
+
+    expect(useEditStore.getState().session!.dirty.has('lease')).toBe(false);
+    expect(onError).toHaveBeenCalled();
+  });
+});
+
 describe('when the editor is not the active tool', () => {
   it('ignores the pointer entirely', () => {
     // The map's pointer props are set once. A handler that stayed live would

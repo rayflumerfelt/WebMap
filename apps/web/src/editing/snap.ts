@@ -61,6 +61,11 @@ export interface SnapResult {
   featureId: string;
   layerId: string;
   vertexRef?: VertexRef;
+  /** For an edge or midpoint hit: which ring the segment is in, alongside the
+   *  segment's index within it. Both are needed to address the insertion point
+   *  of a vertex-add — a polygon with a hole has two rings, and a segment
+   *  index alone names a segment in each. */
+  ring?: number;
   segmentIndex?: number;
   /** False while still tile-derived. The indicator renders hollow until this
    *  is true and filled after — useful in development, harmless in production. */
@@ -245,6 +250,7 @@ function midpointPass(
             type: 'midpoint',
             featureId: candidate.featureId,
             layerId: candidate.layerId,
+            ring,
             segmentIndex: index,
             isExact: candidate.exact ?? false,
           };
@@ -297,6 +303,7 @@ function edgePass(
             type: 'edge',
             featureId: candidate.featureId,
             layerId: candidate.layerId,
+            ring,
             segmentIndex: index,
             isExact: candidate.exact ?? false,
           };
