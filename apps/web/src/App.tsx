@@ -17,13 +17,14 @@ import { AttributePanel } from './attributes/AttributePanel.js';
 import { editMapImages } from './editing/overlay.js';
 import { fetchWorkingSet } from './api/features.js';
 import { discardEdits, pendingCount, saveEdits } from './editing/persistence.js';
+import { useEditSurfaces } from './editing/useEditSurfaces.js';
 import { useMapEditing } from './editing/useMapEditing.js';
 import { ApiClient } from './api/client.js';
 import { cursorTransform } from './crs/analysisCrs.js';
 import { useShortcuts } from './keyboard/useShortcuts.js';
 import type { Command } from './keyboard/shortcuts.js';
 import { AppShell } from './shell/AppShell.js';
-import { StatusBar, scaleDenominatorFor } from './shell/StatusBar.js';
+import { StatusBar, formatCoordinate, scaleDenominatorFor } from './shell/StatusBar.js';
 import { Toolbar } from './shell/Toolbar.js';
 import type { ToolId } from './shell/Toolbar.js';
 import { DEFAULT_PREFS, loadPrefs, savePrefs } from './shell/panelPrefs.js';
@@ -290,6 +291,48 @@ export function App({
     return true;
   }, [api, datasetVersions, selectedLayer, tileTokenFor]);
 
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const surfaces = useEditSurfaces({
+    layers: layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      // Editability is a permission question the dataset answers; until the
+      // API says otherwise, a layer whose version is known is one the editor
+      // can open a session on.
+      canEdit: datasetVersions[layer.datasetId] !== undefined,
+    })),
+    activeLayerId: editLayerId,
+    onActiveLayer: (layerId) => {
+      useSessionStore.getState().select(layerId);
+      // Selecting is not activating: `startEditing` is what opens the session,
+      // and it needs the version and reports its own refusals.
+    },
+    onSave: () => void saveEditSession(),
+    onDiscard: () => {
+      const count = pendingCount();
+      if (count === 0) return;
+      const plural = count === 1 ? 'edit' : 'edits';
+      if (globalThis.confirm?.(`Discard ${count} unsaved ${plural}? This cannot be undone.`)) {
+        discardEdits();
+      }
+    },
+    cursor: cursor ? formatCoordinate(cursor, analysisUnit) : null,
+    crsLabel,
+    snap: editing.snap
+      ? {
+          type: editing.snap.type,
+          layerName:
+            layers.find((layer) => layer.id === editLayerId)?.name ?? editing.snap.layerId,
+          isExact: editing.snap.isExact,
+        }
+      : null,
+    snapClamped: editing.tolerance?.clamped ?? null,
+    onError: setEditError,
+    paletteOpen,
+    onPaletteOpenChange: setPaletteOpen,
+  });
+
   const legendSpec = useMemo<LegendSpec | null>(() => {
     if (!selectedLayer) return null;
     try {
@@ -317,6 +360,9 @@ export function App({
         case 'tool.identify':
         case 'tool.measure':
           setActiveTool(command);
+          return;
+        case 'command.palette':
+          setPaletteOpen(true);
           return;
         case 'session.save':
           void saveEditSession();
@@ -361,9 +407,11 @@ export function App({
   useShortcuts(runCommand);
 
   return (
+    <>
     <AppShell
       prefs={prefs}
       onPrefsChange={updatePrefs}
+      secondaryToolbar={activeTool === 'tool.edit' ? surfaces.toolbar : null}
       toolbar={
         <Toolbar
           projectName={projectName}
@@ -412,8 +460,13 @@ export function App({
           <div style={overlayCorner('top-right')}>
             <NorthArrow bearing={view.bearing ?? 0} />
           </div>
+          {activeTool === 'tool.edit' ? (
+            <div style={{ position: 'absolute', zIndex: 2, left: 8, top: 8 }}>
+              {surfaces.operationBar}
+            </div>
+          ) : null}
           {editError ? (
-            <div role="status" style={editBanner}>
+            <div role="status" aria-label="Editing notice" style={editBanner}>
               {editError}
               {editCount > 0 ? (
                 // §5.2 asks the user to save or discard, so the message that
@@ -483,6 +536,12 @@ export function App({
         ) : undefined
       }
       statusBar={
+        activeTool === 'tool.edit' ? (
+          // §10.4's strip replaces the status bar while editing rather than
+          // sitting beside it: both carry the cursor and the CRS, and two rows
+          // saying the same thing in different words is worse than either.
+          surfaces.statusStrip
+        ) : (
         <StatusBar
           crsLabel={crsLabel}
           cursor={cursor}
@@ -490,8 +549,13 @@ export function App({
           scaleDenominator={scaleDenominatorFor(view.center[1], view.zoom)}
           save={{ dirty, conflict, lastSavedAt }}
         />
+        )
       }
     />
+    {/* Modal, and outside the shell's grid: it covers the whole window and
+        `mod+k` opens it from anywhere, editing or not. */}
+    {surfaces.palette}
+    </>
   );
 }
 

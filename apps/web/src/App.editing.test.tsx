@@ -81,6 +81,51 @@ describe('the map props', () => {
   });
 });
 
+describe('the editing surfaces', () => {
+  it('shows none of them until the edit tool is active', () => {
+    render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+
+    expect(screen.queryByRole('toolbar', { name: 'Editing tools' })).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Editing status' })).toBeNull();
+  });
+
+  it('shows the edit toolbar and status strip once it is', () => {
+    // These four surfaces were built and tested and nothing rendered them,
+    // which left no way into vertex mode outside a test.
+    render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
+
+    expect(screen.getByRole('toolbar', { name: 'Editing tools' })).toBeDefined();
+    expect(screen.getByRole('status', { name: 'Editing status' })).toBeDefined();
+  });
+
+  it('replaces the status bar rather than sitting beside it', () => {
+    // Both carry the cursor and the CRS, and two rows saying the same thing in
+    // different words is worse than either.
+    render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
+
+    expect(screen.queryByRole('status', { name: 'Map status' })).toBeNull();
+  });
+
+  it('enters vertex mode from the toolbar', () => {
+    // The reason this container exists: the modes were reachable only from a
+    // test before it.
+    render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Vertex' }));
+
+    expect(useEditStore.getState().mode.mode).toBe('vertex');
+  });
+
+  it('opens the command palette on its shortcut', () => {
+    render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.keyDown(globalThis.document, { key: 'k', ctrlKey: true });
+
+    expect(screen.getByRole('dialog')).toBeDefined();
+  });
+});
+
 describe('the working set', () => {
   function apiReturning(payload: unknown, status = 200): ApiClient {
     return new ApiClient({
@@ -121,7 +166,7 @@ describe('the working set', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
 
     await waitFor(() =>
-      expect(screen.getByRole('status').textContent).toMatch(/42,000 features/),
+      expect(screen.getByRole('status', { name: 'Editing notice' }).textContent).toMatch(/42,000 features/),
     );
   });
 });
@@ -135,7 +180,7 @@ describe('starting an edit session', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
 
-    expect(screen.getByRole('status').textContent).toMatch(/dataset version has not loaded/i);
+    expect(screen.getByRole('status', { name: 'Editing notice' }).textContent).toMatch(/dataset version has not loaded/i);
     expect(useEditStore.getState().session).toBeNull();
   });
 
@@ -173,7 +218,7 @@ describe('starting an edit session', () => {
     render(<App datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
     fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
 
-    expect(screen.getByRole('status').textContent).toMatch(/unsaved edit/i);
+    expect(screen.getByRole('status', { name: 'Editing notice' }).textContent).toMatch(/unsaved edit/i);
     expect(useEditStore.getState().mode.activeLayerId).toBe('other');
   });
 
@@ -244,6 +289,6 @@ describe('starting an edit session', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
     fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
 
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Editing notice' })).toBeNull();
   });
 });

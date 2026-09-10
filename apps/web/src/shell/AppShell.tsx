@@ -29,6 +29,10 @@ import type { PanelKey, PanelPrefs } from './panelPrefs.js';
 
 export interface AppShellProps {
   toolbar: ReactNode;
+  /** A second bar under the main one — the edit toolbar of `09` §10.1, which
+   *  is present only while editing. The rows size to content, so its absence
+   *  costs nothing. */
+  secondaryToolbar?: ReactNode;
   layers: ReactNode;
   map: ReactNode;
   symbology: ReactNode;
@@ -62,12 +66,16 @@ export function AppShell(props: AppShellProps) {
       <div
         className="app-shell"
         style={{
-          gridTemplateRows: 'var(--toolbar-h, 44px) 1fr var(--statusbar-h, 24px)',
+          // `auto` rather than fixed heights: the bars size themselves, which
+          // is what lets a second one appear while editing without the map
+          // overflowing the viewport.
+          gridTemplateRows: 'auto auto 1fr auto',
           height: '100vh',
           overflow: 'hidden',
         }}
       >
         {props.toolbar}
+        {props.secondaryToolbar}
 
         <div style={{ display: 'flex', minHeight: 0, minWidth: 0 }}>
           <DockedPanel

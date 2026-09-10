@@ -67,7 +67,12 @@ const button: CSSProperties = {
   height: 'var(--control-h, 28px)',
   minWidth: 28,
   padding: '0 8px',
-  border: '1px solid #c9ccd1',
+  // Longhands rather than the `border` shorthand: `activeButton` overrides the
+  // colour alone, and React warns — rightly — that mixing the two makes the
+  // removed shorthand and the surviving longhand fight on a re-render.
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: '#c9ccd1',
   borderRadius: 3,
   background: '#fff',
   fontSize: 12,
