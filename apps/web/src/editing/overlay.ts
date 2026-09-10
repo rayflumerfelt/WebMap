@@ -20,10 +20,10 @@
  * - The indicator is **one point feature**, replaced wholesale each frame.
  */
 
-import type { EditOverlay } from '@webmap/map';
+import type { EditOverlay, MapImage } from '@webmap/map';
 import type { Feature as GeoJsonFeature, Geometry, Point } from 'geojson';
 
-import { indicatorIconId } from './icons.js';
+import { EDIT_ICONS, indicatorIconId } from './icons.js';
 import { ringsOf } from './mapBridge.js';
 import type { Feature } from './session.js';
 import type { SnapResult } from './snap.js';
@@ -242,3 +242,21 @@ export const EDIT_LAYERS: EditOverlay['layers'] = [
 
 /** The layer ids a hit test should ask for when looking for a handle. */
 export const HANDLE_LAYER_ID = 'edit-handles';
+
+/**
+ * The glyphs the overlay layers name, in the shape `WebMap`'s `images` prop
+ * takes.
+ *
+ * Passed to the map rather than added through `getMap()`, because a style
+ * change empties MapLibre's image registry and an `icon-image` naming an image
+ * that is not there renders nothing, with no error.
+ */
+export function editMapImages(): MapImage[] {
+  return EDIT_ICONS.map((icon) => ({
+    id: icon.id,
+    width: icon.image.width,
+    height: icon.image.height,
+    data: icon.image.data,
+    pixelRatio: icon.image.pixelRatio,
+  }));
+}

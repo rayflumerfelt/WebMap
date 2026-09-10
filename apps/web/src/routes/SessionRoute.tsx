@@ -139,6 +139,12 @@ export function SessionRoute({ shortCode, api: injected }: SessionRouteProps) {
         featureCounts={Object.fromEntries(
           session.data.layers.map((layer) => [layer.dataset_id, layer.dataset.feature_count]),
         )}
+        // What an edit session is opened against. `09` §5.3 puts optimistic
+        // concurrency on this pointer alone, so editing waits for it rather
+        // than assuming a version.
+        datasetVersions={Object.fromEntries(
+          session.data.layers.map((layer) => [layer.dataset_id, layer.dataset.version]),
+        )}
         projectName={project.data?.name ?? 'WebMap'}
         crsLabel={
           project.data

@@ -14,6 +14,8 @@ import { LayerTree, Legend, NorthArrow, ScaleBar } from '@webmap/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AttributePanel } from './attributes/AttributePanel.js';
+import { editMapImages } from './editing/overlay.js';
+import { useMapEditing } from './editing/useMapEditing.js';
 import { ApiClient } from './api/client.js';
 import { cursorTransform } from './crs/analysisCrs.js';
 import { useShortcuts } from './keyboard/useShortcuts.js';
@@ -27,7 +29,12 @@ import type { PanelKey, PanelPrefs } from './shell/panelPrefs.js';
 import { FormattingDialogContainer } from './symbology/FormattingDialogContainer.js';
 import { groupIntoFamilies } from './symbology/fontFamilies.js';
 import { usePalettes } from './api/sessions.js';
+import { useEditStore } from './stores/editStore.js';
 import { useSessionStore } from './stores/sessionStore.js';
+
+/** Built once: nine small RGBA buffers, and rebuilding them per render would
+ *  hand MapLibre a new image identity on every frame. */
+const EDIT_IMAGES = editMapImages();
 
 export interface AppProps {
   /** Injected so the shell is renderable without a live API — the session
@@ -52,6 +59,16 @@ export interface AppProps {
   /** Columns per dataset, for the formatting dialog's field pickers. From the
    *  dataset's registered `attribute_schema`. */
   attributeSchemas?: Record<string, Array<{ name: string; type: 'text' | 'number' }>>;
+  /**
+   * Dataset version per dataset id, from session metadata.
+   *
+   * Editing cannot start without it: `09` §5.3 puts optimistic concurrency on
+   * this pointer and nothing else, so a session opened against a guessed
+   * version would overwrite whatever another user saved in the meantime. A
+   * dataset missing from this map simply cannot be edited yet, and the tool
+   * says so rather than opening a session it cannot safely save.
+   */
+  datasetVersions?: Record<string, number>;
   /** Font **stack** names from `GET /static/glyphs` — grouped into families
    *  here, because a stack is what MapLibre asks for and a family is what a
    *  person picks. Injected rather than fetched so the shell renders with no
@@ -70,6 +87,7 @@ export function App({
   featureCounts = {},
   attributeSchemas = {},
   glyphStacks = [],
+  datasetVersions = {},
 }: AppProps = {}) {
   const layers = useSessionStore((state) => state.layers);
   const view = useSessionStore((state) => state.view);
@@ -146,6 +164,70 @@ export function App({
 
   const selectedLayer = layers.find((layer) => layer.id === selectedLayerId) ?? null;
 
+  // --- editing ---------------------------------------------------------------
+
+  const editLayerId = useEditStore((state) => state.mode.activeLayerId);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // The compiled layers drawing the layer being edited. `compileStyle` gives
+  // each session layer one source named after it and any number of layers on
+  // top — fill, line and labels are three — so the source is what identifies
+  // them, not the id prefix.
+  const editBaseLayerIds = useMemo(() => {
+    if (!editLayerId) return [];
+    return style.layers
+      .filter((layer) => 'source' in layer && layer.source === `src-${editLayerId}`)
+      .map((layer) => layer.id);
+  }, [style, editLayerId]);
+
+  const editing = useMapEditing({
+    map: mapRef,
+    baseLayerIds: editBaseLayerIds,
+    enabled: activeTool === 'tool.edit',
+    onError: setEditError,
+  });
+
+  /**
+   * Open an edit session on the selected layer.
+   *
+   * Refused without a dataset version: §5.3 puts optimistic concurrency on
+   * that pointer and nothing else, so a session opened against a guessed one
+   * would overwrite whatever somebody else saved in the meantime.
+   */
+  const startEditing = useCallback(() => {
+    const store = useEditStore.getState();
+    if (!selectedLayer) {
+      setEditError('Select a layer in the layer tree before editing.');
+      return false;
+    }
+    if (store.mode.activeLayerId === selectedLayer.id) return true;
+
+    const version = datasetVersions[selectedLayer.datasetId];
+    if (version === undefined) {
+      setEditError(
+        `'${selectedLayer.name}' cannot be edited yet: its dataset version has ` +
+          `not loaded. Editing needs it to detect a save someone else made first.`,
+      );
+      return false;
+    }
+
+    try {
+      store.activateLayer({
+        layerId: selectedLayer.id,
+        baseVersion: version,
+        geometry: null,
+        canEdit: true,
+      });
+    } catch (error) {
+      // Unsaved edits on another layer. §5.2 makes that the user's decision,
+      // so the message says so rather than discarding them.
+      setEditError(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+    setEditError(null);
+    return true;
+  }, [datasetVersions, selectedLayer]);
+
   const legendSpec = useMemo<LegendSpec | null>(() => {
     if (!selectedLayer) return null;
     try {
@@ -166,13 +248,19 @@ export function App({
     (command: Command) => {
       const store = useSessionStore.getState();
       switch (command) {
+        case 'tool.edit':
+          if (startEditing()) setActiveTool(command);
+          return;
         case 'tool.select':
         case 'tool.identify':
         case 'tool.measure':
-        case 'tool.edit':
           setActiveTool(command);
           return;
         case 'tool.cancel':
+          // The editor gets the press first: §4's two-press rule gives the
+          // first Escape to a drag in flight, and only the second leaves the
+          // tool.
+          if (editing.onEscape()) return;
           setActiveTool('tool.select');
           return;
         case 'panel.layers.toggle':
@@ -197,7 +285,7 @@ export function App({
           return;
       }
     },
-    [togglePanel],
+    [editing, startEditing, togglePanel],
   );
 
   useShortcuts(runCommand);
@@ -211,6 +299,11 @@ export function App({
           projectName={projectName}
           sessionName={sessionName}
           activeTool={activeTool}
+          // The edit tool needs something to edit. Permission is a separate
+          // question the session's dataset metadata answers, and the store's
+          // `canEdit` carries it once a session is open — greying the tool for
+          // an unselected layer is what stops the first click being a refusal.
+          canEdit={selectedLayer !== null}
           onCommand={runCommand}
         />
       }
@@ -234,6 +327,8 @@ export function App({
             view={view}
             layerMeta={{}}
             ariaLabel={`Map of ${projectName}`}
+            images={EDIT_IMAGES}
+            onMapPointer={editing.onMapPointer}
             onViewChange={(next) => useSessionStore.getState().setView(next)}
             onPointerMove={(lngLat) =>
               setCursor(lngLat && toAnalysisCrs ? toAnalysisCrs(lngLat) : null)
@@ -247,6 +342,14 @@ export function App({
           <div style={overlayCorner('top-right')}>
             <NorthArrow bearing={view.bearing ?? 0} />
           </div>
+          {editError ? (
+            <div role="status" style={editBanner}>
+              {editError}
+              <button type="button" onClick={() => setEditError(null)} style={dismiss}>
+                Dismiss
+              </button>
+            </div>
+          ) : null}
           {legendSpec ? (
             <div style={overlayCorner('bottom-right')}>
               <Legend spec={legendSpec} />
@@ -299,6 +402,36 @@ export function App({
     />
   );
 }
+
+/** A refused edit, above the map. Not a toast: the reasons here are things the
+ *  user has to act on — save the other layer, wait for metadata — and a message
+ *  that vanishes on its own is one they will act on twice. */
+const editBanner: React.CSSProperties = {
+  position: 'absolute',
+  zIndex: 2,
+  top: 8,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  maxWidth: 640,
+  padding: '6px 10px',
+  borderRadius: 3,
+  border: '1px solid #d9a441',
+  background: '#fdf6e3',
+  fontSize: 12,
+  color: '#4a3c1a',
+};
+
+const dismiss: React.CSSProperties = {
+  border: 0,
+  background: 'transparent',
+  color: '#7a5c12',
+  cursor: 'pointer',
+  fontSize: 12,
+  textDecoration: 'underline',
+};
 
 function overlayCorner(corner: 'bottom-left' | 'bottom-right' | 'top-right'): React.CSSProperties {
   const base: React.CSSProperties = { position: 'absolute', zIndex: 1, pointerEvents: 'none' };
