@@ -33,6 +33,8 @@ from webmap_geo.faults.raster import blocked_edges, compartments, control_per_co
 from webmap_geo.grid import GridDefinition
 from webmap_geo.interpolate.kriging import cross_validate, ordinary_kriging
 from webmap_geo.interpolate.minimum_curvature import minimum_curvature
+from webmap_geo.interpolate.spline import spline
+from webmap_geo.interpolate.universal import universal_kriging
 from webmap_geo.variogram.fit import fit_auto
 from webmap_geo.variogram.model import FittedVariogram
 
@@ -46,7 +48,9 @@ OVERSHOOT_WARNING = 0.2
 
 class Method(StrEnum):
     ORDINARY_KRIGING = "ordinary_kriging"
+    UNIVERSAL_KRIGING = "universal_kriging"
     MINIMUM_CURVATURE = "minimum_curvature"
+    CUBIC_SPLINE = "cubic_spline"
     IDW = "idw"
     NEAREST = "nearest"
 
@@ -98,6 +102,9 @@ def interpolate(
     max_radius: float | None = None,
     tension: float = 0.0,
     idw_power: float = 2.0,
+    drift_order: int = 1,
+    kernel: str = "thin_plate_spline",
+    smoothing: float = 0.0,
     rng: np.random.Generator | None = None,
 ) -> InterpolationResult:
     """Grid `values` at `points`, with diagnostics.
@@ -187,6 +194,91 @@ def interpolate(
         }
         lineage["n_neighbors"] = n_neighbors
         lineage["max_radius"] = max_radius if max_radius is not None else variogram.range_
+
+    elif method is Method.UNIVERSAL_KRIGING:
+        if hard:
+            # Same Euclidean distance as ordinary kriging, same sentence. A
+            # drift term changes what the *mean* does across the map; it does
+            # nothing about a discontinuity in it.
+            warnings.append(
+                f"{len(hard)} hard constraint(s) were supplied but universal "
+                f"kriging does not honour them — it measures distance in a "
+                f"straight line, so the surface is continuous across every "
+                f"fault. Use minimum_curvature for a fault-aware surface, or "
+                f"remove the constraints to acknowledge the choice."
+            )
+        if variogram is None:
+            variogram = fit_auto(coords, z, rng=rng)
+        universal = universal_kriging(
+            coords,
+            z,
+            grid,
+            variogram,
+            drift_order=drift_order,
+            n_neighbors=n_neighbors,
+            max_radius=max_radius,
+        )
+        surface = universal.estimate
+        variance = universal.variance
+        lineage["variogram"] = {
+            "model": variogram.model,
+            "nugget": variogram.nugget,
+            "sill": variogram.sill,
+            "range": variogram.range_,
+            "anisotropy_ratio": variogram.anisotropy_ratio,
+            "anisotropy_angle": variogram.anisotropy_angle,
+            "describe": variogram.describe(),
+        }
+        lineage["drift_order"] = drift_order
+        lineage["n_neighbors"] = n_neighbors
+        lineage["max_radius"] = max_radius if max_radius is not None else variogram.range_
+        if variogram.model == "power" and drift_order == 0:
+            # A power variogram means the mean is not constant, which is the
+            # condition universal kriging exists for — and order 0 turns it
+            # back into ordinary kriging, quietly.
+            warnings.append(
+                "The variogram fitted a power model, which means the mean varies "
+                "across the map — but drift_order is 0, which assumes it does "
+                "not. Raise it to 1 for a plane, or use ordinary kriging and "
+                "accept the assumption knowingly."
+            )
+
+    elif method is Method.CUBIC_SPLINE:
+        if hard:
+            warnings.append(
+                f"{len(hard)} hard constraint(s) were supplied but a spline does "
+                f"not honour them. It is the *worst* method at a fault: its "
+                f"smoothness constraint actively resists the discontinuity, so "
+                f"throw is smeared into a ramp. Use minimum_curvature."
+            )
+        fitted = spline(
+            coords,
+            z,
+            grid,
+            kernel=kernel,
+            smoothing=smoothing,
+            n_neighbors=n_neighbors,
+            max_radius=max_radius,
+        )
+        surface = fitted.estimate
+        lineage["kernel"] = fitted.kernel
+        lineage["smoothing"] = smoothing
+        lineage["n_neighbors"] = n_neighbors
+        lineage["overshoot"] = fitted.overshoot
+        if fitted.overshoots_badly:
+            # `05` §6.4's rule, measured rather than assumed. This is the one
+            # thing this method does that the others do not, so it is said in
+            # the method's own terms rather than left to the generic overshoot
+            # check below.
+            warnings.append(
+                f"The spline's output range is {fitted.overshoot:.0%} wider than "
+                f"the input range ({fitted.output_range[0]:,.4g} to "
+                f"{fitted.output_range[1]:,.4g}, against control from "
+                f"{fitted.input_range[0]:,.4g} to {fitted.input_range[1]:,.4g}). "
+                f"A radial basis function must bend to reach every point, and "
+                f"between two close points at different values it swings past "
+                f"both. Raise `smoothing`, or use minimum curvature."
+            )
 
     elif method is Method.MINIMUM_CURVATURE:
         curvature = minimum_curvature(coords, z, grid, tension=tension, blocked_edges=blocked)

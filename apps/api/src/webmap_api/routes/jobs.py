@@ -73,7 +73,17 @@ class InterpolateRequest(WebMapModel):
     dataset_id: UUID
     value_column: str
     project_id: UUID | None = None
-    method: str = "ordinary_kriging"
+    method: Literal[
+        "ordinary_kriging",
+        "universal_kriging",
+        "minimum_curvature",
+        "cubic_spline",
+        "idw",
+        "nearest",
+    ] = "ordinary_kriging"
+    drift_order: int = Field(1, ge=0, le=2)
+    kernel: Literal["thin_plate_spline", "cubic", "quintic", "linear"] = "thin_plate_spline"
+    smoothing: float = Field(0.0, ge=0.0)
     cell_size: float | None = Field(default=None, gt=0)
     bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
     fault_dataset_id: UUID | None = None
@@ -98,6 +108,9 @@ class InterpolateRequest(WebMapModel):
             max_radius=self.max_radius,
             tension=self.tension,
             idw_power=self.idw_power,
+            drift_order=self.drift_order,
+            kernel=self.kernel,
+            smoothing=self.smoothing,
             output_name=self.output_name,
             visibility=self.visibility,
             owner_team_id=self.owner_team_id,

@@ -319,9 +319,11 @@ fault is gridded with it.
 - [x] Filled bands measure the area between their levels — checked against a closed form on a
       cone, and sitting exactly under the contours drawn over them
 
-**Still owed by Phase 4:** universal kriging and cubic spline (`Method` has four members:
-ordinary kriging, minimum curvature, IDW, nearest); breakline-aware interpolation;
+**Still owed by Phase 4:** breakline-aware interpolation;
 and the worker's ingest, sync and export tasks.
+
+**Universal kriging and cubic spline are done** (`05` §6.2, §6.4). `Method` now has six
+members, all reachable from `webmap_interpolate`.
 
 **The aggregation catalog is done** (`05` §8): fifteen operations in `webmap_geo.aggregate`,
 a job, `POST /api/v1/jobs/aggregate`, and `webmap_aggregate`. **`webmap_fit_variogram` is

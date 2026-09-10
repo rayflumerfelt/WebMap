@@ -90,6 +90,16 @@ class GridRequest:
     max_radius: float | None = None
     tension: float = 0.0
     idw_power: float = 2.0
+    #: Universal kriging only. 1 is a plane through each neighbourhood, which
+    #: is what a dipping surface needs; 0 reduces exactly to ordinary kriging.
+    drift_order: int = 1
+    #: Cubic spline only. Every offered kernel is scale-invariant — see
+    #: `webmap_geo.interpolate.spline.KERNELS` for why the others are not here.
+    kernel: str = "thin_plate_spline"
+    #: Cubic spline only. 0 interpolates every control point exactly; raising
+    #: it trades exactness for a calmer surface, which is the right trade on
+    #: noisy data.
+    smoothing: float = 0.0
     where: str | None = None
     output_name: str | None = None
     visibility: Visibility = Visibility.TEAM
@@ -109,6 +119,9 @@ class GridRequest:
             "max_radius": self.max_radius,
             "tension": self.tension,
             "idw_power": self.idw_power,
+            "drift_order": self.drift_order,
+            "kernel": self.kernel,
+            "smoothing": self.smoothing,
             "where": self.where,
             "output_name": self.output_name,
             "visibility": self.visibility.value,
@@ -135,6 +148,9 @@ class GridRequest:
             max_radius=parameters.get("max_radius"),
             tension=parameters.get("tension", 0.0),
             idw_power=parameters.get("idw_power", 2.0),
+            drift_order=parameters.get("drift_order", 1),
+            kernel=parameters.get("kernel", "thin_plate_spline"),
+            smoothing=parameters.get("smoothing", 0.0),
             where=parameters.get("where"),
             output_name=parameters.get("output_name"),
             visibility=Visibility(parameters.get("visibility", "team")),

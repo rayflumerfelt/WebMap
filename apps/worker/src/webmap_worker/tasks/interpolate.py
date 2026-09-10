@@ -121,6 +121,9 @@ async def _run(
         max_radius=request.max_radius,
         tension=request.tension,
         idw_power=request.idw_power,
+        drift_order=request.drift_order,
+        kernel=request.kernel,
+        smoothing=request.smoothing,
         # `CLAUDE.md` §3.3: an explicit generator, seeded from the job id so
         # the same job re-run reproduces its own cross-validation split rather
         # than a different one that reports a different RMSE.

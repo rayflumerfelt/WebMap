@@ -476,6 +476,46 @@ distance carries a bias of its own.
 That leaves compartment restriction as the natural design if kriging is made fault-aware
 later. It is not implemented today, and this section does not describe it as though it were.
 
+#### Universal kriging
+
+```python
+# python/webmap_geo/src/webmap_geo/interpolate/universal.py
+
+def universal_kriging(
+    points, values, grid, variogram, *, drift_order=1, n_neighbors=48, max_radius=None
+) -> KrigingResult:
+```
+
+Ordinary kriging assumes the mean is constant — unknown, but the same everywhere within a
+neighbourhood. **A structure map across a dipping basin violates that**, and the variogram says
+so: `fit` returns a `power` model with no sill, which is the signature of semivariance rising
+without bound. Under a constant-mean assumption ordinary kriging then pulls toward a local mean
+that is not the right one, and understates its own uncertainty away from control.
+
+Universal kriging estimates the trend and the residual **together**, in one system per node:
+
+```
+[ C   F ] [ w ]   [ c  ]
+[ Fᵀ  0 ] [ μ ] = [ f0 ]
+```
+
+`F` is the polynomial drift basis at the neighbours and `f0` at the node. The lower block is
+what makes the estimator unbiased *for a mean that varies*: the weights must reproduce every
+drift function exactly rather than merely summing to one.
+
+**With `drift_order=0` this reduces exactly to ordinary kriging**, and a test asserts the two
+agree to floating point on identical input rather than "closely" — a covariance bug in either
+would otherwise hide behind a smooth, plausible surface.
+
+Two consequences worth knowing. Coordinates are **centred and scaled** before the drift basis
+is built: an unshifted state-plane easting squared is 9e12 against a covariance of order 1e4,
+and the resulting condition number makes the solve meaningless without making it fail. And the
+UK variance is never below the OK variance at the same node — the drift terms enter with a
+positive sign, because a mean that is estimated rather than assumed is less certain.
+
+It is **not fault-aware**. A drift term changes what the mean does across the map; it does
+nothing about a discontinuity in it.
+
 ### 6.3 Variogram fitting
 
 Kriging without variogram analysis is kriging with made-up parameters. Both an automatic path
@@ -564,9 +604,28 @@ def fit(
 
 ### 6.4 Cubic spline and the rest
 
-- **Cubic spline** — `scipy.interpolate.RBFInterpolator` with a thin-plate or cubic kernel on
-  the constrained mesh vertices, then mesh sampling. Fast, smooth, can overshoot; warn when
-  output range exceeds input range by more than 20%.
+- **Cubic spline** — `scipy.interpolate.RBFInterpolator` with a neighbour count, so the
+  otherwise-global system becomes a local solve per node (the same intractability the moving
+  neighbourhood in §6.2 avoids). Fast, very smooth, and it **overshoots** — which is the whole
+  story of the method rather than a defect to tune away. An RBF that honours every point must
+  bend to reach them, and between two close points at different values it swings past both: on
+  a porosity map that is negative porosity, on a structure map a dome nobody logged. The
+  overshoot is **measured** against the input range and warned above 20%, in the method's own
+  terms.
+
+  Every offered kernel is **scale-invariant** — thin-plate, cubic, quintic, linear. The
+  Gaussian-family kernels are not offered because SciPy requires an explicit `epsilon` for
+  them, and epsilon is in the coordinate system's units: a value that works on a UTM layer in
+  metres is wrong by a factor of three on the same ground in feet, and there is no honest
+  default. A parametrised test found `multiquadric` listed and unusable for exactly that reason.
+
+  Coincident control points are **averaged** before the solve. Two picks at one surface
+  location is a real thing; kriging survives it because its solver falls back to the nearest
+  value, and `RBFInterpolator` has no such fallback — it raises on the singular system.
+
+  Without a search radius an RBF extrapolates to the corners, and it extrapolates *badly*: a
+  thin-plate spline grows without bound away from its data. Nodes beyond `max_radius` are
+  masked rather than drawn with the same confidence as the middle.
 - **IDW** — trivial, and Euclidean like kriging: it does not honour barriers.
   Produces bull's-eyes; offer it, do not default to it.
 - **Nearest** — diagnostic only. Useful for checking data coverage.

@@ -314,20 +314,63 @@ async def webmap_interpolate(
         ),
     ] = None,
     method: Annotated[
-        Literal["ordinary_kriging", "minimum_curvature", "idw", "nearest"],
+        Literal[
+            "ordinary_kriging",
+            "universal_kriging",
+            "minimum_curvature",
+            "cubic_spline",
+            "idw",
+            "nearest",
+        ],
         Field(
             "ordinary_kriging",
             description=(
                 "ordinary_kriging: best general choice; models spatial "
-                "correlation and gives uncertainty. minimum_curvature: smooth "
-                "surface honouring all data points, the Surfer default and what "
-                "geologists usually expect for structure maps, and the only "
-                "method here that honours faults. idw: fast and robust, produces "
-                "bull's-eyes around control points. nearest: diagnostic only - "
-                "use it to see where control exists, not to contour."
+                "correlation and gives uncertainty, and assumes the mean is "
+                "locally constant. "
+                "universal_kriging: ordinary kriging plus a trend term, for a "
+                "surface that dips across the map - use it when "
+                "webmap_fit_variogram reports a power model, which means the "
+                "mean is not constant. "
+                "minimum_curvature: smooth surface honouring all data points, "
+                "the Surfer default and what geologists usually expect for "
+                "structure maps, and the only method here that honours faults. "
+                "cubic_spline: very smooth radial basis function, which "
+                "overshoots - it must bend to reach every point, so it can "
+                "invent values outside the observed range, and the job warns "
+                "when it does. "
+                "idw: fast and robust, produces bull's-eyes around control "
+                "points. nearest: diagnostic only - use it to see where control "
+                "exists, not to contour."
             ),
         ),
     ] = "ordinary_kriging",
+    drift_order: Annotated[
+        int,
+        Field(
+            1,
+            ge=0,
+            le=2,
+            description=(
+                "universal_kriging only. 1 fits a plane through each "
+                "neighbourhood, which is what a dipping surface needs. 0 is "
+                "exactly ordinary kriging. 2 is a quadratic and extrapolates "
+                "violently past the last control point."
+            ),
+        ),
+    ] = 1,
+    smoothing: Annotated[
+        float,
+        Field(
+            0.0,
+            ge=0.0,
+            description=(
+                "cubic_spline only. 0 passes through every control point "
+                "exactly. Raise it on noisy data - an exact fit through "
+                "measurement error reproduces the error as structure."
+            ),
+        ),
+    ] = 0.0,
     fault_dataset_id: Annotated[
         UUID | None,
         Field(
@@ -447,6 +490,8 @@ async def webmap_interpolate(
                 "n_neighbors": n_neighbors,
                 "max_radius": max_radius,
                 "tension": tension,
+                "drift_order": drift_order,
+                "smoothing": smoothing,
             }
         ),
     )
