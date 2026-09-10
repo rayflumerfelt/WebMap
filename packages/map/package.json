@@ -26,14 +26,15 @@
     "react": "^19.0.0"
   },
   "devDependencies": {
-    "@types/react": "^19.0.7",
-    "react": "^19.0.0",
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.2",
-    "@testing-library/react": "^16.2.0",
     "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.2.0",
+    "@types/geojson": "^7946.0.16",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
     "jsdom": "^26.0.0",
+    "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@types/react-dom": "^19.0.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.2"
   }
 }

@@ -29,6 +29,20 @@ interface FakeMap {
   queryRenderedFeatures: ReturnType<typeof vi.fn>;
   triggerRepaint: ReturnType<typeof vi.fn>;
   getCanvas: ReturnType<typeof vi.fn>;
+  project: ReturnType<typeof vi.fn>;
+  unproject: ReturnType<typeof vi.fn>;
+  addSource: ReturnType<typeof vi.fn>;
+  removeSource: ReturnType<typeof vi.fn>;
+  getSource: ReturnType<typeof vi.fn>;
+  addLayer: ReturnType<typeof vi.fn>;
+  removeLayer: ReturnType<typeof vi.fn>;
+  getLayer: ReturnType<typeof vi.fn>;
+  getFilter: ReturnType<typeof vi.fn>;
+  setFilter: ReturnType<typeof vi.fn>;
+  setData: ReturnType<typeof vi.fn>;
+  sources: Set<string>;
+  layers: Set<string>;
+  filters: Map<string, unknown>;
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
   once: ReturnType<typeof vi.fn>;
@@ -51,8 +65,35 @@ function makeFakeMap(options: Record<string, unknown>): FakeMap {
     pitch: (options.pitch as number) ?? 0,
   };
 
+  const sources = new Set<string>();
+  const layers = new Set<string>(['contours', 'leases']);
+  const filters = new Map<string, unknown>([['contours', ['get', 'is_index']]]);
+  const setData = vi.fn();
+
   const map: FakeMap = {
     camera,
+    sources,
+    layers,
+    filters,
+    setData,
+    // A fixed 100 px per degree, so a projected coordinate is arithmetic a
+    // reader can check rather than a Mercator value they have to trust.
+    project: vi.fn((lngLat: [number, number]) => ({
+      x: lngLat[0] * 100,
+      y: lngLat[1] * 100,
+    })),
+    unproject: vi.fn((point: [number, number]) => ({
+      lng: point[0] / 100,
+      lat: point[1] / 100,
+    })),
+    addSource: vi.fn((id: string) => sources.add(id)),
+    removeSource: vi.fn((id: string) => sources.delete(id)),
+    getSource: vi.fn((id: string) => (sources.has(id) ? { setData } : undefined)),
+    addLayer: vi.fn((layer: { id: string }) => layers.add(layer.id)),
+    removeLayer: vi.fn((id: string) => layers.delete(id)),
+    getLayer: vi.fn((id: string) => (layers.has(id) ? { id } : undefined)),
+    getFilter: vi.fn((id: string) => filters.get(id)),
+    setFilter: vi.fn((id: string, filter: unknown) => filters.set(id, filter)),
     setStyle: vi.fn(),
     jumpTo: vi.fn((view: MapView) => {
       camera.center = view.center;
@@ -380,5 +421,156 @@ describe('accessibility', () => {
     const element = container.querySelector('[role="application"]')!;
     expect(element.getAttribute('tabindex')).toBe('0');
     expect(element.getAttribute('aria-label')).toBe('Map of Wolfcamp A structure');
+  });
+});
+
+// --- what editing needs from the map ----------------------------------------
+
+describe('projection', () => {
+  it('hands back plain tuples rather than MapLibre points', () => {
+    // The snapping engine is written in pixels and imports no MapLibre
+    // (`09` §6.1). A handle that returned `maplibregl.Point` would drag the
+    // dependency into every module that touches a coordinate.
+    const ref = createRef<WebMapHandle>();
+    render(<WebMap ref={ref} style={STYLE} layerMeta={{}} initialView={MIDLAND} />);
+
+    expect(ref.current!.project([-102.08, 31.99])).toEqual([-10208, 3199]);
+    expect(ref.current!.unproject([-10208, 3199])).toEqual([-102.08, 31.99]);
+  });
+});
+
+describe('feature queries', () => {
+  it('passes a box through, which is what snapping asks for', () => {
+    // `09` §6.1 expands the pointer by the larger tolerance and queries once,
+    // rather than testing every segment in view.
+    const ref = createRef<WebMapHandle>();
+    render(<WebMap ref={ref} style={STYLE} layerMeta={{}} initialView={MIDLAND} />);
+
+    ref.current!.queryFeatures(
+      [
+        [10, 20],
+        [30, 40],
+      ],
+      ['leases'],
+    );
+
+    expect(latest().queryRenderedFeatures).toHaveBeenCalledWith(
+      [
+        [10, 20],
+        [30, 40],
+      ],
+      { layers: ['leases'] },
+    );
+  });
+});
+
+describe('the edit overlay', () => {
+  const FEATURE: GeoJSON.Feature = {
+    type: 'Feature',
+    id: 'lease-1',
+    geometry: { type: 'Point', coordinates: [-102.08, 31.99] },
+    properties: {},
+  };
+
+  const LAYERS = [
+    { id: 'edit-points', type: 'circle', source: 'will-be-overwritten' },
+  ] as never[];
+
+  function mounted() {
+    const ref = createRef<WebMapHandle>();
+    render(<WebMap ref={ref} style={STYLE} layerMeta={{}} initialView={MIDLAND} />);
+    return ref.current!;
+  }
+
+  it('adds the source and layers once, then only pushes data', () => {
+    // Re-adding layers per frame would drop and rebuild their GPU buffers,
+    // which is the entire cost this arrangement exists to avoid.
+    const handle = mounted();
+    const map = latest();
+
+    handle.setEditOverlay({ features: [FEATURE], layers: LAYERS });
+    handle.setEditOverlay({ features: [FEATURE], layers: LAYERS });
+    handle.setEditOverlay({ features: [FEATURE], layers: LAYERS });
+
+    expect(map.addSource).toHaveBeenCalledTimes(1);
+    expect(map.addLayer).toHaveBeenCalledTimes(1);
+    expect(map.setData).toHaveBeenCalledTimes(2);
+  });
+
+  it('overwrites the layer source rather than trusting the caller', () => {
+    // A caller pointing an overlay layer at a tile source it is about to
+    // filter would hide the very edit it is trying to show.
+    const handle = mounted();
+    handle.setEditOverlay({ features: [FEATURE], layers: LAYERS });
+
+    expect(latest().addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'edit-points', source: 'webmap-edit-overlay' }),
+    );
+  });
+
+  it('hides the stale tile copy of an edited feature', () => {
+    // Without this the tile version draws under the overlay, so a dragged
+    // boundary shows in both its old and new positions.
+    const handle = mounted();
+    handle.setEditOverlay({
+      features: [FEATURE],
+      layers: LAYERS,
+      hideFromLayers: ['leases'],
+    });
+
+    expect(latest().setFilter).toHaveBeenCalledWith('leases', [
+      '!',
+      ['in', ['id'], ['literal', ['lease-1']]],
+    ]);
+  });
+
+  it("combines with the layer's own filter instead of replacing it", () => {
+    // `contours` is filtered to index contours in the fixture. Replacing that
+    // would bring every intermediate contour back the moment an edit started.
+    const handle = mounted();
+    handle.setEditOverlay({
+      features: [FEATURE],
+      layers: LAYERS,
+      hideFromLayers: ['contours'],
+    });
+
+    expect(latest().setFilter).toHaveBeenCalledWith('contours', [
+      'all',
+      ['get', 'is_index'],
+      ['!', ['in', ['id'], ['literal', ['lease-1']]]],
+    ]);
+  });
+
+  it('restores the original filter when the overlay is cleared', () => {
+    const handle = mounted();
+    const map = latest();
+
+    handle.setEditOverlay({
+      features: [FEATURE],
+      layers: LAYERS,
+      hideFromLayers: ['contours'],
+    });
+    handle.setEditOverlay(null);
+
+    expect(map.filters.get('contours')).toEqual(['get', 'is_index']);
+    expect(map.removeLayer).toHaveBeenCalledWith('edit-points');
+    expect(map.removeSource).toHaveBeenCalledWith('webmap-edit-overlay');
+  });
+
+  it('stops filtering a layer the next overlay does not name', () => {
+    // The bookkeeping rule: nothing stays filtered that the current overlay
+    // did not ask for. A layer left filtered after its feature was saved is a
+    // feature that has silently vanished from the map.
+    const handle = mounted();
+    const map = latest();
+
+    handle.setEditOverlay({
+      features: [FEATURE],
+      layers: LAYERS,
+      hideFromLayers: ['leases'],
+    });
+    handle.setEditOverlay({ features: [FEATURE], layers: LAYERS });
+
+    expect(map.filters.get('leases')).toBeUndefined();
   });
 });

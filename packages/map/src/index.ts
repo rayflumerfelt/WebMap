@@ -10,6 +10,7 @@
 export { WebMap } from './WebMap.js';
 export { capture } from './capture.js';
 export type {
+  EditOverlay,
   LayerMetadata,
   MapView,
   MapWarning,

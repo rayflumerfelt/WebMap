@@ -17,9 +17,13 @@ import type { StyleSpecification } from 'maplibre-gl';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 
 import { capture } from './capture.js';
-import type { MapView, MapWarning, WebMapHandle, WebMapProps } from './types.js';
+import type { EditOverlay, MapView, MapWarning, WebMapHandle, WebMapProps } from './types.js';
 
 const DEFAULT_VIEW: MapView = { center: [0, 0], zoom: 2 };
+
+/** The GeoJSON source holding pending edits. `09-editing.md` §3.3. */
+const EDIT_SOURCE = 'webmap-edit-overlay';
+
 
 /** Below this the camera is treated as unchanged. */
 const VIEW_EPSILON = 1e-9;
@@ -123,6 +127,13 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
     applyingViewRef.current = false;
   }, [props.view]);
 
+  // Which base layers currently carry an exclusion filter, and what their
+  // filter was before. Kept so clearing the overlay restores the style's own
+  // filter rather than removing whatever the layer had — a contour layer
+  // filtered to index contours would otherwise come back showing all of them.
+  const filteredRef = useRef<Map<string, unknown>>(new Map());
+  const overlayLayersRef = useRef<string[]>([]);
+
   const getMap = useCallback(() => {
     const map = mapRef.current;
     if (!map) {
@@ -134,18 +145,103 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
     return map;
   }, []);
 
+  const setEditOverlay = useCallback(
+    (overlay: EditOverlay | null) => {
+      const map = getMap();
+
+      // Restore every filter this component set, before applying the new set.
+      // Doing it unconditionally rather than diffing keeps the bookkeeping to
+      // one rule: nothing stays filtered that the current overlay did not ask
+      // for.
+      for (const [layerId, original] of filteredRef.current) {
+        if (map.getLayer(layerId)) {
+          map.setFilter(layerId, original as never);
+        }
+      }
+      filteredRef.current.clear();
+
+      if (!overlay) {
+        for (const layerId of overlayLayersRef.current) {
+          if (map.getLayer(layerId)) map.removeLayer(layerId);
+        }
+        overlayLayersRef.current = [];
+        if (map.getSource(EDIT_SOURCE)) map.removeSource(EDIT_SOURCE);
+        return;
+      }
+
+      const source = map.getSource(EDIT_SOURCE) as
+        | { setData(data: GeoJSON.FeatureCollection): void }
+        | undefined;
+      const data: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: overlay.features,
+      };
+
+      if (source) {
+        // The hot path: one `setData` per pointer move during a drag.
+        source.setData(data);
+      } else {
+        map.addSource(EDIT_SOURCE, { type: 'geojson', data } as never);
+      }
+
+      // Layers are added once and left alone. Re-adding them per frame would
+      // drop and rebuild their GPU buffers, which is the whole cost this
+      // arrangement exists to avoid.
+      if (overlayLayersRef.current.length === 0) {
+        for (const layer of overlay.layers) {
+          // `source` is overwritten rather than trusted: a caller pointing an
+          // overlay layer at a tile source it is about to filter would hide
+          // the edit it is trying to show.
+          map.addLayer({ ...layer, source: EDIT_SOURCE } as never);
+          overlayLayersRef.current.push(layer.id);
+        }
+      }
+
+      const ids = overlay.features
+        .map((feature) => feature.id)
+        .filter((id): id is string | number => id !== undefined);
+
+      for (const layerId of overlay.hideFromLayers ?? []) {
+        if (!map.getLayer(layerId)) continue;
+        const original = map.getFilter(layerId);
+        filteredRef.current.set(layerId, original);
+        // `!in` against the feature id. Combined with the layer's own filter
+        // rather than replacing it, so a layer already restricted to index
+        // contours stays restricted.
+        const exclusion = ['!', ['in', ['id'], ['literal', ids]]];
+        map.setFilter(
+          layerId,
+          (original ? ['all', original, exclusion] : exclusion) as never,
+        );
+      }
+    },
+    [getMap],
+  );
+
   useImperativeHandle(
     ref,
     (): WebMapHandle => ({
       fitBounds: (bounds, options) => getMap().fitBounds(bounds, options),
       capture: () => capture(getMap()),
       queryFeatures: (point, layerIds) =>
-        getMap().queryRenderedFeatures(point, layerIds ? { layers: layerIds } : undefined),
+        getMap().queryRenderedFeatures(
+          point as never,
+          layerIds ? { layers: layerIds } : undefined,
+        ),
+      project: (lngLat) => {
+        const point = getMap().project(lngLat);
+        return [point.x, point.y];
+      },
+      unproject: (point) => {
+        const lngLat = getMap().unproject(point);
+        return [lngLat.lng, lngLat.lat];
+      },
+      setEditOverlay,
       // The escape hatch. Every use of it in `apps/web` is a signal that the
       // public API is missing something — §2.1 asks for those to be tracked.
       getMap,
     }),
-    [getMap],
+    [getMap, setEditOverlay],
   );
 
   return (
