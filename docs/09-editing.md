@@ -831,6 +831,31 @@ budget.
   why commands are greyed.
 - **Zoom level and scale bar.**
 
+**Built** as `EditToolbar`, `OperationBar` and `EditStatusStrip` in
+`apps/web/src/editing/`. Four things worth recording:
+
+**The ten-control budget is asserted by a test.** `TOOLBAR_SLOTS` names what is on screen and
+the test caps it, so a future addition has to be an argument rather than a commit — a budget
+nobody counts is a budget that grows one reasonable addition at a time. The count is in *slots*
+rather than buttons: the four mode buttons are one segmented control, and only the active mode's
+sub-choice is shown, so Select's three tools and Draw's five shapes cost one slot between them
+rather than eight.
+
+**The toolbar renders from the command registry**, including `enabled` and `checked`. That is
+the whole point of §8 existing: the Snap toggle here and the Snap menu item cannot disagree
+about whether snapping is on, because there is one predicate.
+
+**The operation bar binds `Esc` and `Enter` itself, on the window.** While an operation runs
+they mean *this* operation, and a global binding would have to ask what is on screen. On the
+window rather than on the bar because the pointer is over the map, so the bar rarely holds
+focus — and Enter is left alone inside a `textarea`, or a note field ends the operation when
+somebody presses Return in it.
+
+**The status strip distinguishes "no snap" from "snapping off".** They look the same on the map
+and they are completely different problems: one is "nothing is in range", the other is "you
+turned it off". Its one control is the selection's clear button, which doubles as Select None
+and explains why half the commands are greyed.
+
 ### 10.5 Numeric and bearing entry
 
 A hotkey (`` ` ``) opens an inline input for the next vertex, accepting absolute coordinates in

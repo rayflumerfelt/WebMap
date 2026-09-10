@@ -395,6 +395,10 @@ produces the same wrong surface with nothing said about it.
   and the drag exclusion with its ring wrap. What remains is the MapLibre half — the
   `queryRenderedFeatures` candidate set, the projection cache during a drag, the indicator
   source, and §6.6's exact-coordinate resolution with unsimplified tiles at edit zooms
+- **The editing surfaces** (`09` §10) — **built**: the persistent toolbar rendering from the
+  registry with its ten-slot budget asserted, the contextual operation bar with `Esc`/`Enter`,
+  and the status strip. The menu bar and command palette render from the same registry and are
+  what remain
 - **Vertex editing** — handles, move/add/delete, nudge, numeric and bearing entry
 - **Terra Draw for new geometry only** ([`adr/0014`](adr/0014-terra-draw-scoped-to-creation.md)),
   wired to the snap engine through `toCustom`
