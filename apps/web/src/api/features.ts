@@ -13,7 +13,7 @@
  */
 
 import type { ApiClient } from './client.js';
-import type { FeatureDelta } from '../editing/session.js';
+import type { Feature, FeatureDelta } from '../editing/session.js';
 
 export interface FeatureEditDto {
   feature_id: number;
@@ -72,4 +72,48 @@ export function saveFeatureEdits(
     base_version: baseVersion,
     edits: toEditPayload(deltas),
   });
+}
+
+/** What `GET /features/{id}.geojson` returns. */
+interface FeatureCollectionDto {
+  type: 'FeatureCollection';
+  features: Array<{
+    id: number | string;
+    geometry: unknown;
+    properties: Record<string, unknown> | null;
+  }>;
+}
+
+/**
+ * The editable working set: the layer's exact geometry. `09-editing.md` §17,
+ * §3.3.
+ *
+ * **Exact, not tile.** Everything committed is computed from these — a vertex
+ * moved against tile geometry is a vertex moved against a simplified copy, and
+ * the difference is a boundary that no longer matches its neighbour.
+ *
+ * The endpoint refuses above 5,000 features rather than truncating, which is
+ * the cap §17 asks for and the message says so. A silently partial layer is
+ * worse than an error because it looks like the data.
+ *
+ * `token` is the per-dataset tile token: this endpoint shares the tile
+ * principal, because it is the same object read by the same means.
+ */
+export async function fetchWorkingSet(
+  api: ApiClient,
+  datasetId: string,
+  token?: string | undefined,
+): Promise<Feature[]> {
+  const collection = await api.get<FeatureCollectionDto>(
+    `/features/${datasetId}.geojson`,
+    token ? { token } : undefined,
+  );
+
+  return collection.features.map((feature) => ({
+    // The session keys on strings; the object stores int64. One conversion,
+    // here, matching the one `toEditPayload` reverses on the way out.
+    id: String(feature.id),
+    geometry: feature.geometry,
+    properties: feature.properties ?? {},
+  }));
 }

@@ -82,6 +82,10 @@ export interface EditStoreState {
   applyCommand(command: Command): void;
   undo(): void;
   redo(): void;
+  /** Fill the exact cache with the layer's working set (§17). Separate from
+   *  `activateLayer` because it is a fetch: the session opens at once so the
+   *  toolbar is live, and the handles appear when the geometry lands. */
+  loadWorkingSet(features: readonly Feature[]): void;
   /** A save landed: the dirty features become the exact ones and the version
    *  pointer moves. The request itself is `editing/persistence.ts`'s — this
    *  store does no I/O, for the reason `sessionStore` does none either. */
@@ -170,6 +174,18 @@ export const useEditStore = create<EditStoreState>()((set, get) => ({
   redo() {
     const session = get().session;
     if (!session || !redoSession(session)) return;
+    set((state) => ({ revision: state.revision + 1 }));
+  },
+
+  loadWorkingSet(features) {
+    const session = get().session;
+    if (!session) return;
+    for (const feature of features) {
+      // Dirty features are left alone: a working set that arrived after an
+      // edit must not overwrite the edit, and `current()` reads the dirty
+      // buffer first anyway.
+      session.exactCache.set(feature.id, feature);
+    }
     set((state) => ({ revision: state.revision + 1 }));
   },
 

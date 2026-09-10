@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AttributePanel } from './attributes/AttributePanel.js';
 import { editMapImages } from './editing/overlay.js';
+import { fetchWorkingSet } from './api/features.js';
 import { discardEdits, pendingCount, saveEdits } from './editing/persistence.js';
 import { useMapEditing } from './editing/useMapEditing.js';
 import { ApiClient } from './api/client.js';
@@ -70,6 +71,10 @@ export interface AppProps {
    * says so rather than opening a session it cannot safely save.
    */
   datasetVersions?: Record<string, number>;
+  /** Per-dataset tile token, for the endpoints that take one instead of a
+   *  bearer header (`03` §4.4) — the tiles themselves and the working set the
+   *  editor reads exact geometry from. */
+  tileTokenFor?(datasetId: string): string | undefined;
   /** Font **stack** names from `GET /static/glyphs` — grouped into families
    *  here, because a stack is what MapLibre asks for and a family is what a
    *  person picks. Injected rather than fetched so the shell renders with no
@@ -89,6 +94,7 @@ export function App({
   attributeSchemas = {},
   glyphStacks = [],
   datasetVersions = {},
+  tileTokenFor,
 }: AppProps = {}) {
   const layers = useSessionStore((state) => state.layers);
   const view = useSessionStore((state) => state.view);
@@ -260,6 +266,20 @@ export function App({
         geometry: null,
         canEdit: true,
       });
+      // The working set is fetched rather than awaited: the toolbar goes live
+      // at once and the handles appear when the geometry lands. §17 caps it at
+      // 5,000 features and the endpoint refuses above that rather than
+      // truncating — a silently partial layer looks like the data.
+      if (api) {
+        void fetchWorkingSet(api, selectedLayer.datasetId, tileTokenFor?.(selectedLayer.datasetId))
+          .then((features) => useEditStore.getState().loadWorkingSet(features))
+          .catch((error: unknown) =>
+            setEditError(
+              `'${selectedLayer.name}' cannot be edited: ` +
+                `${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+      }
     } catch (error) {
       // Unsaved edits on another layer. §5.2 makes that the user's decision,
       // so the message says so rather than discarding them.
@@ -268,7 +288,7 @@ export function App({
     }
     setEditError(null);
     return true;
-  }, [datasetVersions, selectedLayer]);
+  }, [api, datasetVersions, selectedLayer, tileTokenFor]);
 
   const legendSpec = useMemo<LegendSpec | null>(() => {
     if (!selectedLayer) return null;

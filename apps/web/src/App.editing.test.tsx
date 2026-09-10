@@ -7,10 +7,11 @@
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiClient } from './api/client.js';
 import { App } from './App.js';
 import { useEditStore } from './stores/editStore.js';
 import { useSessionStore } from './stores/sessionStore.js';
@@ -77,6 +78,51 @@ describe('the map props', () => {
     render(<App />, { wrapper });
 
     expect(typeof mapProps.at(-1)!['onMapPointer']).toBe('function');
+  });
+});
+
+describe('the working set', () => {
+  function apiReturning(payload: unknown, status = 200): ApiClient {
+    return new ApiClient({
+      baseUrl: '/api/v1',
+      fetchImpl: (async () =>
+        new Response(JSON.stringify(payload), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        })) as unknown as typeof fetch,
+    });
+  }
+
+  it('fills the exact cache so the handles have geometry to sit on', async () => {
+    // Without this the session opens with an empty cache, `current()` returns
+    // null for every feature, and vertex mode renders no handles at all —
+    // which looks exactly like a broken editor.
+    const api = apiReturning({
+      type: 'FeatureCollection',
+      features: [
+        { id: 42, geometry: { type: 'Point', coordinates: [-102, 31] }, properties: {} },
+      ],
+    });
+
+    render(<App api={api} datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
+
+    await waitFor(() =>
+      expect(useEditStore.getState().session!.exactCache.get('42')).toBeDefined(),
+    );
+  });
+
+  it('reports a layer too large to edit rather than opening an empty one', async () => {
+    // §17: the endpoint refuses above 5,000 features rather than truncating,
+    // and the refusal has to reach the user or the editor just does nothing.
+    const api = apiReturning({ detail: 'This layer has 42,000 features…' }, 404);
+
+    render(<App api={api} datasetVersions={{ 'dataset-1': 12 }} />, { wrapper });
+    fireEvent.click(screen.getByRole('radio', { name: 'Edit' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toMatch(/42,000 features/),
+    );
   });
 });
 

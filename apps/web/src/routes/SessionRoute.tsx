@@ -153,6 +153,7 @@ export function SessionRoute({ shortCode, api: injected }: SessionRouteProps) {
         }
         {...(project.data?.crs_wkt ? { crsWkt: project.data.crs_wkt } : {})}
         analysisUnit={project.data?.horizontal_unit ?? 'usft'}
+        tileTokenFor={(datasetId) => tileTokens[datasetId]}
         tileUrlFor={(datasetId) => {
           const token = tileTokens[datasetId];
           // No token yet: point at the bearer-authenticated path, which the
