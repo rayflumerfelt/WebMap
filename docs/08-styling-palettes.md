@@ -655,6 +655,34 @@ Clipping is also the cleanest answer to extrapolation. A **clip to the control**
 convex hull of the control points, or everything within the search radius the diagnostics
 already compute — removes the unsupported area rather than warning about it.
 
+**Built** as `webmap_geo.clip`, `webmap_core.services.clipping`, the `clip` job,
+`POST /api/v1/jobs/clip` and `webmap_clip_grid`. Four decisions worth recording, three of them
+made because the obvious version is wrong:
+
+**A cell is in or out by its centre, and a centre on the boundary is in.** A partially covered
+cell has no partial value to give, so including it because a corner is inside extends the grid
+half a cell past the lease line — 125 ft on a 250 ft grid, of somebody else's acreage. The
+boundary itself goes the other way: `contains` excludes it, and a lease outline digitised on
+round coordinates lands on grid lines constantly, so excluding those cells carves a one-cell
+notch along every straight edge.
+
+**The extrapolation fraction's denominator is the clipped map, not the original grid.** This is
+the one that had to be measured. Counting blanked cells in the numerator while keeping the full
+grid in the denominator makes clipping away a wholly invented corner *raise* the extrapolation
+fraction — 95% before and 97% after, on the test fixture — which is the exact opposite of what
+this section says clipping is for. The question the number answers is "of the map you can see,
+how much is invention", and a cell that is not drawn is in neither half of it.
+
+**The "clip to the control" preset takes its point layer explicitly.** Reading it from the
+grid's lineage would resolve a dataset the caller may no longer have access to, which is a
+permission check running against the wrong principal.
+
+**A line or a point in the boundary layer is skipped; a layer with no polygon is refused.** A
+lease layer routinely carries a survey line beside the outlines, and refusing the whole clip
+over one would make an ordinary layer unusable. Selected features are unioned before the clip
+rather than clipped to in turn, because adjacent tracts otherwise leave hairline gaps along
+their shared edges where a cell centre falls between two boundaries.
+
 ## 6. Schema-driven property editor
 
 The escape hatch, and the clever part of covering the style spec without hand-writing hundreds

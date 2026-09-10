@@ -64,6 +64,15 @@ PHASES: dict[str, list[tuple[str, float]]] = {
         ("Aggregating", 0.25),
         ("Writing features", 0.30),
     ],
+    # Clipping is a mask over an array; the time is in the two reads and the
+    # COG write, which is why "Clipping" is the smallest phase in a job named
+    # after it.
+    "clip": [
+        ("Loading grid", 0.30),
+        ("Loading boundary", 0.20),
+        ("Clipping", 0.10),
+        ("Writing grid", 0.40),
+    ],
     "contour_filled": [
         ("Loading grid", 0.10),
         ("Choosing levels", 0.03),

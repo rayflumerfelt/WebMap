@@ -319,9 +319,8 @@ fault is gridded with it.
 - [x] Filled bands measure the area between their levels — checked against a closed form on a
       cone, and sitting exactly under the contours drawn over them
 
-**Still owed by Phase 4:** the worker's ingest, sync and export tasks, the label-anchor job
-(the geoprocessing exists; nothing runs it over a dataset), and grid clipping (`08` §5.2,
-specified and not built).
+**Still owed by Phase 4:** the worker's ingest, sync and export tasks, and the label-anchor job
+(the geoprocessing exists; nothing runs it over a dataset).
 
 **Universal kriging and cubic spline are done** (`05` §6.2, §6.4). `Method` now has six
 members, all reachable from `webmap_interpolate`.
@@ -331,6 +330,11 @@ would, and `minimum_curvature` drops the curvature rows across them while keepin
 rows — the surface kinks and does not tear. `breakline_control` turns the line's own Z into
 densified control, because the mask permits a kink and says nothing about where it goes. Every
 other method gets the elevations and a warning that it will round the break off.
+
+**Grid clipping is done** (`08` §5.2) — to a polygon layer, to selected features of one, or to
+the control, with the sense invertible. A derived grid with lineage to both inputs, recomputing
+the display range and the extrapolation fraction, reachable as `webmap_clip_grid` and
+`POST /api/v1/jobs/clip`.
 
 **The aggregation catalog is done** (`05` §8): fifteen operations in `webmap_geo.aggregate`,
 a job, `POST /api/v1/jobs/aggregate`, and `webmap_aggregate`. **`webmap_fit_variogram` is

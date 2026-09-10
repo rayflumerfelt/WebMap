@@ -36,14 +36,14 @@ render returns the interpolation method, its parameters, value range, units, CRS
 
 ## 2. Tool surface
 
-Twenty-one tools in six groups, of which **fifteen are implemented**. The rest are specified
+Twenty-two tools in six groups, of which **sixteen are implemented**. The rest are specified
 here and scheduled in `12-roadmap.md`; the ✓ column says which is which, so this table stops
 being a claim about the present that quietly goes stale.
 
 | Group | Tools | Built |
 |---|---|---|
 | Discovery | `webmap_list_projects`, `webmap_list_datasets`, `webmap_search_datasets`, `webmap_describe_dataset` | ✓ all four |
-| Analysis | `webmap_interpolate`, `webmap_contour`, `webmap_aggregate`, `webmap_fit_variogram` | ✓ all four |
+| Analysis | `webmap_interpolate`, `webmap_contour`, `webmap_aggregate`, `webmap_fit_variogram`, `webmap_clip_grid` | ✓ all five |
 | Rendering | `webmap_render_map`, `webmap_get_render` | ✓ both |
 | Rendering (specified) | `webmap_suggest_maps` | Phase 6 |
 | Sessions | `webmap_open_session`, `webmap_get_session` | ✓ both |

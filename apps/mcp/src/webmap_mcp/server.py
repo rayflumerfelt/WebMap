@@ -605,6 +605,99 @@ async def webmap_contour(
     return job_submitted(submitted, what="Contouring job", detail=detail)
 
 
+@mcp.tool(annotations=SUBMITS_JOB)
+async def webmap_clip_grid(
+    dataset_id: Annotated[UUID, Field(description="Grid dataset to clip.")],
+    boundary_dataset_id: Annotated[
+        UUID | None,
+        Field(
+            None,
+            description=(
+                "Polygon layer to clip to - a lease, a unit outline, an AMI. "
+                "Give this or to_control, never both."
+            ),
+        ),
+    ] = None,
+    to_control: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "Clip to the control instead of to a layer. 'convex_hull' is the "
+                "conservative choice and keeps bays between two arms of a trend "
+                "that no well has touched; 'concave_hull' follows the outline of "
+                "the control and removes them; 'radius' keeps only the area with "
+                "a control point within the search radius, holes included. This "
+                "is the honest answer to an extrapolated grid - it removes the "
+                "invented area rather than warning about it."
+            ),
+        ),
+    ] = None,
+    control_dataset_id: Annotated[
+        UUID | None,
+        Field(
+            None,
+            description=(
+                "The point layer to_control draws around - normally the well "
+                "layer the grid was made from. Required with to_control."
+            ),
+        ),
+    ] = None,
+    invert: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Exclude the boundary instead of keeping it - a no-permit block, "
+                "acreage that was sold."
+            ),
+        ),
+    ] = False,
+    output_name: Annotated[
+        str | None, Field(None, description="Name for the clipped grid.")
+    ] = None,
+) -> str:
+    """Blank the part of a grid outside (or inside) a boundary.
+
+    Returns a job handle. The output is a **new** grid with lineage to both
+    inputs; the original is untouched, which is what you re-clip when the
+    acreage changes.
+
+    The clipped grid recomputes two numbers the original cannot carry over: its
+    display range, or the legend spans values no longer on the map, and its
+    extrapolated fraction over the cells that remain. That second number is why
+    clipping to the control is worth suggesting when webmap_interpolate warns
+    that a grid is mostly extrapolated - the warning describes the problem, and
+    this fixes it.
+    """
+    source = await _get(f"/api/v1/datasets/{dataset_id}")
+    detail = [f"- **Input**: {source.get('name')}"]
+
+    if boundary_dataset_id:
+        boundary = await _get(f"/api/v1/datasets/{boundary_dataset_id}")
+        verb = "Excluding" if invert else "Clipping to"
+        detail.append(f"- **{verb}**: {boundary.get('name')}")
+    elif to_control:
+        detail.append(f"- **Clipping to**: the control ({to_control.replace('_', ' ')})")
+
+    submitted = await _post(
+        "/api/v1/jobs/clip",
+        _clean_params(
+            {
+                "dataset_id": str(dataset_id),
+                "boundary_dataset_id": (
+                    str(boundary_dataset_id) if boundary_dataset_id else None
+                ),
+                "to_control": to_control,
+                "control_dataset_id": (str(control_dataset_id) if control_dataset_id else None),
+                "invert": invert,
+                "output_name": output_name,
+            }
+        ),
+    )
+    return job_submitted(submitted, what="Clipping job", detail=detail)
+
+
 @mcp.tool(annotations=READ_ONLY)
 async def webmap_fit_variogram(
     dataset_id: Annotated[UUID, Field(description="Point layer to analyse.")],

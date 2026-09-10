@@ -22,6 +22,7 @@ from webmap_api.dependencies import CurrentPrincipal, ScopedConn
 from webmap_core.logging import get_logger
 from webmap_core.models import Visibility, WebMapModel
 from webmap_core.services import aggregation as aggregation_service
+from webmap_core.services import clipping as clip_service
 from webmap_core.services import contours as contour_service
 from webmap_core.services import gridding as grid_service
 from webmap_core.services import jobs as service
@@ -139,6 +140,62 @@ class ContourRequestModel(WebMapModel):
             smoothing=self.smoothing,
             index_every=self.index_every,
             fill=self.fill,
+            output_name=self.output_name,
+            project_id=self.project_id,
+            visibility=self.visibility,
+            owner_team_id=self.owner_team_id,
+        )
+
+
+class ClipRequestModel(WebMapModel):
+    """Clip a grid to a polygon layer, to selected features of one, or to its
+    own control (`08` §5.2).
+
+    Exactly one boundary: `boundary_dataset_id` or `to_control`. Both, or
+    neither, is refused rather than resolved by precedence — which one the map
+    was cut to is not recoverable from the result, so it cannot be guessed at
+    submission time either.
+    """
+
+    dataset_id: UUID
+    boundary_dataset_id: UUID | None = None
+    feature_ids: list[str] = Field(
+        default_factory=list,
+        description="Clip to these features of the boundary layer. Empty means all of it.",
+    )
+    invert: bool = Field(
+        default=False,
+        description="Exclude the boundary instead of keeping it — a lease to leave out.",
+    )
+    to_control: Literal["convex_hull", "concave_hull", "radius"] | None = Field(
+        default=None,
+        description=(
+            "Clip to the control instead of to a layer. convex_hull is "
+            "conservative; concave_hull follows the outline of the control and "
+            "removes bays no well has touched; radius keeps only what `05` §6.5 "
+            "calls supported, holes included."
+        ),
+    )
+    control_dataset_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The point layer to_control draws around. Required with to_control, "
+            "and asked for rather than read from the grid's lineage."
+        ),
+    )
+    output_name: str | None = None
+    project_id: UUID | None = None
+    visibility: Visibility = Visibility.TEAM
+    owner_team_id: UUID | None = None
+
+    def to_request(self) -> clip_service.ClipRequest:
+        return clip_service.ClipRequest(
+            dataset_id=self.dataset_id,
+            boundary_dataset_id=self.boundary_dataset_id,
+            feature_ids=tuple(self.feature_ids),
+            invert=self.invert,
+            to_control=self.to_control,
+            control_dataset_id=self.control_dataset_id,
             output_name=self.output_name,
             project_id=self.project_id,
             visibility=self.visibility,
@@ -278,6 +335,30 @@ async def submit_contour(
         queue(request),
         kind="contour",
         task="contour_task",
+        parameters=body.to_request().to_parameters(),
+    )
+
+
+@router.post("/clip", response_model=Submitted, status_code=202)
+async def submit_clip(
+    body: ClipRequestModel,
+    principal: CurrentPrincipal,
+    conn: ScopedConn,
+    request: Request,
+) -> Submitted:
+    """Clip a grid, producing a derived grid with lineage to both inputs.
+
+    A job rather than an inline call for the same reason gridding is: the mask
+    is cheap and the COG write is not, and a 4-million-cell grid is minutes of
+    it. `10` §6's rule is about the tail, and the caller cannot tell from the
+    request which size they asked for.
+    """
+    return await _submit(
+        conn,
+        principal,
+        queue(request),
+        kind="clip",
+        task="clip_task",
         parameters=body.to_request().to_parameters(),
     )
 
