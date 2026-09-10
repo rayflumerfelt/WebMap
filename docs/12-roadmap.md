@@ -378,9 +378,10 @@ produces the same wrong surface with nothing said about it.
 - Schema-driven property editor generated from the MapLibre style spec
 - Graduated and rule-based symbology; all classification methods
 - Style templates with resolution order
-- **Command registry** (`09` §8) — one definition per command, driving the menu bar, palette,
-  toolbar and context menu. Built before any surface, because retrofitting it means finding four
-  copies of every command's enabled-state logic
+- **Command registry** (`09` §8) — **built**, ahead of every surface as the section requires.
+  Fifty-odd commands defined once, with the menu in §9's order, the palette excluding what is
+  disabled, per-scope context menus, and `conflicts(state)` to prove no key resolves to two
+  enabled commands at once. What remains is the surfaces that render from it
 - **Selection** — multi-feature and vertex scopes, click/rectangle/lasso, active-layer plumbing
 - **Edit session** (`09` §5) — dirty buffer, `Command`/`FeatureDelta`, undo/redo, Save/Discard,
   IndexedDB crash durability. **Before any mutating operation exists**

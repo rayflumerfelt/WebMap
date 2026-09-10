@@ -599,6 +599,33 @@ type ContextScope = 'feature' | 'vertex' | 'edge' | 'empty' | 'selection';
 - Shortcuts derive from the registry. Never register a hotkey independently.
 - Use `mod`, not `ctrl`/`cmd`; `useHotkeys` handles the platform difference.
 
+**Built** as `apps/web/src/editing/{types,predicates,registry}.ts`, ahead of every surface as
+this section requires. Three things worth recording:
+
+**A shortcut may be shared, and `conflicts(state)` is what makes that safe.** `Delete` is
+Delete Feature under Edit and Delete Selected Vertices under Vertices, which is right — but
+only because no state enables both. `bindings()` therefore maps a key to *candidates* and the
+hotkey layer picks the enabled one, and `conflicts` returns any key with two live candidates.
+It found one immediately: with vertices selected, both were enabled, so `Delete` meant
+whichever the hotkey layer found first. Delete Feature now requires a feature-scoped selection
+— with vertices selected, Delete means the vertices, as it does in every editor, and because
+deleting the whole feature is a far larger action to trigger by accident.
+
+**A command with no handler is still registered and still enabled.** It is defined, its
+shortcut is reserved, and it appears in every surface; running it does nothing. That is the
+honest state of a command whose implementation has not landed. Hiding it would make the menu a
+moving target as features arrive, and disabling it would claim the *state* is wrong when the
+state is fine.
+
+**`run` takes the state it was enabled against** rather than reading it again. Between a click
+and its handler a background refresh can change what is selected, and a command that re-read
+would act on something the user did not see when they chose it.
+
+The §9.1 naming rules are enforced by tests rather than by convention: neither Combine nor
+Dissolve is labelled "Merge", both carry it as a *keyword*, and both descriptions say what
+happens to the geometry — so a search for the word a user arrived with returns the pair, with
+the sentence that distinguishes them.
+
 ---
 
 ## 9. Menu structure
