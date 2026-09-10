@@ -13,6 +13,7 @@ mid-algorithm. Inside this package there are exactly two legitimate callers
 from functools import lru_cache
 
 import numpy as np
+import shapely
 from numpy.typing import NDArray
 from pyproj import CRS, Transformer
 from pyproj.exceptions import CRSError
@@ -33,6 +34,7 @@ __all__ = [
     "frame_for",
     "is_geographic",
     "transform_bbox",
+    "transform_geometries",
     "transform_points",
     "transformer",
 ]
@@ -159,6 +161,49 @@ def transform_points(
         return x, y
     tx, ty = transformer(src, dst).transform(x, y)
     return np.asarray(tx, dtype=np.float64), np.asarray(ty, dtype=np.float64)
+
+
+def transform_geometries(
+    geometries: NDArray[np.object_], src: int, dst: int
+) -> NDArray[np.object_]:
+    """Transform Shapely geometries between CRSs, vertex for vertex.
+
+    One of the two legitimate boundary crossings for an edit: the browser
+    works in WGS84 because that is what GeoJSON and MapLibre are, and the
+    feature object stores the dataset's own CRS because that is what every
+    measurement is done in. Somebody has to convert, once, at the edge — this
+    is that call, and putting it here keeps pyproj out of the service layer
+    (`adr/0003`).
+
+    A no-op when `src == dst`, so a dataset already stored in WGS84 does not
+    take a PROJ round trip that would introduce sub-millimetre drift into
+    coordinates that never needed to move.
+
+    **Z is carried through untransformed.** A breakline's elevation is a depth
+    in the project's vertical datum, not a function of the horizontal CRS, and
+    running it through a 2D transform would leave it unchanged while implying
+    it had been converted. A vertical transformation is a separate operation
+    this function does not attempt.
+    """
+    if src == dst:
+        return geometries
+
+    project = transformer(src, dst)
+
+    def convert(coordinates: NDArray[np.float64]) -> NDArray[np.float64]:
+        x, y = project.transform(coordinates[:, 0], coordinates[:, 1])
+        converted = coordinates.copy()
+        converted[:, 0] = x
+        converted[:, 1] = y
+        return converted
+
+    return np.asarray(
+        [
+            None if geometry is None else shapely.transform(geometry, convert, include_z=True)
+            for geometry in geometries
+        ],
+        dtype=object,
+    )
 
 
 def transform_bbox(

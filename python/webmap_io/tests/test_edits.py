@@ -13,6 +13,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 import shapely
+from shapely.geometry.base import BaseGeometry
 
 from webmap_io.edits import EmptyResult, FeatureChange, UnknownFeature, apply_edits
 from webmap_io.parquet import write_features
@@ -36,7 +37,7 @@ def seed(path: Path, count: int = 4) -> Path:
     return path
 
 
-def read(path: Path) -> dict[int, tuple[object, dict[str, object]]]:
+def read(path: Path) -> dict[int, tuple[BaseGeometry, dict[str, object]]]:
     table = pq.read_table(path)
     geometries = shapely.from_wkb(table.column("geometry").to_pylist())
     return {

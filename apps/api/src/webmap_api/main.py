@@ -20,6 +20,7 @@ from webmap_api.auth import build_verifier
 from webmap_api.routes.analysis import router as analysis_router
 from webmap_api.routes.auth import router as auth_router
 from webmap_api.routes.datasets import router as datasets_router
+from webmap_api.routes.features import router as features_router
 from webmap_api.routes.glyphs import router as glyphs_router
 from webmap_api.routes.jobs import router as jobs_router
 from webmap_api.routes.layers import basemaps_router
@@ -47,6 +48,7 @@ from webmap_core.logging import bind_request, configure_logging, get_logger
 from webmap_core.settings import Environment, Settings, get_settings
 from webmap_geo.dataplane import assert_extensions
 from webmap_geo.exceptions import DegenerateInput, GeoError, NotProjected, UnknownCrs
+from webmap_io.edits import EmptyResult, UnknownFeature
 from webmap_io.exceptions import (
     MissingCRS,
     PathTraversal,
@@ -81,6 +83,13 @@ _STATUS_FOR: dict[type[Exception], int] = {
     # replace "your shapefile is missing its .prj" with "internal error".
     MissingCRS: 422,
     UnsupportedFormat: 422,
+    # An edit naming a feature the current version does not hold means the
+    # client is looking at a version that has been replaced — the same
+    # remedy as a version conflict, so the same status.
+    UnknownFeature: 409,
+    # Deleting every feature in a layer: the request is the problem, and the
+    # message names the operation that was meant instead.
+    EmptyResult: 422,
     PathTraversal: 400,
     UnknownShare: 404,
     # Geometry failures are the caller's arguments: a tile coordinate
@@ -217,6 +226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(basemaps_router)
     app.include_router(preferences_router)
     app.include_router(palettes_router)
+    app.include_router(features_router)
 
     return app
 
