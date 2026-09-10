@@ -378,7 +378,10 @@ produces the same wrong surface with nothing said about it.
 - Copy-on-write version commit; the 409 names the changed features (`adr/0005`, amended twice)
 - Attribute editing, including bulk edit and dissolve resolution strategies
 - **Layers and basemaps as shared objects** (`adr/0010`): `layer`, `basemap`,
-  `basemap_layer`, duplication, and the map's active layer
+  `basemap_layer`, duplication, and the map's active layer. **The schema exists** as of
+  revision `0004_layers_basemaps` — tables, RLS with `FORCE` and all four policies, the
+  `ON DELETE RESTRICT` that makes a shared layer un-deletable while a basemap uses it, and the
+  capability columns. The services and endpoints over it are what remain
 - **Capability roles**: `app_user.is_global_admin`, `team_member.role`, and the
   administration screens they gate
 - **Default basemaps** across the user / team / global tiers, keyed on presentation

@@ -1,6 +1,6 @@
 # 02 — Data Model
 
-Implementation depth. The DDL here is the contract; Alembic migrations must match it **for every table a migration has created**. Five tables specified below — `team_preferences`, `global_preferences`, `layer`, `basemap`, `basemap_layer` — are the `adr/0010` additions and have no migration yet; they arrive in Phase 5. Sixteen of the twenty-one exist today.
+Implementation depth. The DDL here is the contract; Alembic migrations must match it. All twenty-one tables exist as of revision `0004_layers_basemaps`, which added the `adr/0010` objects — `layer`, `basemap`, `basemap_layer`, `team_preferences`, `global_preferences` — along with the capability columns `app_user.is_global_admin` and `team_member.role`.
 
 ---
 
