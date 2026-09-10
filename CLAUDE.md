@@ -549,7 +549,7 @@ jobs:
 
   visual:
     runs-on: ubuntu-latest
-    container: mcr.microsoft.com/playwright/python:v1.49.0-noble
+    container: mcr.microsoft.com/playwright/python:v1.62.0-noble
     steps:
       - uses: actions/checkout@v4
       - run: uv sync

@@ -25,7 +25,7 @@ Keep the interface at `render(spec: RenderSpec) -> bytes` so the engine stays sw
 
 ```dockerfile
 # infra/docker/render.Dockerfile
-FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
+FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
 
 # Fonts for HTML overlays (legend, title block). Map labels use glyph PBFs
 # served by the API, but overlay text uses system fonts — headless Linux

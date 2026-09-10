@@ -10,7 +10,11 @@
 FROM node:22-slim AS shell
 WORKDIR /build
 RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# `tsconfig.base.json` is not optional decoration: every package's tsconfig
+# extends it, and without it `tsc` falls back to its ES5 defaults — `Map`,
+# `Set` and `Object.fromEntries` all stop existing, and the failure reads as
+# a hundred type errors in library code rather than as a missing file.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/ packages/
 COPY apps/web/package.json apps/web/
 COPY apps/render/shell/ apps/render/shell/
@@ -19,7 +23,12 @@ RUN pnpm --filter @webmap/style-model build  && cd packages/ui && npx vite build
 RUN cp node_modules/.pnpm/maplibre-gl@*/node_modules/maplibre-gl/dist/maplibre-gl.js        node_modules/.pnpm/maplibre-gl@*/node_modules/maplibre-gl/dist/maplibre-gl.css        apps/render/shell/
 
 # --- service -----------------------------------------------------------------
-FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
+# The tag must match the `playwright` version in `uv.lock` (1.62.0). The
+# image ships the browsers that release expects at a versioned path, and a
+# mismatch fails at launch with "Executable doesn't exist at
+# /ms-playwright/chromium_headless_shell-<build>" — after a clean build and
+# a healthy-looking start.
+FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
 
 # Fonts for HTML overlays (legend, title block). Map labels use glyph PBFs
 # served by the API, but overlay text uses system fonts — headless Linux ships

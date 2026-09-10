@@ -6,6 +6,11 @@ node_modules/
 **/node_modules/
 **/dist/
 **/dist-types/
+# Build *state*, not just build output. `tsc --build` reads a stale
+# tsbuildinfo from the host, concludes the outputs are current, and emits
+# nothing — leaving an image whose packages have no `dist/` and a build that
+# fails several steps later with "failed to resolve entry for package".
+**/*.tsbuildinfo
 .git/
 .turbo/
 .ruff_cache/

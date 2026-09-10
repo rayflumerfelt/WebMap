@@ -179,6 +179,17 @@ services:
       dockerfile: infra/docker/render.Dockerfile
     environment:
       <<: *app-env
+      # Map labels are glyph PBFs the API serves, so a style that draws any
+      # label names `api` as a host — including the visual harness's
+      # label-placement case. The default allowlist is the deployed internal
+      # names, which do not exist in compose; naming them here rather than
+      # widening the default keeps a deployment that forgets fetching nothing
+      # rather than everything.
+      WEBMAP_RENDER_ALLOWED_HOSTS: >-
+        api,tiles.webmap.internal,titiler.webmap.internal,static.webmap.internal
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
       - "8002:8002"
     # 03-auth-security.md §7.3: render workers reach the tile, glyph, sprite,

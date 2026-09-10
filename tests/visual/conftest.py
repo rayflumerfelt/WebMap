@@ -40,7 +40,11 @@ OUTPUT = HERE / "output"
 
 #: Where the render service listens. Overridable because the harness runs
 #: against a container in CI and against a local process on a workstation.
-RENDER_URL = os.environ.get("WEBMAP_RENDER_URL", "http://localhost:8081")
+#:
+#: 8002 is what `infra/compose.yaml` publishes and what the service binds by
+#: default. A default that disagreed with compose made every case skip saying
+#: "start the render service" while the service was running.
+RENDER_URL = os.environ.get("WEBMAP_RENDER_URL", "http://localhost:8002")
 
 #: `06` §10's cases. Each is a fixture file in `fixtures/`, and each exists to
 #: protect something specific rather than to cover surface area.

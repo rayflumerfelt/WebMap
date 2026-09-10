@@ -115,7 +115,8 @@ jobs:
     # reading a pixel count.
     if: false
     runs-on: ubuntu-latest
-    container: mcr.microsoft.com/playwright/python:v1.49.0-noble
+    # Matches the playwright version in uv.lock; see render.Dockerfile.
+    container: mcr.microsoft.com/playwright/python:v1.62.0-noble
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
