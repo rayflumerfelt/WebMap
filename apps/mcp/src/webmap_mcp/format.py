@@ -535,3 +535,57 @@ def job_list(jobs: list[dict[str, Any]]) -> str:
             f"| {clean(job.get('state'))} | {percent} | {_date(job.get('started_at'))} |"
         )
     return "\n".join(lines)
+
+
+def variogram_summary(fit: dict[str, Any]) -> str:
+    """The fitted model, in the order a geologist reads it.
+
+    Range first, because it is the number that decides whether a layer can be
+    gridded at all and the one people quote. Then the nugget as a *fraction*
+    rather than a raw variance — 4,200 means nothing without the sill beside
+    it, and 68% means "there is very little structure here" immediately.
+
+    The empirical points are summarised rather than listed. Thirty lag rows in
+    a conversation is a wall of numbers nobody reads; the count and the range
+    they span say whether the curve is worth trusting, and the full array is on
+    the API for anything that wants to draw it.
+    """
+    units = clean(fit.get("units", ""))
+    lines = [
+        f"**Variogram** — {clean(fit.get('dataset_name'))} · "
+        f"`{clean(fit.get('value_column'))}`",
+        "",
+        f"- **Range**: {fit['range']:,.0f} {units}",
+        f"- **Model**: {clean(fit.get('model'))}",
+        f"- **Sill**: {fit['sill']:,.4g} · **Nugget**: {fit['nugget']:,.4g} "
+        f"({fit['nugget_ratio']:.0%} of total variance)",
+    ]
+
+    if fit.get("anisotropy_ratio", 1.0) > 1.0:
+        lines.append(
+            f"- **Anisotropy**: {fit['anisotropy_ratio']:.2f}:1 along "
+            f"{fit['anisotropy_angle']:.0f}° (major axis)"
+        )
+    else:
+        lines.append("- **Anisotropy**: none detected — isotropic")
+
+    lags = fit.get("lags") or []
+    lines.append(
+        f"- **Fitted from**: {_count(fit.get('n_points'))} points, "
+        f"{_count(fit.get('n_pairs_used'))} pairs over {len(lags)} lags"
+    )
+    lines.append(f"- **Seed**: {fit.get('seed')} — the same request gives the same fit")
+
+    warnings = fit.get("warnings") or []
+    if warnings:
+        lines.append("")
+        lines.append("⚠️ **Read before gridding with this:**")
+        for warning in warnings:
+            lines.append(f"- {clean(warning)}")
+
+    lines.append("")
+    lines.append(
+        'Pass these to `webmap_interpolate` with `method="ordinary_kriging"`, or '
+        "let it fit its own — it runs the same code."
+    )
+    return "\n".join(lines)

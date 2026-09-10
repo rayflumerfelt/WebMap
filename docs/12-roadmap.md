@@ -321,8 +321,11 @@ fault is gridded with it.
 
 **Still owed by Phase 4:** universal kriging and cubic spline (`Method` has four members:
 ordinary kriging, minimum curvature, IDW, nearest); breakline-aware interpolation;
-`webmap_aggregate` and `webmap_fit_variogram`; the `aggregate` package, which is still an empty
-placeholder; and the worker's ingest, sync and export tasks.
+and the worker's ingest, sync and export tasks.
+
+**The aggregation catalog is done** (`05` §8): fifteen operations in `webmap_geo.aggregate`,
+a job, `POST /api/v1/jobs/aggregate`, and `webmap_aggregate`. **`webmap_fit_variogram` is
+done** and runs inline rather than as a job (`10` §6).
 
 **Label anchors are half done.** The geoprocessing exists and is tested — `webmap_geo.label`
 places one anchor per feature, centroid where it falls inside and pole of inaccessibility where

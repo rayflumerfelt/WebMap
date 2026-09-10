@@ -260,6 +260,20 @@ async def aggregate(principal, request) -> AggregateResponse:
 
 The MCP tool response states which happened, so Claude knows whether to poll.
 
+> **What was built, and where it differs.** The threshold is applied *per operation kind*
+> rather than by estimating each request:
+>
+> - **`POST /api/v1/datasets/{id}/variogram` runs inline.** `05` §10 budgets a fit at under
+>   five seconds on a 20k subsample, and the question it answers — "is this layer worth
+>   kriging?" — is asked while deciding whether to grid at all. Behind a poll cycle it is an
+>   answer nobody waits for.
+> - **`POST /api/v1/jobs/aggregate` is always a job**, even for a buffer that finishes in
+>   200 ms. `estimate_cost` above does not exist, and the honest reason is that a useful
+>   estimate for a dissolve needs the feature count *and* the geometry complexity, which means
+>   reading the layer — at which point the estimate costs what the operation costs. One path
+>   is simpler than a threshold that guesses, and the cost is a poll on work that was already
+>   done. Revisit if the latency is ever a complaint; the shape above is still the right one.
+
 ---
 
 ## 7. Quotas

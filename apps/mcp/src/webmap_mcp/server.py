@@ -42,6 +42,7 @@ from webmap_mcp.format import (
     search_results,
     session_detail,
     session_summary,
+    variogram_summary,
 )
 from webmap_mcp.settings import McpSettings
 from webmap_mcp.tokens import build_token_source
@@ -557,6 +558,57 @@ async def webmap_contour(
         ),
     )
     return job_submitted(submitted, what="Contouring job", detail=detail)
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def webmap_fit_variogram(
+    dataset_id: Annotated[UUID, Field(description="Point layer to analyse.")],
+    value_field: Annotated[str, Field(description="Numeric column to fit the variogram over.")],
+    model: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "spherical, exponential, gaussian or matern. Omit to fit all of "
+                "them and keep whichever matches the data best - which is the "
+                "usual choice unless matching someone else's map."
+            ),
+        ),
+    ] = None,
+    detect_anisotropy: Annotated[
+        bool,
+        Field(
+            True,
+            description=(
+                "Look for a directional grain. A basin with structural fabric has "
+                "a range twice as long along strike as across it, and an isotropic "
+                "model smears that into a dome."
+            ),
+        ),
+    ] = True,
+) -> str:
+    """Fit a variogram to a point layer without gridding anything.
+
+    Answers immediately rather than returning a job. Use it to decide whether a
+    layer is worth kriging before spending a gridding job on it: the range says
+    how far the property is spatially correlated, and the nugget fraction says
+    how much of the variance is structure rather than noise.
+
+    A nugget above about 60% of total variance means there is little spatial
+    structure to exploit - kriging will return something close to the layer's
+    mean wherever control is sparse, and a smoother method is no worse.
+    """
+    fit = await _post(
+        f"/api/v1/datasets/{dataset_id}/variogram",
+        _clean_params(
+            {
+                "value_column": value_field,
+                "model": model,
+                "detect_anisotropy": detect_anisotropy,
+            }
+        ),
+    )
+    return variogram_summary(fit)
 
 
 @mcp.tool(annotations=SUBMITS_JOB)
