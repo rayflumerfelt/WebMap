@@ -390,9 +390,11 @@ produces the same wrong surface with nothing said about it.
   atomic over a command's whole delta set, Save/Discard, the Refresh half of the 409 rebase,
   and the snapshot §5.4 mirrors to IndexedDB. The IndexedDB write itself and the recovery
   prompt are what remain
-- **Screen-space snapping** (`09` §6) — vertex/edge/intersection/midpoint, the pixel-clamped
-  tolerance and its badge, the exact-coordinate resolution protocol, unsimplified tiles at edit
-  zooms
+- **Screen-space snapping** (`09` §6) — **the engine is built**: vertex, edge, intersection and
+  midpoint passes in priority order, the pixel-clamped tolerance reporting *which* clamp bound,
+  and the drag exclusion with its ring wrap. What remains is the MapLibre half — the
+  `queryRenderedFeatures` candidate set, the projection cache during a drag, the indicator
+  source, and §6.6's exact-coordinate resolution with unsimplified tiles at edit zooms
 - **Vertex editing** — handles, move/add/delete, nudge, numeric and bearing entry
 - **Terra Draw for new geometry only** ([`adr/0014`](adr/0014-terra-draw-scoped-to-creation.md)),
   wired to the snap engine through `toCustom`

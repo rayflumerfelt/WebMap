@@ -473,6 +473,27 @@ under 1 px at z15, at which point **snapping silently stops working**. The clamp
 control to say the pixel floor is in force rather than the configured distance. A silent
 behaviour change generates bug reports; a badge generates none.
 
+**Built** as `apps/web/src/editing/snap.ts` — the pure half. It takes candidates already
+projected to screen pixels and returns the winner; projection, `queryRenderedFeatures` and
+`unproject` stay with the caller, which is what lets every rule here be tested without a map.
+
+**The ceiling binds more often than the floor, and the badge has to say so too.** Measured over
+the Permian, a 50 ft tolerance is 7.5 px at z16, 15 px at z17 and 30 px at z18 — so the 20 px
+ceiling takes over from about z17.4, well inside ordinary editing zooms. Above it the radius is
+20 px of screen rather than 50 ft of ground. That is the right behaviour, because a 30 px radius
+grabs things the cursor is nowhere near; it is still a behaviour change, and `pixelTolerance`
+returns `clamped: 'floor' | 'ceiling' | null` rather than only reporting the floor case this
+section originally named.
+
+Two smaller things the tests settled:
+
+**A midpoint pass is skipped when either endpoint of the segment is excluded.** The midpoint of
+a segment attached to the dragged vertex moves with the drag, so snapping to it is snapping to
+the cursor.
+
+**An intersection is only ever between two features.** A self-intersection is a defect §12's
+validator reports, and offering to snap to it would be offering to build on it.
+
 ### 6.4 Exclusions
 
 - The vertex being dragged **and its two ring neighbours** are excluded. Without this the drag
