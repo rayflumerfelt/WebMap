@@ -6,7 +6,7 @@ drive it conversationally.
 The differentiator is **fault-constrained interpolation** — gridding that correctly refuses to
 interpolate across a sealing fault, exposed through a conversational interface.
 
-**Status:** Phases 0 and 1 complete. Current state and
+**Status:** Phases 0–3 built, Phase 4 in progress. Current state and
 known gaps are tracked in [`docs/12-roadmap.md`](docs/12-roadmap.md) under *Current status*.
 
 ---
@@ -28,8 +28,8 @@ with the entity model, resolve that before writing code rather than working arou
 |---|---|
 | [`00-overview.md`](docs/00-overview.md) | Scope, users, scale targets, non-goals |
 | [`01-architecture.md`](docs/01-architecture.md) | Services, topology, technology decisions with rationale |
-| [`02-data-model.md`](docs/02-data-model.md) | PostGIS DDL, Pydantic models, CRS model, permissions |
-| [`03-auth-security.md`](docs/03-auth-security.md) | OIDC, MCP OAuth + DCR, identity propagation, SSRF controls |
+| [`02-data-model.md`](docs/02-data-model.md) | Schema DDL, Pydantic models, CRS model, permissions |
+| [`03-auth-security.md`](docs/03-auth-security.md) | OIDC, identity propagation to a local MCP server, SSRF controls |
 | [`04-mcp-server.md`](docs/04-mcp-server.md) | Complete tool surface with schemas |
 | [`05-geoprocessing.md`](docs/05-geoprocessing.md) | Interpolation, fault handling, contouring, aggregation |
 | [`06-rendering.md`](docs/06-rendering.md) | Playwright render service, style pipeline, tiles |
@@ -39,16 +39,21 @@ with the entity model, resolve that before writing code rather than working arou
 | [`10-jobs-async.md`](docs/10-jobs-async.md) | Queue, status protocol, progress, quotas |
 | [`11-file-io.md`](docs/11-file-io.md) | Format matrix, connectors, shapefile caveats |
 | [`12-roadmap.md`](docs/12-roadmap.md) | Phased milestones with acceptance criteria |
+| [`13-kriging.md`](docs/13-kriging.md) | Variography, the kriging family, regression indicator kriging |
 | [`adr/`](docs/adr/) | Architecture decision records |
 
 ## Architecture in a paragraph
 
-React/Mantine frontend with MapLibre GL JS. FastAPI backend on PostGIS. Separate worker pools
-for geoprocessing (`arq`) and rendering (Playwright + headless Chromium running real MapLibre
-GL JS). Rasters as Cloud-Optimized GeoTIFF served through TiTiler; vectors as dynamic MVT.
-MapLibre Style JSON is the single source of truth for appearance — the interactive map and the
-headless renderer consume byte-identical style documents. An MCP server exposes the whole thing
-to Claude over Streamable HTTP with OAuth 2.1.
+React/Mantine frontend with MapLibre GL JS. FastAPI backend on PostgreSQL — **no PostGIS**;
+geometry lives in the data plane as GeoParquet read through DuckDB ([ADR
+0002](docs/adr/0002-duckdb-data-plane.md)). Separate worker pools for geoprocessing (`arq`) and
+rendering (Playwright + headless Chromium running real MapLibre GL JS). Rasters as
+Cloud-Optimized GeoTIFF served through TiTiler; vectors as dynamic MVT. MapLibre Style JSON is
+the single source of truth for appearance — the interactive map and the headless renderer
+consume byte-identical style documents. An MCP server exposes the whole thing to Claude **over
+stdio, running on the user's own workstation** ([ADR
+0008](docs/adr/0008-local-stdio-mcp.md)) — which is what removes the need for an OAuth server
+rather than solving it.
 
 ## Not in scope
 
@@ -89,7 +94,7 @@ await fetch('/auth/dev/login?user=ada', { method: 'POST' });
 ```
 
 That sets the `webmap_session` cookie. `ada`, `grace` and `alan` are the
-development roster (`apps/api/auth/dev.py`); Ada and Grace are on the team
+development roster (`apps/api/src/webmap_api/auth/dev.py`); Ada and Grace are on the team
 owning the seeded data and Alan is not, which is how the permission model is
 demonstrated rather than asserted.
 
@@ -160,7 +165,7 @@ outstanding, lives in [`docs/12-roadmap.md`](docs/12-roadmap.md). In summary:
 | Area | State |
 |---|---|
 | Monorepo, boundary lint (both languages) | Working; each contract verified against a deliberate violation |
-| Schema, RLS policies, ownership trigger | Applied and rolled back cleanly; 17 tables, 24 policies |
+| Schema, RLS policies, ownership trigger | Applied and rolled back cleanly; 16 tables, 24 policies |
 | Compose stack, container images | `docker compose up` verified from empty volumes |
 | Seed script | 2,000 points, 20 faults, one grid, queryable via DuckDB and TiTiler |
 | Identity, permissions, audit | Working offline via the verifier seam ([ADR 0009](docs/adr/0009-offline-identity-seam.md)); OIDC and MSAL paths written but unrun |
@@ -172,10 +177,11 @@ outstanding, lives in [`docs/12-roadmap.md`](docs/12-roadmap.md). In summary:
 | `apps/mcp` | 13 tools over stdio — discovery, analysis, jobs, render, session — plus `webmap-mcp-install` |
 | `webmap_geo` | Variograms, ordinary kriging, minimum curvature with fault-aware stencils, contouring, fault validation, constrained triangulation |
 | Jobs | arq worker with progress, cooperative cancellation, quotas, idempotency; gridding and contouring end to end with lineage |
+| `webmap_geo` (labels, contour bands) | Polygon label anchors and filled contour bands, with areas checked against a closed form |
 | `webmap_geo.aggregate`, editing, connectors, export | Empty by design until Phases 5–6 |
 
-Verified against a live stack: 826 Python tests including the full integration
-suite, 295 TypeScript, lint and typecheck clean in both languages.
+Verified against a live stack: 906 Python tests including the full integration
+suite, 320 TypeScript, lint and typecheck clean in both languages.
 
 What is **not** demonstrated is as important: `tests/visual/golden/` and
 `tests/e2e/` are still empty, and no test carries the `reference` marker, so

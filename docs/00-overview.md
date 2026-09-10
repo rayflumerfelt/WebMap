@@ -1,7 +1,7 @@
 # 00 — Overview
 
 **Project name:** WebMap
-**Status:** Specification, pre-implementation
+**Status:** Phases 0-3 built, Phase 4 in progress - `12-roadmap.md` is authoritative
 **Audience:** Engineers and AI coding agents implementing the system
 
 ---
@@ -86,11 +86,11 @@ threats from data.
 | Dimension | Target | Consequence |
 |---|---|---|
 | Interpolation input | 10k–500k points | Local-neighborhood kriging mandatory; global solve impossible |
-| Output grid | up to 2000×2000 cells | Sparse solve, ~seconds with multigrid |
+| Output grid | 4M cells by default, 16M by quota (`02` §5, `10` §7) | Sparse solve, ~seconds with multigrid |
 | Vector layer display | up to 5M features | MVT from GeoParquet via DuckDB, not GeoJSON |
 | Concurrent users | ~5–10 | Modest; contention is on the worker, not the API |
 | Render latency | < 5 s p95 | Warm browser pool |
-| Grid job latency | < 3 min p95 | Async job queue with progress |
+| Grid job latency | < 5 min p95 (`05` §10) | Async job queue with progress |
 
 ## 6. Architecture summary
 
@@ -104,7 +104,8 @@ rendering (Playwright + headless Chromium running real MapLibre GL JS). Rasters 
 through TiTiler for dynamic colormaps; vectors as MVT generated in-process. MapLibre Style
 JSON is the single source of truth for appearance — the interactive map and the headless
 renderer consume byte-identical style documents. An MCP server exposes the whole thing to
-Claude over Streamable HTTP.
+Claude over stdio, running on the user's own workstation (`adr/0008-local-stdio-mcp.md`) — as
+§4 says, and as this paragraph previously contradicted.
 
 ## 7. Non-goals
 

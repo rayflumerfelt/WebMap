@@ -87,7 +87,7 @@ Browser ──▶ /auth/login ──▶ IdP ──▶ /auth/callback ──▶ s
   the directory is the source of truth, `team_member` is a cache.
 
 ```python
-# apps/api/auth/oidc.py
+# apps/api/src/webmap_api/auth/oidc.py
 
 from authlib.integrations.starlette_client import OAuth
 from webmap_core.settings import settings
@@ -149,7 +149,7 @@ the one query someone forgets.
 ### 3.2 Permission resolution
 
 ```python
-# python/webmap_core/permissions.py
+# python/webmap_core/src/webmap_core/permissions.py
 
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
@@ -236,7 +236,7 @@ is deliberately not a read:
 ### 3.4 Setting RLS context
 
 ```python
-# apps/api/db/session.py
+# python/webmap_core/src/webmap_core/db/session.py
 
 from contextlib import asynccontextmanager
 
@@ -376,7 +376,7 @@ Jobs run asynchronously, after the request is gone. The identity must travel wit
 payload.
 
 ```python
-# apps/worker/tasks/base.py
+# apps/worker/src/webmap_worker/runtime.py
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -412,7 +412,7 @@ open for performance is exactly how data leaks.
 **Approach: short-TTL signed URLs, minted by the API after a permission check.**
 
 ```python
-# python/webmap_core/signing.py
+# python/webmap_core/src/webmap_core/signing.py
 
 import hmac, hashlib, time, base64
 from uuid import UUID
@@ -500,7 +500,7 @@ service, and the response appears in the rendered image.
 ### 7.1 Style validation before dispatch
 
 ```python
-# apps/render/security.py
+# apps/render/src/webmap_render/security.py
 
 from urllib.parse import urlparse
 

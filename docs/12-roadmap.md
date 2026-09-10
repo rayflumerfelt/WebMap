@@ -15,11 +15,11 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 
 ## Current status
 
-Updated 2026-09-09 (Phase 4 in progress). A phase is complete only when every criterion
+Updated 2026-09-10 (Phase 4 in progress). A phase is complete only when every criterion
 passes; a criterion met with a caveat says so rather than being ticked quietly.
 
 Verified on this date against a live stack: 906 Python tests including the full integration
-suite, 319 TypeScript tests, and lint, formatting, typechecking and the package-boundary
+suite, 320 TypeScript tests, and lint, formatting, typechecking and the package-boundary
 contracts clean in both languages.
 
 | Phase | State |
@@ -88,7 +88,7 @@ something to check, and are empty until their phase. They are not oversights:
 |---|---|
 | `packages/ui` ramp editor, schema-driven property editor | 5 |
 | `webmap_geo.aggregate` | 4 (still owed) |
-| `webmap_io.connectors` (file share, PostGIS) | 6 |
+| `webmap_io.connectors` (file share, PostGIS) | 6 — **but the directory is empty**: no `__init__.py`, so it is not importable and no contract names it |
 | `webmap_io` readers for `.grd`, ZMAP+, KML, DXF | 6 |
 | Export and loss reporting (`11-file-io.md` §4.2, §7) | 6 |
 | `tests/visual/golden`, `tests/e2e` | 2, 3 — **overdue**, see above |
@@ -308,8 +308,10 @@ fault is gridded with it.
       no interpolator honours them yet
 - [x] Fault network validation catches all defects in the hostile fault fixture, each with a
       location
-- [ ] 100k points → 1000×1000 with faults completes in under 5 minutes (minimum curvature)
-      — **unmeasured**
+- [x] 1000×1000 with faults completes in under 5 minutes (minimum curvature) — **measured
+      2026-09-10 at 181.5 s** for 1,083,630 cells with a 20-fault network and 2,000 control
+      points, end to end through the job queue (`05` §10). Not yet measured at 100k control
+      points, which is a control-density question rather than a grid-size one
 - [x] Cancelling a running job leaves no partial dataset registered
 - [x] Lineage record is sufficient to re-run and reproduce the identical grid — asserted by
       re-running the job and comparing the arrays, not by inspecting the record
@@ -351,12 +353,25 @@ produces the same wrong surface with nothing said about it.
 - Schema-driven property editor generated from the MapLibre style spec
 - Graduated and rule-based symbology; all classification methods
 - Style templates with resolution order
-- Terra Draw integration, vertex editing
-- Snapping with spatial index
-- Geometry validation, blocking on errors
-- Copy-on-write version commit with 409 conflict detection; version history browser
-- Undo/redo
-- Attribute editing
+- **Command registry** (`09` §8) — one definition per command, driving the menu bar, palette,
+  toolbar and context menu. Built before any surface, because retrofitting it means finding four
+  copies of every command's enabled-state logic
+- **Selection** — multi-feature and vertex scopes, click/rectangle/lasso, active-layer plumbing
+- **Edit session** (`09` §5) — dirty buffer, `Command`/`FeatureDelta`, undo/redo, Save/Discard,
+  IndexedDB crash durability. **Before any mutating operation exists**
+- **Screen-space snapping** (`09` §6) — vertex/edge/intersection/midpoint, the pixel-clamped
+  tolerance and its badge, the exact-coordinate resolution protocol, unsimplified tiles at edit
+  zooms
+- **Vertex editing** — handles, move/add/delete, nudge, numeric and bearing entry
+- **Terra Draw for new geometry only** ([`adr/0014`](adr/0014-terra-draw-scoped-to-creation.md)),
+  wired to the snap engine through `toCustom`
+- **Topological editing** ([`adr/0013`](adr/0013-topological-editing-within-the-active-layer.md))
+  — coincidence index, propagation on vertex operations, the discoverability nudge
+- **Operations catalog** (`09` §11) — split, reshape, combine/explode/dissolve, overlay,
+  smooth/simplify, buffer, align
+- Geometry validation blocking on errors, plus **Validate Topology** as a whole-layer job
+- Copy-on-write version commit; the 409 names the changed features (`adr/0005`, amended twice)
+- Attribute editing, including bulk edit and dissolve resolution strategies
 - **Layers and basemaps as shared objects** (`adr/0010`): `layer`, `basemap`,
   `basemap_layer`, duplication, and the map's active layer
 - **Capability roles**: `app_user.is_global_admin`, `team_member.role`, and the
@@ -377,9 +392,15 @@ produces the same wrong surface with nothing said about it.
 - [ ] A Surfer `.clr` imports and renders identically to Surfer's display of the same grid
 - [ ] The property editor exposes every paint and layout property for each layer type,
       correctly filtered by geometry
+- [ ] A feature round-trips through every engine hop with bit-identical coordinates (`09` §2.4)
+- [ ] A topological vertex move leaves every previously coincident vertex still coincident
+- [ ] Vertex add propagates to the neighbour sharing that edge — the case that silently creates
+      slivers when implemented halfway (`09` §7.3)
+- [ ] Two sessions commit against one version; the loser gets a 409 **naming the features that
+      changed**, not just the version
 - [ ] Snapping lands within tolerance on vertices, edges, and intersections, with visual
       feedback
-- [ ] Snap index query completes in under 2 ms with 50k features in view
+- [ ] The full snap pass completes in under 4 ms with 50k segments in view (`09` §6.5)
 - [ ] A polygon digitized against an existing boundary with snapping on produces no sliver
 - [ ] Editing a fault and re-gridding produces a surface reflecting the new geometry
 - [ ] Undo restores exact prior state across 20 random operation sequences
@@ -458,7 +479,7 @@ Not scheduled. Revisit only with a stated trigger.
 | Real-time collaborative editing | Sustained demand; concurrent commits are already detected, just not merged (`adr/0005`) |
 | Remote MCP endpoint | Access needed from outside the domain, or enough users that per-workstation install is a burden (`adr/0008`) |
 | MapLibre Native renderer | Render throughput > 100/min, or container size becomes an operational blocker |
-| Full planar topology | Coverage editing becomes a primary workflow |
+| Full planar topology — a stored node/edge graph, and cross-layer propagation | Coverage editing spans layers. The narrower within-layer coincidence editing of `adr/0013` is Phase 5, not deferred |
 | PostGIS for the data plane | An operation DuckDB spatial cannot express, or concurrent writers (`adr/0002`) |
 | Kerberos delegation for shares | Share-sourced data expands beyond well-understood locations |
 | Unattended/batch rendering | A scheduled reporting requirement appears |

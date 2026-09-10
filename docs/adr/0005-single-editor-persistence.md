@@ -104,3 +104,33 @@ and a conflict path per row. The immutable objects do the hard part.
 **Unchanged:** the retention rule (every version 30 days, then thinned to daily), the 5,000-
 feature viewport working set that keeps rewrites cheap, and the crash-safety property that a
 half-written object is invisible until the pointer moves.
+
+---
+
+## Amendment — 2026-09-10
+
+**The pointer still commits. The 409 now names the features.**
+
+`09-editing.md` §5.3 wanted what a per-feature version model gives you: on a conflict, tell the
+user *which* features changed underneath them, so they can keep their edits to the ones nobody
+else touched. The first amendment rejected the mechanism — a version column on every feature and
+a conflict path per row — and that rejection stands.
+
+It is not needed. Both versions are **immutable objects that still exist**, so on a failed
+pointer update the server diffs `v_expected` against `v_current` and returns the ids that
+actually changed. The answer was already in storage; nothing had to be recorded to get it.
+
+The 409 body therefore carries the current version *and* the changed feature ids, and the client
+offers **Refresh** — discard local changes to those features and rebase the rest — or **Force**.
+
+This is the useful half of per-feature conflict resolution at none of its cost, and it is only
+possible because of the storage model this ADR chose in the first place. A mutable feature table
+could not answer the question without the version column.
+
+> **A note on the section numbers above.** `09-editing.md` was restructured from nine sections
+> to twenty when the editing subsystem was specified in full. The references in this ADR's
+> Context and Consequences point at the document *as it stood when the decision was made*, and
+> are left that way because an ADR is a record of a moment rather than a live index. Their
+> current homes: optimistic locking → §5.3, redo-clearing → §3.4, the working set → §17, the
+> edit-and-re-grid E2E test → §19.
+

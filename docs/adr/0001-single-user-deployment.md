@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-09-08
+**Superseded by [[0007-multi-user-directory-sso]] — 2026-09-08.** Accepted 2026-09-08 and reversed the same day, once a second regular user appeared — which is the trigger this ADR named for its own reversal. Kept rather than deleted: it records what the removal cost, which is the context 0007 answers.
 
 ## Context
 

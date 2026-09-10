@@ -1,6 +1,6 @@
 # 02 — Data Model
 
-Implementation depth. The DDL here is the contract; Alembic migrations must match it.
+Implementation depth. The DDL here is the contract; Alembic migrations must match it **for every table a migration has created**. Five tables specified below — `team_preferences`, `global_preferences`, `layer`, `basemap`, `basemap_layer` — are the `adr/0010` additions and have no migration yet; they arrive in Phase 5. Sixteen of the twenty-one exist today.
 
 ---
 
@@ -35,7 +35,7 @@ it, not a parallel implementation** — it holds the validation that belongs at
 the boundary preparing arrays for analysis, and delegates every transform.
 
 ```python
-# python/webmap_core/crs.py
+# python/webmap_core/src/webmap_core/crs.py
 
 from dataclasses import dataclass
 
@@ -400,7 +400,11 @@ that pointer is the atomic commit for an edit (`adr/0005-single-editor-persisten
 
 Because objects are immutable, two concurrent editors cannot corrupt each other's writes —
 they produce two separately-named objects. They contend only on the pointer, which is one row
-and one optimistic `UPDATE`; see `09-editing.md` §5.1.
+and one optimistic `UPDATE`; see `09-editing.md` §5.3.
+
+Because superseded versions are retained, a conflict can be *explained* without storing anything
+extra: the server diffs the two objects and reports which features changed underneath the loser
+of the race.
 
 ```
 features/ds_<uuid_hex>/v1.parquet      <- superseded, retained
@@ -415,7 +419,18 @@ Schema of each object:
 | `id` | `INT64` | Stable across versions; the edit identity of a feature |
 | `geometry` | GeoParquet WKB | In the dataset's `storage_srid` |
 | `props` | JSON string | Attribute values |
+| `geometry_source` | `STRING` | `'drawn'` or `'derived'` — see below |
 | `updated_at` | `TIMESTAMP` | |
+
+**`geometry_source` is present from the start although `'derived'` is unused at launch**
+(`09-editing.md` §18). A derived feature is one whose geometry is *computed from parameters* —
+a development well stick from a surface location, azimuth, length and survey — where the
+parameters are authoritative and the linestring is a rendering of them. Such a feature is not
+vertex-editable through the normal handles; editing it means editing its parameters.
+
+Adding the column later would mean rewriting every feature object in every dataset. Adding it
+now costs one string per row in a columnar format that will dictionary-encode it to nearly
+nothing.
 
 GeoParquet metadata carries the CRS, so an object is self-describing — a `.parquet` handed
 to someone else does not need this database to be readable, which is not true of a row in a
@@ -933,7 +948,7 @@ prefix — not putting features back in Postgres.
 
 ## 5. Pydantic models
 
-`python/webmap_core/models.py`. These are the API and MCP contract.
+`python/webmap_core/src/webmap_core/models.py`. These are the API and MCP contract.
 
 ```python
 from __future__ import annotations
@@ -1167,7 +1182,7 @@ Rules:
 - Never delete an upgrade path. `v1 → v2 → v3` chains are fine.
 
 ```python
-# python/webmap_core/versioning.py
+# python/webmap_core/src/webmap_core/versioning.py
 
 from typing import Any, Callable
 

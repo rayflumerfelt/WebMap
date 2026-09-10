@@ -15,6 +15,10 @@ Naming: `NNNN-short-title.md`. Format and an example are in `CLAUDE.md` §10.
 | [0008](0008-local-stdio-mcp.md) | The MCP server runs locally over stdio | Accepted · amended 2026-09-08 |
 | [0009](0009-offline-identity-seam.md) | A verifier seam so identity is testable without the directory | Accepted |
 | [0010](0010-layers-basemaps-and-capability-roles.md) | Layers and basemaps as shared objects; roles as capabilities | Accepted |
+| [0011](0011-reml-for-trend-residual-variograms.md) | Fit trend-residual variograms by REML, not least squares | Accepted |
+| [0012](0012-geostatistics-in-webmap-geo.md) | The geostatistics toolkit lives in `webmap_geo`, on WebMap's contracts | Accepted |
+| [0013](0013-topological-editing-within-the-active-layer.md) | Topological editing, scoped to the active layer | Accepted |
+| [0014](0014-terra-draw-scoped-to-creation.md) | Terra Draw draws; it does not own selection, vertices, or the store | Accepted |
 
 ## Reading order
 
@@ -48,4 +52,18 @@ than a new position.
 0011 is the one to read before touching variogram code. It records why a least-squares fit to
 a fitted-trend residual biases sill and range downward, why that bias feeds itself inside the
 GLS loop, and why two CI tests exist whose only job is to fail if someone removes REML later.
+
+**0013 and 0014 cover the editing subsystem** rewritten in `09-editing.md`. Both reverse a
+position that document previously held, which is why they are ADRs rather than edits.
+
+0013 adopts topological editing after `09` §1 had deferred it. The deferral's argument — that an
+editor which silently permits slivers is worse than none — is not overturned; what changed is the
+recognition that a coordinate coincidence index over one layer, off by default, at a tolerance
+three orders of magnitude tighter than snapping, is a much smaller thing than the planar topology
+that was refused. Validation still blocks a save that would introduce a sliver.
+
+0014 scopes Terra Draw to creating new geometry, where `09` §2 had given it selection and vertex
+editing as well. The reason is not a defect in the library but the boundary of what it was built
+for: its select mode is single-feature, and the entire Edit menu operates on a multi-feature
+selection.
 

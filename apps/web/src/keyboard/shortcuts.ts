@@ -3,9 +3,19 @@
  *
  * Single-letter tool shortcuts follow the convention geologists already know
  * from QGIS and Surfer, which is why they are bare letters rather than
- * chorded: someone who has used those for a decade reaches for `v`, `i`, `m`
- * without thinking. A command palette (`mod+k`) covers everything else without
- * growing the toolbar.
+ * chorded. A command palette (`mod+k`) covers everything else without growing
+ * the toolbar.
+ *
+ * **`v` and `m` are deliberately absent.** They belong to the editing command
+ * registry (`09-editing.md` §8, §15), where `v` is vertex-edit and `m` is
+ * move — the QGIS and ArcGIS bindings. An earlier version of this file bound
+ * them to select and measure, which meant the same two keys did different
+ * things depending on which document you read. The editing registry is the
+ * single registrar for shortcuts once an edit session exists, so the app-level
+ * map gives way rather than competing with it: select moved to `1`, which is
+ * what `09` §15 binds click-select to inside an edit session — the same
+ * concept, the same key, in both contexts — and measure moved to `d` for
+ * distance.
  *
  * Bare letters make one rule load-bearing: **a shortcut never fires while the
  * user is typing.** Without that, renaming a layer to "measured depth" would
@@ -24,10 +34,10 @@ export const SHORTCUTS = {
   'mod+2': 'panel.symbology.toggle',
   'mod+3': 'panel.attributes.toggle',
   'mod+enter': 'render.current',
+  '1': 'tool.select',
   e: 'tool.edit',
-  v: 'tool.select',
   i: 'tool.identify',
-  m: 'tool.measure',
+  d: 'tool.measure',
   f: 'view.zoomToLayer',
   Escape: 'tool.cancel',
 } as const;

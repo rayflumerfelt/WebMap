@@ -24,7 +24,7 @@ Keep the interface at `render(spec: RenderSpec) -> bytes` so the engine stays sw
 ## 2. Container
 
 ```dockerfile
-# apps/render/Dockerfile
+# infra/docker/render.Dockerfile
 FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
 
 # Fonts for HTML overlays (legend, title block). Map labels use glyph PBFs
@@ -55,7 +55,7 @@ Never launch a browser per request — that is 2–4 seconds of pure startup. La
 a `BrowserContext` per job.
 
 ```python
-# apps/render/pool.py
+# apps/render/src/webmap_render/pool.py
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -205,7 +205,7 @@ window.renderMap = async function (spec) {
 ## 5. Render pipeline
 
 ```python
-# apps/render/service.py
+# apps/render/src/webmap_render/service.py
 
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -298,7 +298,7 @@ Styles are **always assembled server-side** from validated layer references. Cli
 symbology is accepted; client-supplied source URLs are not (`03-auth-security.md` §7.3).
 
 ```python
-# apps/api/services/style_builder.py
+# python/webmap_core/src/webmap_core/services/style_builder.py
 
 async def build_style(
     actor: Actor,
@@ -349,7 +349,7 @@ DuckDB. No tile service, no build step — which still matters, because layers a
 tile must reflect the current version the moment the version pointer advances.
 
 ```python
-# apps/api/services/tiles.py
+# python/webmap_geo/src/webmap_geo/tiles.py
 
 TILE_SQL = """
 SELECT ST_AsMVT(t, $layer, 4096, 'geom')

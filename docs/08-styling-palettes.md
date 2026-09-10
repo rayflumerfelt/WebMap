@@ -410,7 +410,7 @@ without a JS runtime. The shared vectors are the cost of that.
 ## 4. Classification
 
 ```python
-# python/webmap_core/style/classify.py
+# python/webmap_core/src/webmap_core/style/classify.py
 
 import numpy as np
 
@@ -516,7 +516,7 @@ hand-built ramps guarantees the tool is rejected.
 | WebMap native | `.json` | Round-trip |
 
 ```python
-# python/webmap_core/style/palette_io.py
+# python/webmap_core/src/webmap_core/style/palette_io.py
 
 def read_clr(text: str) -> Palette:
     """Surfer .clr format.

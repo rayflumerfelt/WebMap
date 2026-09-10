@@ -71,7 +71,7 @@ def write_features(
 
     Objects are immutable and whole-object: there is no incremental append.
     An edit produces a new version (`adr/0005-single-editor-persistence.md`),
-    and the 5,000-feature viewport cap in `09-editing.md` §8 is what keeps
+    and the 5,000-feature viewport cap in `09-editing.md` §17 is what keeps
     that cheap.
     """
     if len(geometry) != len(props):

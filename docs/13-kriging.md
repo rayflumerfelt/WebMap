@@ -162,8 +162,9 @@ scaling. Anything requiring a network call at runtime (`00-overview.md` §7).
 
 ## 4. Data contracts
 
-Frozen dataclasses with validation in `__post_init__`, in `webmap_geo/types.py` beside the
-existing `AnalysisFrame` and `GridDefinition`.
+Frozen dataclasses with validation in `__post_init__`. `AnalysisFrame` lives in
+`webmap_geo/frame.py` and `GridDefinition` in `webmap_geo/grid.py`; the new types below sit
+beside the code that uses them rather than being collected into a `types.py`.
 
 ### 4.1 Samples
 
@@ -693,7 +694,10 @@ Back-transform quantiles through §5.3. Exact, no correction.
 | Cell size | ¼ to ⅕ of the shortest fitted range, capped by `SOFT_CELL_LIMIT` | `GridDefinition(cell_size=)` |
 | Extent | Convex hull of samples, buffered by one range | `"bbox"`, `"alpha_hull"`, or a Polygon |
 | Search radius | 1.0–1.5 × the longest range | `neighborhood(radius=)` |
-| Min / max neighbours | 8 / 40 | `neighborhood(min_n=, max_n=)` |
+| Min / max neighbours | 8 / 48 | `neighborhood(min_n=, max_n=)` |
+
+The maximum matches `InterpolationRequest.n_neighbors` (`02` §5) and the `webmap_interpolate` schema, which both default to 48. A geostatistics path that quietly used a different neighbourhood than the interpolation path would make two grids of the same data differ for a reason nobody could find.
+
 | Search ellipse | From the fitted anisotropy (§7.6) | explicit ratio/azimuth |
 | Sector search | Off; quadrant/octant available | `sectors=4|8`, `per_sector=` |
 | Extrapolation mask | Nodes further than `mask_distance` (default 1 × range) from any sample | `mask_distance=` |
@@ -935,10 +939,15 @@ reach the lineage record and the UI.
 
 ### 14.3 As a job
 
-Full-resolution runs go through the existing job path (`10-jobs-async.md`): a
-`KrigingRequest` submitted at `POST /api/v1/jobs/krige`, executed by the worker as the
-requesting principal, with progress phases weighted by measured duration and cancellation
+Full-resolution runs go through the **existing gridding job** — `POST /api/v1/jobs/interpolate`
+with `method="regression_kriging"` or `"regression_indicator_kriging"`, executed by the worker
+as the requesting principal, with progress phases weighted by measured duration and cancellation
 checked before anything becomes visible.
+
+**No second request model and no second tool.** `InterpolationRequest` gains the fields RK and
+RIK need — trend, covariates, transform, thresholds, tail, scenario — and they are documented as
+method-specific. The alternative, a parallel `KrigingRequest` behind a `webmap_krige` tool, would
+give Claude two tools for "make me a grid" and a geologist two places to look.
 
 The phases are real and known in advance, which is what makes progress here informative
 rather than a spinner:

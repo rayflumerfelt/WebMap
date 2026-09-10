@@ -11,8 +11,8 @@ Package: `python/webmap_io`.
 | Shapefile (`.shp`) | ✓ | ✓ | pyogrio | Interchange only — see §4 |
 | GeoJSON | ✓ | ✓ | pyogrio / orjson | Always WGS84 per RFC 7946 |
 | GeoPackage (`.gpkg`) | ✓ | ✓ | pyogrio | Preferred over shapefile for everything |
-| GeoParquet | ✓ | ✓ | pyarrow + geoarrow | Large layers |
-| CSV / XYZ | ✓ | ✓ | pandas | Column mapping required |
+| GeoParquet | ✓ | ✓ | pyarrow | Large layers; GeoParquet metadata written directly, no `geoarrow` |
+| CSV / XYZ | ✓ | ✓ | stdlib `csv` | Column mapping required; no pandas dependency |
 | GeoTIFF / COG | ✓ | ✓ | rasterio | Internal grid format |
 | ASCII Grid (`.asc`) | ✓ | ✓ | rasterio | Common Surfer export |
 | Surfer Grid (`.grd`) | ✓ | ✗ | custom | Read-only; v6 binary and v7 |
@@ -35,7 +35,7 @@ layers, returns arrays rather than per-feature dicts.
 Data lives in three places. Build one abstraction rather than special-casing each.
 
 ```python
-# python/webmap_io/connectors/base.py
+# python/webmap_io/src/webmap_io/connectors/base.py
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -154,8 +154,8 @@ async def sync_dataset(ctx: JobContext, dataset_id: UUID) -> SyncResult:
 
     1. describe() the source; compare checksum against dataset.source_checksum
     2. Unchanged → mark synced_at, return early
-    3. Changed → fetch, read, validate, load into a staging table
-    4. Atomic swap staging → live
+    3. Changed → fetch, read, validate, write a new versioned GeoParquet object
+    4. Advance `dataset.parquet_key` / `dataset.version` — the pointer move is the commit (`adr/0005`, `09` §13). There is no staging table; objects are immutable
     5. Update bbox, feature_count, attribute_schema, checksum, synced_at
 
     The atomic swap matters: a geologist should never see a half-loaded
@@ -171,7 +171,7 @@ stale data as current.
 ## 3. Reading
 
 ```python
-# python/webmap_io/read.py
+# python/webmap_io/src/webmap_io/read.py
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -231,7 +231,7 @@ def read_xyz(
     """
 ```
 
-The API exposes `POST /datasets/preview` returning the first 50 rows and a proposed mapping, so
+The API exposes `POST /api/v1/datasets/preview` returning the first 50 rows and a proposed mapping, so
 the UI (and Claude) can confirm before committing.
 
 ---
@@ -245,7 +245,7 @@ of it. It must never influence the internal data model.
 
 | Constraint | Consequence | Handling |
 |---|---|---|
-| Field names ≤ 10 chars | `porosity_avg` → `porosity_a` | Warn at schema-edit time (`09-editing.md` §7) |
+| Field names ≤ 10 chars | `porosity_avg` → `porosity_a` | Warn at schema-edit time (`09-editing.md` §14) |
 | Field name collisions after truncation | Silent data loss | Detect, auto-suffix, report |
 | No null support in numeric fields | Nulls become 0 | Warn; offer a sentinel value |
 | Single geometry type per file | Mixed layers cannot export | Split into multiple files, named |
@@ -316,7 +316,7 @@ applies.
 ## 5. Grid I/O
 
 ```python
-# python/webmap_io/raster.py
+# python/webmap_io/src/webmap_io/raster.py
 
 import numpy as np
 import rasterio
@@ -420,7 +420,7 @@ async def write_features(result: ReadResult, key: str) -> int:
 
 Writing is a whole-object operation. There is no incremental append — an edit produces a new
 version (`adr/0005-single-editor-persistence.md`), and the 5,000-feature viewport cap in
-`09-editing.md` §8 is what keeps that cheap.
+`09-editing.md` §17 is what keeps that cheap.
 
 ## 7. Export
 

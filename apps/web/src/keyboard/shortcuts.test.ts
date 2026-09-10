@@ -63,7 +63,15 @@ describe('modifiers', () => {
   });
 
   it('is case-insensitive, so Shift-held letters still resolve', () => {
-    expect(commandFor({ key: 'V' })).toBe('tool.select');
+    expect(commandFor({ key: 'D' })).toBe('tool.measure');
+  });
+
+  it('leaves v and m unbound, because editing owns them', () => {
+    // `09-editing.md` §15: v is vertex-edit, m is move. The editing command
+    // registry is the only registrar for shortcuts once a session exists
+    // (§8), so this map must not compete for those two keys.
+    expect(commandFor({ key: 'v' })).toBeNull();
+    expect(commandFor({ key: 'm' })).toBeNull();
   });
 });
 

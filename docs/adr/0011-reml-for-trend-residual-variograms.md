@@ -42,9 +42,9 @@ produces plausible output, and a geologist puts it in a partner deck.
 
 | Variogram of | Fitter | Why |
 |---|---|---|
-| Raw data (OK, SK, standalone IK) | WLS (`vario/fit_wls.py`) | Mean is one unknown constant; no absorption to correct. Fast enough for interactive use. |
+| Raw data (OK, SK, standalone IK) | WLS (`variogram/fit.py`) | Mean is one unknown constant; no absorption to correct. Fast enough for interactive use. |
 | Indicators of an already-detrended residual | WLS | The indicator mean is again a single constant, so §7.4's bias does not arise. |
-| **Residual of a fitted trend** (RK, RIK stage 1) | **REML** (`vario/fit_reml.py`) | Uses error contrasts; removes the absorption bias by construction. |
+| **Residual of a fitted trend** (RK, RIK stage 1) | **REML** (`variogram/fit_reml.py`) | Uses error contrasts; removes the absorption bias by construction. |
 
 REML minimises, over covariance parameters `φ`:
 
@@ -87,7 +87,7 @@ calls `fit_reml` and there is no argument that switches it to WLS.
   asserting the range is materially underestimated relative to REML.
 
 The second test exists to fail loudly if someone later "simplifies" this away. Without it,
-deleting `fit_reml.py` and pointing the residual path at `fit_wls.py` passes every other test
+deleting `fit_reml.py` and pointing the residual path at `fit.py` passes every other test
 in the repository and produces subtly wrong maps forever.
 
 **REML is slower than WLS** — an optimisation over two to four parameters, each evaluation a

@@ -115,7 +115,7 @@ webmap/
 │   └── render/                    # Playwright render service
 ├── packages/                      # Reusable JS
 │   ├── map/                       # @webmap/map — the map component
-│   ├── ui/                        # @webmap/ui — ramp editor, style editor
+│   ├── ui/                        # @webmap/ui — layer tree, legend, scale bar, north arrow
 │   └── style-model/               # @webmap/style-model — TS types + compilers
 ├── python/                        # Reusable Python
 │   ├── webmap_geo/                # Interpolation, contouring, aggregation, data plane
@@ -128,6 +128,7 @@ webmap/
 ├── scripts/                       # Seed and operational scripts
 └── tests/
     ├── fixtures/                  # Synthetic inputs, including hostile/ (11 §8)
+    ├── mcp_eval/                  # MCP tool evaluations, run by `make eval`
     ├── e2e/                       # Playwright
     └── visual/                    # Render regression goldens
 ```
@@ -369,7 +370,7 @@ datasets, style, and extent. Session ID is the shared vocabulary between Claude 
 ### 5.3 Geologist grids a surface
 
 ```
-POST /api/v1/grids  ──▶ validate params ──▶ enqueue ──▶ 202 + job_id
+POST /api/v1/jobs/interpolate  ──▶ validate params ──▶ enqueue ──▶ 202 + job_id
                                                 │
 GET /api/v1/jobs/{id} ◀── poll (or WS) ────────┤
                                                 ├─ triangulate w/ fault constraints

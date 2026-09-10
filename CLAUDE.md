@@ -92,7 +92,9 @@ Violating these produces bugs that are invisible in review and expensive in prod
 ### 3.5 Package boundaries
 
 - `python/webmap_geo` imports no web framework, no database, no `webmap_core`. NumPy,
-  Shapely, and DuckDB in; NumPy, Shapely, and Arrow out.
+  Shapely, and DuckDB in; NumPy, Shapely, and Arrow out — plus a pandas covariate table on
+  the geostatistics entry points only, which [`adr/0012`](docs/adr/0012-geostatistics-in-webmap-geo.md)
+  argues for and bounds. Nothing else crosses that boundary.
 - `packages/map` imports nothing from `apps/web`.
 - `packages/ui` imports no MapLibre.
 - `packages/style-model` imports no React and no MapLibre.
@@ -396,24 +398,30 @@ PR description states: what changed, why, how it was verified, and any spec upda
 `docs/adr/NNNN-title.md` whenever a decision contradicts or extends the specs.
 
 ```markdown
-# 0007 — Cache Dijkstra frontiers by fault compartment
+# 0014 — Terra Draw draws; it does not own selection, vertices, or the store
 
 ## Status
-Accepted
+Accepted — 2026-09-10
 
 ## Context
-Fault-aware kriging missed the 5-minute target at 100k points, running at
-roughly 11 minutes. Profiling showed 78% of time in per-node Dijkstra.
+`09-editing.md` §2 gave Terra Draw selection and vertex editing as well as
+drawing. Its select mode is single-feature, multi-select is an open upstream
+request, and its snapping only targets its own internal store — none of which
+supports the multi-feature Edit menu in `09` §9.
 
 ## Decision
-Process grid nodes in compartment-major order and reuse the search frontier
-across nodes within the same compartment.
+Terra Draw is used for new geometry creation only. Selection, the feature
+store and vertex editing are ours. If custom Terra Draw modes are ever needed
+for any of those, drop the library entirely.
 
 ## Consequences
-Runtime drops to ~4 minutes. Memory rises by ~200 MB for a 1000×1000 grid.
-Node processing order is now significant — a future parallelisation must
-partition by compartment, not by row.
+More code — roughly phases 2 and 5 of `09` §20. In exchange, vertex identity
+survives tile simplification, which the exact-coordinate protocol needs and
+Terra Draw's model has no equivalent for.
 ```
+
+Use a real one as the model. The example above is
+[`0014`](docs/adr/0014-terra-draw-scoped-to-creation.md), abridged.
 
 ---
 
@@ -590,12 +598,12 @@ Terms that appear throughout and are not general software vocabulary.
 | Need | Location |
 |---|---|
 | Entity model, DDL | `docs/02-data-model.md` |
-| Permission logic | `python/webmap_core/permissions.py` |
-| CRS handling | `python/webmap_core/crs.py` |
-| Interpolation | `python/webmap_geo/interpolate/` |
-| Style compilation | `packages/style-model/` and `python/webmap_core/style/` |
+| Permission logic | `python/webmap_core/src/webmap_core/permissions.py` |
+| CRS handling | `python/webmap_core/src/webmap_core/crs.py` |
+| Interpolation | `python/webmap_geo/src/webmap_geo/interpolate/` |
+| Style compilation | `packages/style-model/` and `python/webmap_core/src/webmap_core/style/` |
 | MCP tools | `apps/mcp/src/webmap_mcp/server.py` |
-| Render service | `apps/render/service.py` |
+| Render service | `apps/render/src/webmap_render/service.py` |
 | Map component | `packages/map/src/WebMap.tsx` |
 | Test fixtures | `tests/fixtures/` |
 | Visual goldens | `tests/visual/golden/` |

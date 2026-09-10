@@ -11,7 +11,7 @@ packages/
 ├── style-model/          @webmap/style-model   (no React, no MapLibre)
 │   └── Symbology types + compilers to MapLibre Style JSON
 ├── ui/                   @webmap/ui            (React + Mantine, no MapLibre)
-│   └── Ramp editor, style property editor, legend, scale bar
+│   └── Layer tree, legend, scale bar, north arrow today; ramp editor and style property editor in Phase 5
 └── map/                  @webmap/map           (React + MapLibre + @webmap/*)
     └── The map component
 apps/
@@ -379,7 +379,7 @@ These are first-class because the input model is fixed. None require a touch fal
 - **Drag-and-drop** for layer reordering, ramp stops, and dropping files onto the map to
   import.
 - **Modifier keys**: Shift for range select, Ctrl/Cmd for multi-select, Alt to bypass
-  snapping (`09-editing.md` §3), Space to temporarily pan while a draw tool is active.
+  snapping (`09-editing.md` §6.4), Space to temporarily pan while a draw tool is active.
 - **Middle-click drag** pans; scroll wheel zooms at the cursor.
 - **Double-click** on a layer zooms to its extent; on a vertex deletes it in edit mode.
 
@@ -395,10 +395,10 @@ export const SHORTCUTS = {
   'mod+2':       'panel.symbology.toggle',
   'mod+3':       'panel.attributes.toggle',
   'mod+enter':   'render.current',
+  '1':           'tool.select',
   'e':           'tool.edit',
-  'v':           'tool.select',
   'i':           'tool.identify',
-  'm':           'tool.measure',
+  'd':           'tool.measure',
   'f':           'view.zoomToLayer',
   'Escape':      'tool.cancel',
 } as const;
@@ -406,6 +406,17 @@ export const SHORTCUTS = {
 
 Single-letter tool shortcuts follow the convention geologists already know from QGIS and
 Surfer. A command palette (`mod+k`) covers everything else without growing the toolbar.
+
+**`v` and `m` are not bound here.** They belong to the editing command registry, where `v` is
+vertex-edit and `m` is move (`09-editing.md` §15) — the QGIS and ArcGIS bindings this section
+claims to follow. This map previously bound them to select and measure, so the same two keys
+meant different things depending on which document you read, while `09` §8 required that
+shortcuts derive from the registry and never be registered independently. The app-level map
+yields: select moved to `1` — which is what `09` §15 binds click-select to inside an edit
+session, so the key means the same thing in both contexts — and measure moved to `d`.
+
+**Inside an edit session the registry is the only registrar.** This map covers the application
+shell; `09` §15 covers editing, and the two do not overlap.
 
 ### 5.5 Multi-window
 
@@ -587,8 +598,10 @@ export function useJobPolling(jobId: string | null) {
     queryKey: ['jobs', jobId],
     queryFn: () => api.get<Job>(`/jobs/${jobId}`),
     enabled: !!jobId,
-    // Back off as the job runs; gridding takes 20-90 s and hammering the
-    // endpoint every second is pure waste.
+    // **The server says how long to wait** — `poll_after_seconds` (`10` §5.1),
+    // which varies by state. Honour it, so the web client and the MCP client
+    // back off identically; the curve below is only the fallback for a
+    // response that predates the field.
     refetchInterval: (query) => {
       const state = query.state.data?.state;
       if (state === 'succeeded' || state === 'failed' || state === 'cancelled') {

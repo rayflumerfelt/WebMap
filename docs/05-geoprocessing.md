@@ -45,7 +45,7 @@ Every public entry point takes one. It **declares** the planar frame the caller'
 already in — it does not cause a transformation.
 
 ```python
-# python/webmap_geo/frame.py
+# python/webmap_geo/src/webmap_geo/frame.py
 
 from dataclasses import dataclass
 from typing import Literal
@@ -170,7 +170,7 @@ Raw fault polylines from a geologist's interpretation are almost never triangula
 Cleaning is a required step with clear diagnostics, not a silent fix-up.
 
 ```python
-# python/webmap_geo/faults.py
+# python/webmap_geo/src/webmap_geo/faults/network.py
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -261,7 +261,7 @@ def clean_network(
 ## 5. Constrained triangulation
 
 ```python
-# python/webmap_geo/mesh.py
+# python/webmap_geo/src/webmap_geo/mesh/constrained.py
 
 import numpy as np
 import triangle as tr
@@ -348,7 +348,7 @@ Briggs (1974). What Surfer produces by default, and what geologists expect for s
 Implemented directly because no library does it with fault awareness.
 
 ```python
-# python/webmap_geo/interpolate/minimum_curvature.py
+# python/webmap_geo/src/webmap_geo/interpolate/minimum_curvature.py
 
 import numpy as np
 import scipy.sparse as sp
@@ -413,7 +413,7 @@ def _assemble_biharmonic(grid, points, values, constraints, tension):
 One hard requirement at this scale: local neighborhoods.
 
 ```python
-# python/webmap_geo/interpolate/kriging.py
+# python/webmap_geo/src/webmap_geo/interpolate/kriging.py
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -498,7 +498,7 @@ Kriging without variogram analysis is kriging with made-up parameters. Both an a
 > and range self-reinforcingly. See [`adr/0011`](adr/0011-reml-for-trend-residual-variograms.md).
 
 ```python
-# python/webmap_geo/variogram.py
+# python/webmap_geo/src/webmap_geo/variogram/model.py
 
 import numpy as np
 from dataclasses import dataclass
@@ -574,7 +574,7 @@ def fit(
 ### 6.5 Method dispatch
 
 ```python
-# python/webmap_geo/interpolate/__init__.py
+# python/webmap_geo/src/webmap_geo/interpolate/__init__.py
 
 def interpolate(request: InterpolationSpec) -> InterpolationResult:
     """Single entry point. Validates, dispatches, returns grid + diagnostics.
@@ -595,7 +595,7 @@ def interpolate(request: InterpolationSpec) -> InterpolationResult:
 ## 7. Contouring
 
 ```python
-# python/webmap_geo/contour.py
+# python/webmap_geo/src/webmap_geo/contour/lines.py
 
 import contourpy
 import numpy as np
@@ -645,7 +645,7 @@ Contour output carries attributes: `value`, `is_index` (every Nth for heavier st
 ### 7.1 Filled bands
 
 ```python
-# python/webmap_geo/contour/bands.py
+# python/webmap_geo/src/webmap_geo/contour/bands.py
 
 def contour_bands(
     surface: NDArray[np.floating],
@@ -691,7 +691,7 @@ Polygon label anchors are computed here rather than left to the renderer, becaus
 geometry (`adr/0004`) and because MapLibre's own placement is per-tile.
 
 ```python
-# python/webmap_geo/label.py
+# python/webmap_geo/src/webmap_geo/label.py
 
 @dataclass(frozen=True)
 class LabelAnchor:
@@ -752,7 +752,7 @@ analysis-CRS rule below was enforced by nothing. See
 `adr/0004-geoprocessing-owns-geometry.md`.
 
 ```python
-# python/webmap_geo/aggregate.py
+# python/webmap_geo/src/webmap_geo/aggregate/__init__.py
 
 def aggregate(
     op: str,
@@ -835,14 +835,24 @@ Measured on 8 vCPU, 32 GB.
 |---|---|---|---|
 | Variogram fit | 500k pts (20k subsample) | < 5 s | |
 | Minimum curvature, no faults | 1000×1000 grid | < 10 s | AMG-bound |
-| Minimum curvature, with faults | 1000×1000, 50 faults | < 25 s | Stencil assembly cost |
 | Ordinary kriging, no faults | 100k pts → 1000×1000 | < 60 s | cKDTree + local solve |
-| Minimum curvature, with faults | 100k pts → 1000×1000 | < 5 min | Solver-bound; the expensive case |
+| **Minimum curvature, with faults** | **1.08M cells, 20 faults, 2k pts** | **< 5 min — measured 181 s** | Solver-bound; the expensive case |
 | Triangulation | 500k pts + 100 faults | < 15 s | |
 | Contouring | 2000×2000, 20 levels | < 5 s | |
 
-Exceeding these is a bug, not a fact of life. Profile before optimizing; the fault-aware
-neighbor search is the expected hotspot and the caching strategy in §6.2 is the first lever.
+**The faulted minimum-curvature row is measured, not estimated.** An earlier revision carried
+*two* rows for that operation — 25 s and 5 min — for the same method and the same output size,
+which cannot both be right when the method scales with grid cells rather than input points. It
+was settled by running it: a 1,230 × 881 grid (1,083,630 cells) at 500 ft over the seeded
+Midland Basin extent, with the 20-fault network and 2,000 control points, completed in
+**181.5 s** wall clock end to end — job submission through solve to a registered COG — on a
+developer workstation through Docker. The 25 s figure was wrong for the whole job by roughly
+7×; the 5-minute budget holds with about 40% headroom.
+
+Exceeding these is a bug, not a fact of life. Profile before optimizing; minimum curvature's
+sparse solve is the expected hotspot. **§6.2's caching strategy is not the lever it once was** —
+fault-aware neighbour search was measured and removed, and the compartment-major frontier
+caching that section used to propose went with it.
 
 **These need re-measuring, not assuming.** They were established against a design where
 overlay and aggregation ran in PostGIS and features lived in database tables. Reading

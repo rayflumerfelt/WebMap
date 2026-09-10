@@ -12,17 +12,17 @@ and the spatial operations themselves. Three things justified PostGIS specifical
 
 1. `ST_AsMVT` serving dynamic vector tiles from live, editable data via Martin
    (`06` §7).
-2. The spatial aggregation catalog (`05` §7) — buffer, dissolve, clip, overlay,
+2. The spatial aggregation catalog (`05` §8) — buffer, dissolve, clip, overlay,
    spatial join, voronoi, hexbin — implemented as "thin wrappers over PostGIS."
 3. GIST indexes for tile bbox queries and snapping.
 
 Two findings moved this. First, DuckDB's spatial extension now covers all three —
 verified against duckdb 1.5.5: `ST_AsMVT`, `ST_AsMVTGeom`, `ST_TileEnvelope`,
-`ST_Transform`, RTREE indexes, and every function named in the `05` §7 catalog.
+`ST_Transform`, RTREE indexes, and every function named in the `05` §8 catalog.
 Second, [[0001-single-user-deployment]] removed row-level security, which was the
 one PostGIS-adjacent capability DuckDB has no answer for.
 
-Separately, `05` §7's PostGIS wrappers were a standing violation of the rule that
+Separately, `05` §8's PostGIS wrappers were a standing violation of the rule that
 all geometry operations belong in the geoprocessing module
 ([[0004-geoprocessing-owns-geometry]]) — the aggregation catalog executed as SQL in
 the database, not in `webmap_geo`.
@@ -75,7 +75,7 @@ copy-on-write rather than `UPDATE`, and the version pointer lives in Postgres.
 
 Losing PostGIS means losing an escape hatch: any operation not covered by DuckDB
 spatial has to be written against Shapely in `webmap_geo` rather than reached for in
-SQL. The `05` §7 catalog was checked function-by-function before this was accepted;
+SQL. The `05` §8 catalog was checked function-by-function before this was accepted;
 anything added later needs the same check.
 
 Restoring PostGIS is possible but not free — the tile path, the aggregation

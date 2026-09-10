@@ -71,7 +71,8 @@ The four conflicts resolve toward WebMap in every case:
    the same way it draws every other map, and the HTML report is assembled by
    `webmap_core`/render from those two sources.
 
-**Two dependencies are added to `webmap_geo`, and both are load-bearing:**
+**Two dependencies will be added to `webmap_geo` when Phase 7 starts**, and both are
+load-bearing. Neither is in `python/webmap_geo/pyproject.toml` today:
 
 - `pandas` — the covariate table. Covariates are named, heterogeneous columns that get
   selected, standardised, screened for collinearity, and carried alongside coordinates
@@ -91,7 +92,7 @@ tool the message *is* the interface (`CLAUDE.md` §8), and a caller cannot branc
 
 ## Consequences
 
-**`webmap_geo`'s dependency list grows by two**, in a package where `CLAUDE.md` §7.2 says
+**`webmap_geo`'s dependency list will grow by two**, in a package where `CLAUDE.md` §7.2 says
 every dependency is reviewed. The justification is above; a future reviewer should hold new
 additions to the same bar rather than treating these as a precedent for loosening it.
 

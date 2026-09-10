@@ -9,7 +9,7 @@ Accepted — 2026-09-08
 The spec set claimed a clean separation between computation and presentation but did
 not enforce one. Three places broke it:
 
-- **`05-geoprocessing.md` §7** — the entire spatial aggregation catalog was "thin
+- **`05-geoprocessing.md` §8** — the entire spatial aggregation catalog was "thin
   wrappers over PostGIS." Buffer, dissolve, clip, intersect, union, difference,
   spatial join, summarize-within, voronoi, and hexbin executed as SQL against the
   database, not in `webmap_geo`.
@@ -33,7 +33,7 @@ computation of its own.
 
 Concretely:
 
-1. The `05` §7 aggregation catalog is implemented in `webmap_geo` over in-process
+1. The `05` §8 aggregation catalog is implemented in `webmap_geo` over in-process
    DuckDB and Shapely, not as SQL issued at a database
    ([[0002-duckdb-data-plane]] makes this the natural implementation rather than a
    sacrifice).
@@ -56,14 +56,14 @@ belongs to `webmap_geo`. If it reads or writes appearance, it does not.
 ## Consequences
 
 The rule becomes structural rather than aspirational. With aggregation running
-in-process, there is no SQL path for a geometry operation to take, so `05` §7's
+in-process, there is no SQL path for a geometry operation to take, so `05` §8's
 analysis-CRS rule is enforced by the `AnalysisFrame` threading of
 [[0003-geoprocessing-owns-crs]] instead of by review.
 
 Large-layer overlays now load geometry into the process rather than staying in the
 database. DuckDB reads GeoParquet columnar and lazily, so this is not the naive
 round-trip it would have been against Postgres — but it is a different performance
-profile, and the `05` §9 targets should be re-measured against it rather than
+profile, and the `05` §10 targets should be re-measured against it rather than
 assumed to carry over.
 
 Losing the SQL escape hatch means any operation DuckDB spatial does not cover has to

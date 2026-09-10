@@ -28,7 +28,12 @@ BASE_URL = "http://localhost:8000"
 
 #: Long enough for a real solve on the seeded layer, short enough that a stuck
 #: worker fails the suite rather than hanging it.
-JOB_TIMEOUT_SECONDS = 120
+#: Generous on purpose. These submit real gridding jobs to a real worker, and a
+#: seeded grid takes 20-90 s unloaded. At 120 s this failed once on a machine
+#: that was also running a 181 s measurement — a false failure that says nothing
+#: about the code. The number that matters for latency is the measured budget in
+#: `05` §10, asserted there; this one only needs to outlast a busy laptop.
+JOB_TIMEOUT_SECONDS = 300
 
 #: A token unique to this run, mixed into every job's output name.
 #:

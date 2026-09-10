@@ -24,9 +24,9 @@ interface ToolDef {
 
 /** Order follows frequency of use, not alphabet. */
 const TOOLS: ToolDef[] = [
-  { id: 'tool.select', label: 'Select', shortcut: 'v', glyph: '⬉' },
+  { id: 'tool.select', label: 'Select', shortcut: '1', glyph: '⬉' },
   { id: 'tool.identify', label: 'Identify', shortcut: 'i', glyph: 'ⓘ' },
-  { id: 'tool.measure', label: 'Measure', shortcut: 'm', glyph: '⟷' },
+  { id: 'tool.measure', label: 'Measure', shortcut: 'd', glyph: '⟷' },
   { id: 'tool.edit', label: 'Edit', shortcut: 'e', glyph: '✎' },
 ];
 

@@ -36,22 +36,40 @@ render returns the interpolation method, its parameters, value range, units, CRS
 
 ## 2. Tool surface
 
-Twenty tools in six groups.
+Twenty-one tools in six groups, of which **thirteen are implemented**. The rest are specified
+here and scheduled in `12-roadmap.md`; the ✓ column says which is which, so this table stops
+being a claim about the present that quietly goes stale.
 
-> **Implemented so far:** the four discovery tools, in Phase 1 rather than Phase 3.
-> Phase 1's own acceptance criteria require the server to "call an authenticated tool"
-> and to prove that "MCP calls execute as the requesting user", and neither is
-> demonstrable against a server with no tools. The analysis, rendering, session and job
-> groups remain Phase 3 and 4. See `12-roadmap.md` for current status.
+| Group | Tools | Built |
+|---|---|---|
+| Discovery | `webmap_list_projects`, `webmap_list_datasets`, `webmap_search_datasets`, `webmap_describe_dataset` | ✓ all four |
+| Analysis | `webmap_interpolate`, `webmap_contour` | ✓ both |
+| Analysis (specified) | `webmap_aggregate`, `webmap_fit_variogram` | Phase 4 |
+| Rendering | `webmap_render_map`, `webmap_get_render` | ✓ both |
+| Rendering (specified) | `webmap_suggest_maps` | Phase 6 |
+| Sessions | `webmap_open_session`, `webmap_get_session` | ✓ both |
+| Sessions (specified) | `webmap_update_session` | Phase 5 |
+| Styling (specified) | `webmap_list_palettes`, `webmap_list_style_templates` | Phase 5 |
+| Jobs | `webmap_get_job`, `webmap_list_jobs`, `webmap_cancel_job` | ✓ all three |
+| Admin (specified) | `webmap_export_dataset`, `webmap_delete_dataset` | Phase 6 |
 
-| Group | Tools |
-|---|---|
-| Discovery | `webmap_list_projects`, `webmap_list_datasets`, `webmap_search_datasets`, `webmap_describe_dataset` |
-| Analysis | `webmap_interpolate`, `webmap_contour`, `webmap_krige`, `webmap_aggregate`, `webmap_fit_variogram` |
-| Rendering | `webmap_render_map`, `webmap_get_render`, `webmap_suggest_maps` |
-| Sessions | `webmap_open_session`, `webmap_get_session`, `webmap_update_session` |
-| Styling | `webmap_list_palettes`, `webmap_list_style_templates` |
-| Jobs & admin | `webmap_get_job`, `webmap_cancel_job`, `webmap_export_dataset`, `webmap_delete_dataset` |
+**There is no `webmap_krige`.** Regression kriging and regression indicator kriging arrive as
+**methods on `webmap_interpolate`** rather than as a second analysis tool — one tool for Claude
+to reason about, and one place a geologist looks for "make me a grid". `13-kriging.md` §14.3
+carries the consequence: the parameters only RK/RIK use are grouped and documented as
+method-specific, because a flat schema where half the fields are meaningless for the selected
+method is worse than a longer description.
+
+> **Three specified parameters are not implemented**, and are listed here as intent rather
+> than as description: every signature below takes a leading `ctx`; `webmap_list_datasets` and
+> its siblings take `response_format: "markdown" | "json"`; and `webmap_open_session` takes
+> `mode: "view" | "edit"`. None exists in `apps/mcp/src/webmap_mcp/server.py` today. The §11
+> checklist item requiring `response_format` on every data-returning tool is therefore also
+> outstanding.
+>
+> `webmap_render_map`'s layer entries are specified as `{dataset_id, style_template_id?,
+> palette_id?, opacity?, label_field?}` with `title` required; the implementation takes
+> `{dataset_id, opacity?, colormap?}` and `title` optional. The specification is the target.
 
 ### 2.1 Annotations
 
@@ -59,7 +77,8 @@ Twenty tools in six groups.
 |---|---|---|---|---|
 | `webmap_list_*`, `webmap_search_*`, `webmap_describe_*`, `webmap_get_*` | ✓ | ✗ | ✓ | ✗ |
 | `webmap_suggest_maps`, `webmap_fit_variogram` | ✓ | ✗ | ✓ | ✗ |
-| `webmap_interpolate`, `webmap_contour`, `webmap_krige`, `webmap_aggregate` | ✗ | ✗ | ✗ | ✗ |
+| `webmap_interpolate`, `webmap_contour`, `webmap_aggregate` | ✗ | ✗ | ✗ | ✗ |
+| `webmap_cancel_job` | ✗ | ✗ | ✓ | ✗ |
 | `webmap_render_map`, `webmap_open_session` | ✗ | ✗ | ✗ | ✗ |
 | `webmap_update_session`, `webmap_export_dataset` | ✗ | ✗ | ✓ | ✗ |
 | `webmap_delete_dataset` | ✗ | **✓** | ✓ | ✗ |
@@ -717,7 +736,7 @@ class DatasetNotFound(WebMapToolError):
 ## 10. Evaluations
 
 Per the MCP builder guidance, maintain at least 10 evaluation questions in
-`tests/mcp/evaluations.xml`. Each must be independent, read-only, complex enough to require
+`tests/mcp_eval/evaluations.xml`. Each must be independent, read-only, complex enough to require
 several tool calls, realistic, verifiable by string comparison, and stable over time.
 
 ```xml
@@ -750,7 +769,7 @@ selection is invisible without them.
 - [ ] All tools annotated (readOnly / destructive / idempotent / openWorld)
 - [ ] Every list tool paginates and returns `has_more` / `next_offset` / `total`
 - [ ] Every tool supports `response_format` where it returns data
-- [ ] No business logic in tool handlers — all delegate to `webmap_core.services`
+- [ ] No business logic in tool handlers — all delegate to the HTTP API — **never** to `webmap_core.services`, which `webmap_mcp` is forbidden to import (`adr/0008`, and an `import-linter` contract)
 - [ ] Every handler goes through the authenticated API client; no service-account path
 - [ ] Destructive tools require `confirm: true`
 - [ ] Error messages name a next action

@@ -278,7 +278,7 @@ def _normalise(
     if invalid.any():
         # Reported, not repaired. Silently fixing a self-intersecting polygon
         # changes area and boundaries, and a geologist who digitised it should
-        # decide — see 09-editing.md §4.
+        # decide — see 09-editing.md §12.
         reasons = {str(shapely.is_valid_reason(g)) for g in geometry[invalid][:3]}
         warnings.append(
             f"{int(invalid.sum())} of {len(geometry)} geometries in {name} are "

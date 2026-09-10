@@ -28,7 +28,7 @@ for nothing.
 ## 2. Job contract
 
 ```python
-# python/webmap_core/jobs.py
+# python/webmap_core/src/webmap_core/jobs.py
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -85,8 +85,12 @@ class JobContext:
 
 ## 3. Worker
 
+> **Built today: `ping`, `interpolate_task`, `contour_task`, and no cron jobs.** The
+> `aggregate`, `ingest`, `sync` and `export` tasks below are Phase 4 and 6 work, and the four
+> cron entries with them. `apps/worker/src/webmap_worker/main.py` carries the same note.
+
 ```python
-# apps/worker/main.py
+# apps/worker/src/webmap_worker/main.py
 
 from arq import cron
 from arq.connections import RedisSettings
@@ -137,7 +141,7 @@ class WorkerSettings:
 Gridding jobs run for minutes. A frozen progress bar is indistinguishable from a hung worker.
 
 ```python
-# apps/worker/progress.py
+# apps/worker/src/webmap_worker/progress.py
 
 class ProgressReporter:
     """Reports progress with named phases and throttled writes.
@@ -206,12 +210,18 @@ GET /api/v1/jobs/{job_id}
   "id": "7c2e...", "kind": "interpolate", "state": "running",
   "progress": 0.62, "progress_message": "Solving on constrained mesh (1.2M cells)",
   "queued_at": "2026-09-02T14:22:01Z", "started_at": "2026-09-02T14:22:03Z",
-  "estimated_remaining_seconds": 21
+  "estimated_remaining_seconds": 21,
+  "poll_after_seconds": 3
 }
 ```
 
-Client backoff is specified in `07-frontend.md` §7. Claude's polling guidance is in the
-`webmap_get_job` tool description.
+**`poll_after_seconds` is the backoff, and the server owns it.** It varies by state — a queued
+job is worth checking less often than a running one — and having the server say so means every
+client backs off the same way. The MCP job status already reads it; `07` §7's web client should
+too, rather than computing a second curve that drifts from it.
+
+Claude's polling guidance is in the `webmap_get_job` tool description, which restates the same
+number in prose.
 
 ### 5.2 WebSocket (progressive enhancement)
 
@@ -258,7 +268,7 @@ Business units share infrastructure. One geologist kriging 500k points should no
 another team.
 
 ```python
-# python/webmap_core/quota.py
+# python/webmap_core/src/webmap_core/quota.py
 
 @dataclass(frozen=True)
 class QuotaPolicy:
@@ -379,7 +389,7 @@ Metrics to alert on:
 | Metric | Alert threshold |
 |---|---|
 | `webmap_job_queue_depth` | > 50 for 5 min |
-| `webmap_job_duration_seconds{kind}` p95 | > 2× the target in `05-geoprocessing.md` §9 |
+| `webmap_job_duration_seconds{kind}` p95 | > 2× the target in `05-geoprocessing.md` §10 |
 | `webmap_job_failures_total{error_kind="internal"}` | any |
 | `webmap_worker_oom_total` | any |
 | `webmap_render_pool_saturation` | > 0.9 for 5 min |
