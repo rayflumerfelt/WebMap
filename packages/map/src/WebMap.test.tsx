@@ -40,6 +40,9 @@ interface FakeMap {
   getFilter: ReturnType<typeof vi.fn>;
   setFilter: ReturnType<typeof vi.fn>;
   setData: ReturnType<typeof vi.fn>;
+  addImage: ReturnType<typeof vi.fn>;
+  hasImage: ReturnType<typeof vi.fn>;
+  images: Map<string, unknown>;
   sources: Set<string>;
   layers: Set<string>;
   filters: Map<string, unknown>;
@@ -69,6 +72,7 @@ function makeFakeMap(options: Record<string, unknown>): FakeMap {
   const layers = new Set<string>(['contours', 'leases']);
   const filters = new Map<string, unknown>([['contours', ['get', 'is_index']]]);
   const setData = vi.fn();
+  const images = new Map<string, unknown>();
 
   const map: FakeMap = {
     camera,
@@ -76,6 +80,9 @@ function makeFakeMap(options: Record<string, unknown>): FakeMap {
     layers,
     filters,
     setData,
+    images,
+    addImage: vi.fn((id: string, image: unknown) => images.set(id, image)),
+    hasImage: vi.fn((id: string) => images.has(id)),
     // A fixed 100 px per degree, so a projected coordinate is arithmetic a
     // reader can check rather than a Mercator value they have to trust.
     project: vi.fn((lngLat: [number, number]) => ({
@@ -572,5 +579,132 @@ describe('the edit overlay', () => {
     handle.setEditOverlay({ features: [FEATURE], layers: LAYERS });
 
     expect(map.filters.get('leases')).toBeUndefined();
+  });
+});
+
+// --- images and pointer gestures --------------------------------------------
+
+const GLYPH = {
+  id: 'edit-handle',
+  width: 4,
+  height: 4,
+  data: new Uint8Array(4 * 4 * 4),
+  pixelRatio: 2,
+};
+
+describe('style images', () => {
+  it('adds them on mount, with their pixel ratio', () => {
+    // An `icon-image` naming an image that is not registered renders nothing,
+    // with no error — the handles simply do not appear.
+    render(<WebMap style={STYLE} layerMeta={{}} images={[GLYPH]} />);
+
+    expect(latest().addImage).toHaveBeenCalledWith(
+      'edit-handle',
+      { width: 4, height: 4, data: GLYPH.data },
+      { pixelRatio: 2 },
+    );
+  });
+
+  it('re-adds them when the style settles again', () => {
+    // A style swap empties MapLibre's image registry without telling anyone.
+    const map = (() => {
+      render(<WebMap style={STYLE} layerMeta={{}} images={[GLYPH]} />);
+      return latest();
+    })();
+
+    map.images.clear();
+    act(() => map.emit('styledata'));
+
+    expect(map.addImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not re-add an image that is still registered', () => {
+    const map = (() => {
+      render(<WebMap style={STYLE} layerMeta={{}} images={[GLYPH]} />);
+      return latest();
+    })();
+
+    act(() => map.emit('styledata'));
+
+    expect(map.addImage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('pointer gestures', () => {
+  function pointerEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      point: { x: 120, y: 240 },
+      lngLat: { lng: -102.08, lat: 31.99 },
+      originalEvent: { shiftKey: true, altKey: false, ctrlKey: false, metaKey: false },
+      preventDefault: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it('reports the pixel, the coordinate and the modifiers', () => {
+    // Snapping works in pixels (§6.1) and shift-click toggles a selection —
+    // neither is derivable from the lng/lat the status bar gets.
+    const onMapPointer = vi.fn();
+    render(<WebMap style={STYLE} layerMeta={{}} onMapPointer={onMapPointer} />);
+
+    act(() => latest().emit('mousedown', pointerEvent()));
+
+    expect(onMapPointer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'down',
+        point: [120, 240],
+        lngLat: [-102.08, 31.99],
+        shiftKey: true,
+      }),
+    );
+  });
+
+  it('lets a handler claim the gesture so the map does not pan', () => {
+    // Without this a vertex drag pans the map underneath the vertex.
+    const event = pointerEvent();
+    render(
+      <WebMap
+        style={STYLE}
+        layerMeta={{}}
+        onMapPointer={(pointer) => pointer.preventDefault()}
+      />,
+    );
+
+    act(() => latest().emit('mousedown', event));
+
+    expect(event.preventDefault).toHaveBeenCalled();
+  });
+
+  it('still reports the cursor to onPointerMove', () => {
+    // The status bar's coordinate readout must not depend on whether anything
+    // is editing.
+    const onPointerMove = vi.fn();
+    const onMapPointer = vi.fn();
+    render(
+      <WebMap
+        style={STYLE}
+        layerMeta={{}}
+        onPointerMove={onPointerMove}
+        onMapPointer={onMapPointer}
+      />,
+    );
+
+    act(() => latest().emit('mousemove', pointerEvent()));
+
+    expect(onPointerMove).toHaveBeenCalledWith([-102.08, 31.99]);
+    expect(onMapPointer).toHaveBeenCalledWith(expect.objectContaining({ type: 'move' }));
+  });
+});
+
+describe('queryFeatures with no box', () => {
+  it('asks for the whole viewport', () => {
+    // What the snapping engine does once at the start of a drag, rather than
+    // re-querying a box as the pointer moves (§6.5).
+    const ref = createRef<WebMapHandle>();
+    render(<WebMap ref={ref} style={STYLE} layerMeta={{}} initialView={MIDLAND} />);
+
+    ref.current!.queryFeatures(undefined, ['leases']);
+
+    expect(latest().queryRenderedFeatures).toHaveBeenCalledWith({ layers: ['leases'] });
   });
 });

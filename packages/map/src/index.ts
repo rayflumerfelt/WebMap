@@ -12,6 +12,8 @@ export { capture } from './capture.js';
 export type {
   EditOverlay,
   LayerMetadata,
+  MapImage,
+  MapPointerEvent,
   MapView,
   MapWarning,
   WebMapHandle,

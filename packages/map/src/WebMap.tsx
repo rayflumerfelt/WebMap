@@ -18,13 +18,52 @@ import type { StyleSpecification } from 'maplibre-gl';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 
 import { capture } from './capture.js';
-import type { EditOverlay, MapView, MapWarning, WebMapHandle, WebMapProps } from './types.js';
+import type {
+  EditOverlay,
+  MapImage,
+  MapPointerEvent,
+  MapView,
+  MapWarning,
+  WebMapHandle,
+  WebMapProps,
+} from './types.js';
 
 const DEFAULT_VIEW: MapView = { center: [0, 0], zoom: 2 };
 
 /** The GeoJSON source holding pending edits. `09-editing.md` §3.3. */
 const EDIT_SOURCE = 'webmap-edit-overlay';
 
+
+/** The MapLibre event shape the pointer handlers read. */
+interface MapLibrePointer {
+  point: { x: number; y: number };
+  lngLat: { lng: number; lat: number };
+  originalEvent?: {
+    shiftKey: boolean;
+    altKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+  };
+  preventDefault?(): void;
+}
+
+/**
+ * Add the images the style refers to, skipping those already registered.
+ *
+ * `hasImage` rather than a local record of what was added: a style swap empties
+ * MapLibre's registry without telling anyone, so the map is the only thing that
+ * knows what is actually there.
+ */
+function syncImages(map: maplibregl.Map, images: readonly MapImage[] | undefined): void {
+  for (const image of images ?? []) {
+    if (map.hasImage(image.id)) continue;
+    map.addImage(
+      image.id,
+      { width: image.width, height: image.height, data: image.data },
+      { pixelRatio: image.pixelRatio ?? 1 },
+    );
+  }
+}
 
 /** Below this the camera is treated as unchanged. */
 const VIEW_EPSILON = 1e-9;
@@ -76,15 +115,49 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
       propsRef.current.onWarning?.(warningFrom(event.error));
     };
 
-    const handlePointerMove = (event: { lngLat: { lng: number; lat: number } }) =>
+    const forward = (type: MapPointerEvent['type'], event: MapLibrePointer) => {
+      const handler = propsRef.current.onMapPointer;
+      if (!handler) return;
+      handler({
+        type,
+        point: [event.point.x, event.point.y],
+        lngLat: [event.lngLat.lng, event.lngLat.lat],
+        shiftKey: event.originalEvent?.shiftKey ?? false,
+        altKey: event.originalEvent?.altKey ?? false,
+        ctrlKey: event.originalEvent?.ctrlKey ?? false,
+        metaKey: event.originalEvent?.metaKey ?? false,
+        // MapLibre's own: called on the event it gave us, it cancels the pan
+        // or the zoom this gesture would otherwise have caused.
+        preventDefault: () => event.preventDefault?.(),
+      });
+    };
+    const handlePointerMove = (event: MapLibrePointer) => {
       propsRef.current.onPointerMove?.([event.lngLat.lng, event.lngLat.lat]);
+      forward('move', event);
+    };
     const handlePointerOut = () => propsRef.current.onPointerMove?.(null);
+
+    const handleDown = (event: MapLibrePointer) => forward('down', event);
+    const handleUp = (event: MapLibrePointer) => forward('up', event);
+    const handleClick = (event: MapLibrePointer) => forward('click', event);
+    const handleDoubleClick = (event: MapLibrePointer) => forward('dblclick', event);
+
+    // Images survive neither a style swap nor the initial load, so they are
+    // (re-)added every time the style settles. `syncImages` skips what is
+    // already registered, which makes this cheap enough to run on each one.
+    const handleStyleData = () => syncImages(map, propsRef.current.images);
 
     map.on('moveend', handleMove);
     map.on('idle', handleIdle);
     map.on('error', handleError);
     map.on('mousemove', handlePointerMove);
     map.on('mouseout', handlePointerOut);
+    map.on('mousedown', handleDown);
+    map.on('mouseup', handleUp);
+    map.on('click', handleClick);
+    map.on('dblclick', handleDoubleClick);
+    map.on('styledata', handleStyleData);
+    syncImages(map, propsRef.current.images);
 
     return () => {
       map.off('moveend', handleMove);
@@ -92,6 +165,11 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
       map.off('error', handleError);
       map.off('mousemove', handlePointerMove);
       map.off('mouseout', handlePointerOut);
+      map.off('mousedown', handleDown);
+      map.off('mouseup', handleUp);
+      map.off('click', handleClick);
+      map.off('dblclick', handleDoubleClick);
+      map.off('styledata', handleStyleData);
       map.remove();
       mapRef.current = null;
     };
@@ -110,6 +188,11 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
     if (!map) return;
     map.setStyle(props.style as StyleSpecification, { diff: true });
   }, [props.style]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map) syncImages(map, props.images);
+  }, [props.images]);
 
   // Camera: only when the parent controls it, and only when it actually
   // differs. Applying an equal view would fight the user mid-drag.
@@ -224,11 +307,15 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
     (): WebMapHandle => ({
       fitBounds: (bounds, options) => getMap().fitBounds(bounds, options),
       capture: () => capture(getMap()),
+      // No point means the whole viewport, which is what the snapping engine
+      // asks for once at the start of a drag rather than per pointer move.
       queryFeatures: (point, layerIds) =>
-        getMap().queryRenderedFeatures(
-          point as never,
-          layerIds ? { layers: layerIds } : undefined,
-        ),
+        point === undefined
+          ? getMap().queryRenderedFeatures(layerIds ? { layers: layerIds } : undefined)
+          : getMap().queryRenderedFeatures(
+              point as never,
+              layerIds ? { layers: layerIds } : undefined,
+            ),
       project: (lngLat) => {
         const point = getMap().project(lngLat);
         return [point.x, point.y];

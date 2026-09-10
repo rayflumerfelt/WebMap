@@ -76,6 +76,26 @@ export interface WebMapProps {
    *  it on every session and §2.1 asks for escape-hatch uses to stay rare. */
   onPointerMove?: (lngLat: [number, number] | null) => void;
 
+  /**
+   * Raw pointer gestures, in pixels as well as coordinates.
+   *
+   * Separate from `onPointerMove`, which exists for the status bar and gives
+   * only a coordinate. Editing needs the pixel, the modifier keys and the
+   * chance to call `preventDefault()` — that last one is what stops MapLibre
+   * panning the map when a drag was meant to move a vertex.
+   */
+  onMapPointer?: (event: MapPointerEvent) => void;
+
+  /**
+   * Images the style's `icon-image` expressions refer to, added on load.
+   *
+   * A prop rather than a `getMap().addImage` call because a style change
+   * empties the image registry: the app cannot know when that happened, and an
+   * `icon-image` naming an image that is not there renders **nothing, with no
+   * error**. Here they are re-added whenever the style settles.
+   */
+  images?: readonly MapImage[];
+
   className?: string;
 
   /** Announced to screen readers in place of "Map". Name the subject — "Map
@@ -117,6 +137,32 @@ export interface EditOverlay {
 /**
  * Operations that do not fit declarative props. `07-frontend.md` §2.1.
  */
+/** A pointer gesture on the map. */
+export interface MapPointerEvent {
+  type: 'down' | 'move' | 'up' | 'click' | 'dblclick';
+  /** Screen pixels relative to the map canvas — what snapping works in. */
+  point: [number, number];
+  lngLat: [number, number];
+  shiftKey: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  /** Suppresses MapLibre's own handling of this gesture — the map pans on a
+   *  drag unless the handler claims it. */
+  preventDefault(): void;
+}
+
+/** A raw RGBA image for `map.addImage`. Unassociated alpha, row-major. */
+export interface MapImage {
+  id: string;
+  width: number;
+  height: number;
+  data: Uint8Array;
+  /** Device pixels per CSS pixel in `data`. 2 for a glyph authored for
+   *  high-DPI, which then draws at half these dimensions. */
+  pixelRatio?: number;
+}
+
 export interface WebMapHandle {
   fitBounds(bounds: LngLatBoundsLike, options?: FitBoundsOptions): void;
   /** The map as a PNG. See `capture.ts` for why it is not `canvas.toBlob`. */
@@ -129,7 +175,7 @@ export interface WebMapHandle {
    * testing every segment in view.
    */
   queryFeatures(
-    point: PointLike | [PointLike, PointLike],
+    point?: PointLike | [PointLike, PointLike],
     layerIds?: string[],
   ): MapGeoJSONFeature[];
   /**
