@@ -193,3 +193,78 @@ export function useAttributes(
     retry: false,
   });
 }
+
+/** What `GET /features/{id}/summary` returns for a text column. */
+export interface CategorySummaryResponse {
+  column: string;
+  kind: 'text';
+  categories: Array<{ value: string; count: number }>;
+  remaining: number;
+  refused: { distinct: number; limit: number } | null;
+}
+
+/** …and for a numeric one. */
+export interface NumericSummaryResponse {
+  column: string;
+  kind: 'number';
+  domain: [number, number];
+  histogram: number[];
+  missing: number;
+}
+
+export type AttributeSummaryResponse = CategorySummaryResponse | NumericSummaryResponse;
+
+/**
+ * The summary of one column, for the formatting dialog (`07` §6.2).
+ *
+ * Cached for longer than a page of attributes: a distinct-values query over
+ * half a million features is expensive and the answer does not change while
+ * somebody picks colours. The query key carries the column, so switching the
+ * column being coloured by is a fetch rather than a refetch of the same key.
+ */
+export function useAttributeSummary(
+  api: ApiClient,
+  datasetId: string | null,
+  column: string | null,
+) {
+  return useQuery({
+    queryKey: ['attribute-summary', datasetId, column],
+    queryFn: () =>
+      api.get<AttributeSummaryResponse>(`/features/${datasetId}/summary`, {
+        column: column ?? '',
+      }),
+    enabled: Boolean(datasetId && column),
+    staleTime: 15 * 60_000,
+    retry: false,
+  });
+}
+
+/** Palettes the caller can see, stops included — `08` §5.1. */
+export interface PaletteListResponse {
+  count: number;
+  items: Array<{
+    id: string;
+    name: string;
+    isContinuous: boolean;
+    interpolation: 'linear' | 'discrete';
+    stops: Array<{ position: number; color: string }>;
+    sourceFormat: string | null;
+  }>;
+}
+
+/**
+ * Every palette, once.
+ *
+ * The list carries stops so the picker can draw a preview strip per row
+ * without a request each; a deployment with forty palettes would otherwise
+ * open the picker with forty requests.
+ */
+export function usePalettes(api: ApiClient | undefined) {
+  return useQuery({
+    queryKey: ['palettes'],
+    queryFn: () => api!.get<PaletteListResponse>('/palettes'),
+    enabled: Boolean(api),
+    staleTime: 30 * 60_000,
+    retry: false,
+  });
+}

@@ -142,6 +142,211 @@ def feature_attributes(
     return AttributePage(items=items, total=total, offset=offset, limit=limit)
 
 
+#: How many distinct values the category table will list.
+#:
+#: `07` §6.2 says "the top few hundred". Two hundred rows is already more than
+#: anybody assigns colours to by hand, and each carries a colour picker — past
+#: this the dialog is the bottleneck rather than the query.
+MAX_CATEGORIES = 200
+
+#: Past this many distinct values, enumeration is **refused** rather than
+#: truncated.
+#:
+#: `07` §6.2: "the endpoint refuses to enumerate a column above a cardinality
+#: threshold rather than hanging the dialog". A well-name column on 500k
+#: features has 500k distinct values and no useful colour mapping, and the
+#: honest answer is to say so — a truncated list of 200 well names looks like a
+#: list somebody could finish.
+MAX_DISTINCT = 5_000
+
+#: Bins in the histogram drawn under a ramp. Enough to show a bimodal
+#: distribution or a spike at zero at any panel width; more would be narrower
+#: than a pixel in a 280 px panel.
+HISTOGRAM_BINS = 40
+
+#: How much of a column has to cast for `kind='auto'` to call it numeric.
+#:
+#: Not all of it: one `N/A` in a porosity column is a data-entry slip, and
+#: demoting the column to text over it takes the ramp away from a layer that
+#: plainly has one. Deliberately high all the same — a column that is 90%
+#: numbers and 10% words is a mixed column, and a ramp would hide the words.
+NUMERIC_THRESHOLD = 0.98
+
+
+@dataclass(frozen=True)
+class CategorySummary:
+    """Distinct values of a text column, most common first."""
+
+    values: list[tuple[str, int]]
+    #: Distinct values beyond the ones returned. They take the *Other* colour,
+    #: and the dialog says how many there are.
+    remaining: int
+    #: `(distinct, limit)` when the column was past `MAX_DISTINCT` and not
+    #: enumerated at all.
+    refused: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True)
+class NumericSummary:
+    """A numeric column's shape, for the ramp editor's underlay."""
+
+    minimum: float
+    maximum: float
+    counts: list[int]
+    #: Rows whose value is null or does not cast. Reported rather than dropped
+    #: silently: "why does my histogram hold 900 wells when the layer has
+    #: 1,200" has an answer, and it is usually a column added mid-campaign.
+    missing: int
+
+
+def attribute_summary(
+    parquet_key: str,
+    column: str,
+    store: ObjectStore | None = None,
+    *,
+    kind: str = "auto",
+    max_categories: int = MAX_CATEGORIES,
+    bins: int = HISTOGRAM_BINS,
+) -> CategorySummary | NumericSummary:
+    """Summarise one column for the formatting dialog.
+
+    A text column gives distinct values with counts; a numeric one gives a
+    range and a histogram. `kind='auto'` decides by trying to cast, because a
+    column of numbers stored as strings is ordinary in a shapefile and reading
+    it as categories offers a picker with 1,200 entries where a ramp was
+    wanted.
+
+    **The column name is bound, not interpolated.** It is validated against the
+    file's own attribute names first — a name that is not there is a mistake
+    worth a message — and then passed as a parameter, so a props key containing
+    a quote is data rather than syntax.
+    """
+    with connect(store) as conn:
+        available = attribute_names(conn, parquet_key)
+        if column not in available:
+            listed = sorted(available)
+            raise DegenerateInput(
+                f"'{column}' is not a column of this layer. It has: "
+                f"{', '.join(listed[:20])}{'…' if len(listed) > 20 else ''}."
+            )
+
+        resolved = kind if kind != "auto" else _infer_kind(conn, parquet_key, column)
+        if resolved == "number":
+            return _numeric_summary(conn, parquet_key, column, bins)
+        return _category_summary(conn, parquet_key, column, max_categories)
+
+
+def _infer_kind(conn: Any, parquet_key: str, column: str) -> str:
+    row = conn.execute(
+        """
+        SELECT
+            count(*) FILTER (WHERE value IS NOT NULL) AS present,
+            count(*) FILTER (WHERE TRY_CAST(value AS DOUBLE) IS NOT NULL) AS numeric
+        FROM (SELECT props ->> $col AS value FROM read_parquet($key))
+        """,
+        {"key": parquet_key, "col": column},
+    ).fetchone()
+    present, numeric = int(row[0] or 0), int(row[1] or 0)
+    return "number" if present > 0 and numeric / present >= NUMERIC_THRESHOLD else "text"
+
+
+def _category_summary(
+    conn: Any, parquet_key: str, column: str, max_categories: int
+) -> CategorySummary:
+    """Distinct values with counts, most common first.
+
+    **The distinct count is taken before the values are.** One extra aggregate,
+    and it is what makes the refusal possible: enumerating 500,000 values to
+    discover there are 500,000 of them is the hang the refusal exists to
+    prevent.
+    """
+    distinct = int(
+        conn.execute(
+            "SELECT count(DISTINCT props ->> $col) FROM read_parquet($key)",
+            {"key": parquet_key, "col": column},
+        ).fetchone()[0]
+        or 0
+    )
+    if distinct > MAX_DISTINCT:
+        return CategorySummary(values=[], remaining=distinct, refused=(distinct, MAX_DISTINCT))
+
+    rows = conn.execute(
+        """
+        SELECT props ->> $col AS value, count(*) AS n
+        FROM read_parquet($key)
+        WHERE props ->> $col IS NOT NULL
+        GROUP BY 1
+        ORDER BY n DESC, value ASC
+        LIMIT $cap
+        """,
+        {"key": parquet_key, "col": column, "cap": int(max_categories)},
+    ).fetchall()
+
+    values = [(str(row[0]), int(row[1])) for row in rows]
+    return CategorySummary(values=values, remaining=max(0, distinct - len(values)))
+
+
+def _numeric_summary(conn: Any, parquet_key: str, column: str, bins: int) -> NumericSummary:
+    row = conn.execute(
+        """
+        SELECT min(value), max(value),
+               count(*) FILTER (WHERE value IS NULL) AS missing
+        FROM (SELECT TRY_CAST(props ->> $col AS DOUBLE) AS value FROM read_parquet($key))
+        """,
+        {"key": parquet_key, "col": column},
+    ).fetchone()
+
+    low_raw, high_raw, missing = row[0], row[1], int(row[2] or 0)
+    if low_raw is None or high_raw is None:
+        raise DegenerateInput(
+            f"'{column}' has no numeric values. Check the column name, and that "
+            f"the values are numbers rather than text with units in them."
+        )
+    low, high = float(low_raw), float(high_raw)
+
+    if high <= low:
+        # A constant column. One bin holding everything is the honest picture,
+        # and the alternative — dividing by a zero width — is a crash.
+        total = int(
+            conn.execute(
+                """
+                SELECT count(*) FROM read_parquet($key)
+                WHERE TRY_CAST(props ->> $col AS DOUBLE) IS NOT NULL
+                """,
+                {"key": parquet_key, "col": column},
+            ).fetchone()[0]
+            or 0
+        )
+        return NumericSummary(minimum=low, maximum=high, counts=[total], missing=missing)
+
+    # Binned in SQL rather than by pulling the column into Python: a 500,000-row
+    # column is 4 MB of doubles over the wire to compute forty integers.
+    rows = conn.execute(
+        """
+        SELECT bin, count(*) AS n FROM (
+            SELECT least($bins - 1, CAST(floor((value - $low) / $width) AS INTEGER)) AS bin
+            FROM (SELECT TRY_CAST(props ->> $col AS DOUBLE) AS value FROM read_parquet($key))
+            WHERE value IS NOT NULL
+        )
+        GROUP BY bin ORDER BY bin
+        """,
+        {
+            "key": parquet_key,
+            "col": column,
+            "bins": int(bins),
+            "low": low,
+            "width": (high - low) / bins,
+        },
+    ).fetchall()
+
+    counts = [0] * bins
+    for bin_index, count in rows:
+        index = int(bin_index)
+        if 0 <= index < bins:
+            counts[index] = int(count)
+    return NumericSummary(minimum=low, maximum=high, counts=counts, missing=missing)
+
+
 def attribute_names(conn: Any, parquet_key: str) -> set[str]:
     """Every attribute name present anywhere in the file.
 
@@ -174,8 +379,15 @@ def attribute_names(conn: Any, parquet_key: str) -> set[str]:
 
 __all__ = [
     "DEFAULT_PAGE",
+    "HISTOGRAM_BINS",
+    "MAX_CATEGORIES",
+    "MAX_DISTINCT",
     "MAX_PAGE",
+    "NUMERIC_THRESHOLD",
     "AttributePage",
+    "CategorySummary",
+    "NumericSummary",
     "attribute_names",
+    "attribute_summary",
     "feature_attributes",
 ]

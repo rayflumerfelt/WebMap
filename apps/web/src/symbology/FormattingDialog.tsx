@@ -52,13 +52,13 @@ import { Section, fieldRow, panel } from './dialogParts.js';
 
 export interface AttributeSummary {
   /** Distinct values with counts, for a text column. Empty for a numeric one. */
-  categories?: CategoryRow[];
+  categories?: CategoryRow[] | undefined;
   /** Counts per equal-width bin, for the ramp editor's underlay. */
-  histogram?: number[];
-  domain?: [number, number];
+  histogram?: number[] | undefined;
+  domain?: [number, number] | undefined;
   /** Set when the column's cardinality was past what the server enumerates. */
-  refused?: { distinct: number; limit: number } | null;
-  remaining?: number;
+  refused?: { distinct: number; limit: number } | null | undefined;
+  remaining?: number | undefined;
 }
 
 export interface FormattingDialogProps {
@@ -67,8 +67,12 @@ export interface FormattingDialogProps {
   onChange(symbology: Symbology): void;
   /** Columns the layer has, for every field picker in the dialog. */
   fields: Array<{ name: string; type: 'text' | 'number' }>;
-  /** Summary for the column currently being coloured or labelled by. */
-  summary?: AttributeSummary;
+  /** Summary for the column currently being coloured or labelled by.
+   *
+   *  Absent while it loads, and absent for a fixed-colour layer where there is
+   *  no column to summarise — both render the editors without an underlay
+   *  rather than blocking on the request. */
+  summary?: AttributeSummary | undefined;
   palettes: Record<string, Palette>;
   /** What `GET /static/glyphs` returned — see `FontPicker`. */
   fonts: FontFamily[];
@@ -371,6 +375,18 @@ function initialMode(symbology: Symbology, bands?: IntervalBand[]): ColourMode {
   if (symbology.type === 'categorized') return 'categories';
   if (symbology.type === 'graduated') return bands?.length ? 'interval' : 'gradient';
   return 'fixed';
+}
+
+/**
+ * The column a layer is coloured by, or null for a fixed colour.
+ *
+ * Exported because the container fetches a summary *for that column* rather
+ * than for the layer: a distinct-values query over half a million features is
+ * expensive, and thirty-nine of a layer's forty columns are not being looked
+ * at.
+ */
+export function colouredColumn(symbology: Symbology): string | null {
+  return fieldOf(symbology);
 }
 
 export function fieldOf(symbology: Symbology): string | null {

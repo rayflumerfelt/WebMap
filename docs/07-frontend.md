@@ -511,6 +511,30 @@ reports how many values remain uncounted, and the endpoint **refuses to enumerat
 above a cardinality threshold** rather than hanging the dialog — a well-name column on 500k
 features has 500k distinct values and no useful colour mapping.
 
+**Built** as `webmap_geo.attribute_summary` and `GET /api/v1/features/{id}/summary`. It answers
+for one column: a text column gives distinct values with counts and how many it left out, a
+numeric one gives a range and a 40-bin histogram for the ramp editor's underlay.
+
+Four details that are decisions rather than implementation:
+
+**The distinct count is taken before the values are.** One extra aggregate, and it is what
+makes the refusal possible — enumerating half a million values to discover there are half a
+million of them is the hang the refusal exists to prevent. `MAX_DISTINCT` is 5,000; above it
+the response carries `refused` and no values, and the dialog says so.
+
+**`kind='auto'` decides by trying to cast**, because a shapefile storing numbers as text is
+ordinary and reading such a column as categories offers a picker with 1,200 entries where a
+ramp was wanted. The threshold is 98%: one `N/A` in a porosity column is a data-entry slip, and
+a column that is 90% numbers and 10% words is a mixed column where a ramp would hide the words.
+
+**The column name is bound, not interpolated.** It is checked against the file's own attribute
+names first, then passed as a parameter, so a props key containing a quote — a shapefile field
+named from a spreadsheet header — is data rather than syntax.
+
+**The summary is fetched for the column being coloured by, not for the layer**, and the
+container that does the fetching is separate from the dialog for the same reason
+`AttributePanel` is separate from `AttributeTable` (§5.5).
+
 **Transparency** applies to fills only. On a grid it is `raster-opacity`, which is the one part
 of a grid's appearance MapLibre still controls.
 

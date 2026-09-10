@@ -24,8 +24,9 @@ import { Toolbar } from './shell/Toolbar.js';
 import type { ToolId } from './shell/Toolbar.js';
 import { DEFAULT_PREFS, loadPrefs, savePrefs } from './shell/panelPrefs.js';
 import type { PanelKey, PanelPrefs } from './shell/panelPrefs.js';
-import { FormattingDialog } from './symbology/FormattingDialog.js';
+import { FormattingDialogContainer } from './symbology/FormattingDialogContainer.js';
 import { groupIntoFamilies } from './symbology/fontFamilies.js';
+import { usePalettes } from './api/sessions.js';
 import { useSessionStore } from './stores/sessionStore.js';
 
 export interface AppProps {
@@ -80,6 +81,17 @@ export function App({
 
   const [prefs, setPrefs] = useState<PanelPrefs>(DEFAULT_PREFS);
   const fontFamilies = useMemo(() => groupIntoFamilies(glyphStacks), [glyphStacks]);
+
+  // Stored palettes merged over the injected ones, so the shell still renders
+  // with no API in reach and a live session sees what the deployment has.
+  const storedPalettes = usePalettes(api);
+  const allPalettes = useMemo<Record<string, Palette>>(() => {
+    const merged: Record<string, Palette> = { ...palettes };
+    for (const entry of storedPalettes.data?.items ?? []) {
+      merged[entry.id] = entry;
+    }
+    return merged;
+  }, [palettes, storedPalettes.data]);
   const [activeTool, setActiveTool] = useState<ToolId>('tool.select');
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
 
@@ -127,9 +139,9 @@ export function App({
           visible: layer.visible,
           z: index,
         })),
-        palettes,
+        palettes: allPalettes,
       }),
-    [layers, palettes, tileUrlFor],
+    [layers, allPalettes, tileUrlFor],
   );
 
   const selectedLayer = layers.find((layer) => layer.id === selectedLayerId) ?? null;
@@ -137,14 +149,18 @@ export function App({
   const legendSpec = useMemo<LegendSpec | null>(() => {
     if (!selectedLayer) return null;
     try {
-      return deriveLegend(selectedLayer.symbology, { name: selectedLayer.name }, palettes);
+      return deriveLegend(
+        selectedLayer.symbology,
+        { name: selectedLayer.name },
+        allPalettes,
+      );
     } catch {
       // A symbology whose palette is missing must not blank the map along
       // with its legend. The map still draws; the legend does not, and the
       // reason surfaces where the layer fails to compile.
       return null;
     }
-  }, [palettes, selectedLayer]);
+  }, [allPalettes, selectedLayer]);
 
   const runCommand = useCallback(
     (command: Command) => {
@@ -201,7 +217,7 @@ export function App({
       layers={
         <LayerTree
           layers={layers}
-          palettes={palettes}
+          palettes={allPalettes}
           selectedId={selectedLayerId}
           onSelect={(id) => useSessionStore.getState().select(id)}
           onReorder={(from, to) => useSessionStore.getState().reorderLayers(from, to)}
@@ -240,14 +256,16 @@ export function App({
       }
       symbology={
         selectedLayer && selectedLayerId ? (
-          <FormattingDialog
+          <FormattingDialogContainer
+            api={api}
+            datasetId={selectedLayer.datasetId}
             layerName={selectedLayer.name}
             symbology={selectedLayer.symbology}
             onChange={(symbology) =>
               useSessionStore.getState().updateSymbology(selectedLayerId, symbology)
             }
             fields={attributeSchemas[selectedLayer.datasetId] ?? []}
-            palettes={palettes}
+            palettes={allPalettes}
             fonts={fontFamilies}
           />
         ) : (

@@ -130,6 +130,7 @@ def test_the_adr_0010_routes_are_registered() -> None:
         ("/api/v1/palettes", "GET"),
         ("/api/v1/palettes/import", "POST"),
         ("/api/v1/palettes/{palette_id}", "GET"),
+        ("/api/v1/features/{dataset_id}/summary", "GET"),
         ("/api/v1/jobs/clip", "POST"),
         ("/api/v1/jobs/label-anchors", "POST"),
     }

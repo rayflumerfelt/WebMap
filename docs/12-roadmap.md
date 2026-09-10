@@ -413,8 +413,9 @@ produces the same wrong surface with nothing said about it.
 - **Formatting dialogs and shared controls** (`07` §6.2-6.3): **the nine shared controls and
   the dialog that composes them are built** — colour modes, line, marker, text, halo, the zoom
   window, null colour and the live legend preview. What remains is the data behind three of
-  them: the distinct-values endpoint `CategoryTable` reads (with its cardinality refusal) and
-  the histogram `RampEditor` draws under the ramp. **`PaletteIO` is served**:
+  them — **now built**: `GET /api/v1/features/{id}/summary` answers with distinct values and
+  counts (refusing past 5,000 distinct rather than truncating) or with a range and a 40-bin
+  histogram, and `usePalettes` feeds the picker. **`PaletteIO` is served**:
   `webmap_core.style.palette_io` reads Surfer `.clr`, GMT `.cpt`, a QGIS ramp `.xml` and
   WebMap's own `.json`, and writes the first, second and fourth, behind
   `POST /api/v1/palettes/import` and `GET /api/v1/palettes/{id}/export.{fmt}`. Size-by-column

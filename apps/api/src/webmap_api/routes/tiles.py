@@ -19,7 +19,7 @@ never reach a layer its requester cannot.
 """
 
 import hashlib
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import httpx
@@ -294,6 +294,74 @@ async def feature_attributes(
         "offset": page.offset,
         "limit": page.limit,
         "has_more": page.has_more,
+    }
+
+
+@router.get("/features/{dataset_id}/summary")
+async def attribute_summary(
+    request: Request,
+    settings: AppSettings,
+    dataset_id: UUID,
+    principal: Annotated[Principal, Depends(tile_principal)],
+    column: Annotated[str, Query(description="The attribute to summarise.")],
+    kind: Annotated[
+        Literal["auto", "text", "number"],
+        Query(
+            description=(
+                "'auto' decides by trying to cast, which is right for a "
+                "shapefile storing numbers as text. Pass one explicitly to "
+                "override."
+            )
+        ),
+    ] = "auto",
+) -> dict[str, Any]:
+    """What the formatting dialog needs to colour by one column (`07` §6.2).
+
+    A text column returns distinct values with counts, most common first, plus
+    how many it did not list. A numeric one returns a range and a histogram for
+    the ramp editor's underlay.
+
+    **A column past the cardinality threshold is refused rather than
+    truncated.** A well-name column on 500k features has 500k distinct values
+    and no useful colour mapping; a list of the first 200 looks like a list
+    somebody could finish, and enumerating all of them is the hang the refusal
+    exists to prevent. The response then carries `refused` and no values.
+    """
+    from webmap_geo.attributes import CategorySummary
+    from webmap_geo.attributes import attribute_summary as summarise
+    from webmap_geo.dataplane import ObjectStore
+
+    async with principal_session(request.app.state.engine, principal) as conn:
+        key, _ = await service.resolve_feature_object(conn, principal, dataset_id)
+
+    store = ObjectStore(
+        endpoint=settings.s3_endpoint.removeprefix("http://").removeprefix("https://"),
+        access_key=settings.s3_access_key.get_secret_value(),
+        secret_key=settings.s3_secret_key.get_secret_value(),
+        region=settings.s3_region,
+        use_ssl=settings.s3_use_ssl,
+    )
+    summary = summarise(f"s3://{settings.s3_bucket}/{key}", column, store, kind=kind)
+
+    if isinstance(summary, CategorySummary):
+        return {
+            "column": column,
+            "kind": "text",
+            "categories": [{"value": value, "count": count} for value, count in summary.values],
+            "remaining": summary.remaining,
+            "refused": (
+                None
+                if summary.refused is None
+                else {"distinct": summary.refused[0], "limit": summary.refused[1]}
+            ),
+        }
+
+    return {
+        "column": column,
+        "kind": "number",
+        "domain": [summary.minimum, summary.maximum],
+        "histogram": summary.counts,
+        "missing": summary.missing,
     }
 
 
