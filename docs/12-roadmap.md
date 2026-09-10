@@ -383,8 +383,10 @@ produces the same wrong surface with nothing said about it.
   disabled, per-scope context menus, and `conflicts(state)` to prove no key resolves to two
   enabled commands at once. What remains is the surfaces that render from it
 - **Selection** — multi-feature and vertex scopes, click/rectangle/lasso, active-layer plumbing
-- **Edit session** (`09` §5) — dirty buffer, `Command`/`FeatureDelta`, undo/redo, Save/Discard,
-  IndexedDB crash durability. **Before any mutating operation exists**
+- **Edit session** (`09` §5) — **built**: dirty buffer, `Command`/`FeatureDelta`, undo/redo
+  atomic over a command's whole delta set, Save/Discard, the Refresh half of the 409 rebase,
+  and the snapshot §5.4 mirrors to IndexedDB. The IndexedDB write itself and the recovery
+  prompt are what remain
 - **Screen-space snapping** (`09` §6) — vertex/edge/intersection/midpoint, the pixel-clamped
   tolerance and its badge, the exact-coordinate resolution protocol, unsimplified tiles at edit
   zooms

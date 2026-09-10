@@ -255,6 +255,32 @@ interface FeatureDelta {
 new command, and on a failed flush — replaying forward from a state the server never accepted
 produces a layer nobody authored.
 
+**Built** as `apps/web/src/editing/session.ts`, ahead of any mutating operation as §14's
+sequence requires. Five decisions:
+
+**Undoing back to the start leaves the session clean.** `restore` compares the restored feature
+against the exact cache and *drops it from the buffer* when they match, rather than writing it
+back. Without that, Save stays enabled with nothing to send and the tab warns about unsaved
+changes that no longer exist. "Unchanged" is therefore decided by comparison, not by counting
+operations — a move and a move back is two commands and zero changes.
+
+**A pending delete is `null` in the buffer, not an absent key.** An absent key is an untouched
+feature, and a delete stored that way is a delete that never reaches the server.
+
+**`pendingDeltas` is derived from the buffer, not accumulated.** A feature moved four times is
+one delta from its original; the server writes a whole immutable object either way
+(`adr/0005`), and four deltas for one feature is four chances to disagree about the order.
+
+**Commit clears both stacks.** After a commit the previous state is a version on the server,
+and undoing into it would leave a local buffer that disagrees with a `baseVersion` the session
+has already moved past. A rebase clears them for the same reason: an entry referencing a
+feature just replaced underneath would restore a `before` that is nobody's state.
+
+**The snapshot leaves out the exact cache.** It is a copy of what the server holds and can be
+fetched again; persisting it would multiply the stored size by the size of the layer, and
+§5.4's recovery rebases onto whatever the layer holds *now* — `isStale` is what tells the
+recovery prompt the version moved while the tab was closed.
+
 ---
 
 ## 4. Mode state machine
