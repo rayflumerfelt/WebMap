@@ -18,9 +18,10 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 Updated 2026-09-10 (Phases 4 and 5 in progress). A phase is complete only when every
 criterion passes; a criterion met with a caveat says so rather than being ticked quietly.
 
-Verified on this date against a live stack: the full Python suite including the integration
-tests, 487 TypeScript tests (97 style-model, 76 ui, 22 map, 292 web), and lint, formatting, typechecking and the package-boundary
-contracts clean in both languages. Migrations apply, roll back to base and re-apply.
+Verified on this date against a live stack: **1,080 Python tests pass and 12 skip** —
+the skips name the service they need — with 487 TypeScript tests (97 style-model, 76 ui,
+22 map, 292 web), and lint, formatting, typechecking and the package-boundary contracts
+clean in both languages. Migrations apply, roll back to base and re-apply.
 
 **What is deliberately not counted as done.** The editing subsystem's *model* is built and
 tested — registry, session, modes, snapping, topology — and none of it is wired to a map yet.

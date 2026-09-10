@@ -151,8 +151,22 @@
     <question>What kinds of spatial data are available to me in this
       deployment — points, grids, faults, or something else?</question>
     <answer>a pointset, a grid, and a fault network</answer>
+    <!-- One call per kind, not one unfiltered page. "What kinds are
+         available" cannot be answered from the first 25 rows of a listing:
+         it happened to work while the deployment held fewer than 25
+         datasets, and stopped the night a run of jobs registered thirty.
+         The tool has a `kind` filter, and using it is also the tool
+         selection this question should be teaching. -->
     <plan>
-      <call tool="webmap_list_datasets" />
+      <call tool="webmap_list_datasets">
+        <arg name="kind">pointset</arg>
+      </call>
+      <call tool="webmap_list_datasets">
+        <arg name="kind">grid</arg>
+      </call>
+      <call tool="webmap_list_datasets">
+        <arg name="kind">fault_network</arg>
+      </call>
     </plan>
     <expect>pointset</expect>
     <expect>grid</expect>

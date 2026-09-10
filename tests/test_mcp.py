@@ -277,17 +277,39 @@ async def test_two_users_get_different_results(api_base_url: str) -> None:
     A dataset Alan cannot see must be absent rather than forbidden. Reporting
     it as refused would confirm it exists, which is the disclosure the
     scoping is there to prevent.
+
+    **Searched rather than listed**, and the difference is not stylistic.
+    `webmap_list_datasets` returns a page, and this assertion is about
+    visibility rather than about ordering — an earlier version read page one of
+    a 25-row list and passed for exactly as long as the deployment held fewer
+    than 25 datasets. A night of probe jobs registered thirty and the test
+    started reporting a permission failure that had not happened. A search
+    names what it is looking for; a listing hopes.
     """
+    # **Each user's calls all happen before the next `_tools_as`.** The helper
+    # rebinds the MCP server's module-level settings and returns the module
+    # itself, so two handles are two names for one object pointed at whoever
+    # was configured last — holding both and interleaving gives Alan's answers
+    # under Ada's name.
     ada = await _tools_as("ada", api_base_url)
     ada_view = await ada.webmap_list_datasets()
+    ada_wolfcamp = await ada.webmap_search_datasets(query="Wolfcamp")
 
     alan = await _tools_as("alan", api_base_url)
     alan_view = await alan.webmap_list_datasets()
+    alan_wolfcamp = await alan.webmap_search_datasets(query="Wolfcamp")
+    alan_faults = await alan.webmap_search_datasets(query="Fault Network")
 
     assert ada_view != alan_view, "the same tool returned the same thing for both users"
-    assert "Wolfcamp" in ada_view, "Ada is on the team that owns the seeded data"
-    assert "Wolfcamp" not in alan_view, "Alan is not, and must not see it"
-    assert "Fault Network" in alan_view, "the one dataset granted to his team"
+
+    assert "Wolfcamp" in ada_wolfcamp, "Ada is on the team that owns the seeded data"
+    # **Not a substring check.** An empty result echoes the query back — "No
+    # datasets matching 'Wolfcamp'" — so `"Wolfcamp" not in ...` is false for
+    # the very answer that proves the point. What is asserted is that the
+    # search found nothing, which is also the shape §5 requires: absent rather
+    # than forbidden, because reporting it as refused would confirm it exists.
+    assert "No datasets" in alan_wolfcamp, "Alan is not on that team and must not see it"
+    assert "Fault Network" in alan_faults, "the one dataset granted to his team"
 
 
 async def test_one_word_from_a_layers_name_finds_it(api_base_url: str) -> None:
