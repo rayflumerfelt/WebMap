@@ -78,9 +78,7 @@ def test_the_request_survives_a_job_payload() -> None:
 
 
 def test_a_control_clip_survives_a_job_payload() -> None:
-    original = ClipRequest(
-        dataset_id=uuid4(), to_control="radius", control_dataset_id=uuid4()
-    )
+    original = ClipRequest(dataset_id=uuid4(), to_control="radius", control_dataset_id=uuid4())
     assert ClipRequest.from_parameters(original.to_parameters()) == original
 
 
@@ -94,13 +92,10 @@ def test_the_job_has_progress_phases() -> None:
 
 
 def test_the_endpoint_is_registered_and_needs_a_principal() -> None:
+    from tests.test_route_wiring import _api_routes, _dependency_calls
     from webmap_api.dependencies import get_principal
     from webmap_api.main import create_app
 
-    from tests.test_route_wiring import _api_routes, _dependency_calls
-
-    routes = [
-        route for route in _api_routes(create_app()) if route.path == "/api/v1/jobs/clip"
-    ]
+    routes = [route for route in _api_routes(create_app()) if route.path == "/api/v1/jobs/clip"]
     assert routes, "POST /api/v1/jobs/clip is not registered"
     assert get_principal in _dependency_calls(routes[0].dependant)

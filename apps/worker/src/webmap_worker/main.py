@@ -9,6 +9,7 @@ from webmap_core.logging import configure_logging, get_logger
 from webmap_core.settings import Environment, get_settings
 from webmap_geo.dataplane import ObjectStore, assert_extensions
 from webmap_worker.tasks.aggregate import aggregate_task
+from webmap_worker.tasks.anchors import anchor_task
 from webmap_worker.tasks.clip import clip_task
 from webmap_worker.tasks.contour import contour_task
 from webmap_worker.tasks.health import ping
@@ -81,6 +82,7 @@ class WorkerSettings:
         contour_task,
         aggregate_task,
         clip_task,
+        anchor_task,
     ]
     cron_jobs: ClassVar[list[Any]] = []
 

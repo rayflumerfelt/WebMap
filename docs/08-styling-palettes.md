@@ -310,6 +310,18 @@ A precomputed anchor is stable, is computed once against the whole geometry, and
 writes geometry, so it belongs to `webmap_geo` and not to `style-model` (`adr/0004`); Shapely
 ships `polylabel`, so it costs no new dependency.
 
+**Built** as `webmap_geo.label`, `webmap_core.services.anchors`, the `label_anchors` job,
+`POST /api/v1/jobs/label-anchors` and `webmap_label_anchors`. The anchor layer carries
+`anchor_method` — `centroid`, or `pole` where the centroid fell outside the polygon — and
+`clearance`, the distance from the anchor to the nearest edge. `clearance` is what lets a
+caller thin labels by how much room a feature actually has rather than by guessing a zoom, and
+the pole count in the caption is what says a layer is full of crescents and doughnuts, which is
+where a hand correction usually gets wanted.
+
+**Label columns are copied only when asked for, and none are by default.** An anchor layer
+carrying every attribute of its source is a duplicate that then drifts out of date with it; the
+anchors exist to place a label, and placing one needs one column.
+
 For lines, `symbol-placement: 'line-center'` rather than a precomputed point. MapLibre anchors
 a `point`-placed line label at the line's **first vertex** — an end, not the middle — which is
 why contour labels drawn that way all cluster at the edge of the map.

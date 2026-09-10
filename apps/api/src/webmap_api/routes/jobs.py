@@ -22,6 +22,7 @@ from webmap_api.dependencies import CurrentPrincipal, ScopedConn
 from webmap_core.logging import get_logger
 from webmap_core.models import Visibility, WebMapModel
 from webmap_core.services import aggregation as aggregation_service
+from webmap_core.services import anchors as anchor_service
 from webmap_core.services import clipping as clip_service
 from webmap_core.services import contours as contour_service
 from webmap_core.services import gridding as grid_service
@@ -203,6 +204,36 @@ class ClipRequestModel(WebMapModel):
         )
 
 
+class AnchorRequestModel(WebMapModel):
+    """Precompute label anchors for a polygon layer (`08` §2.4)."""
+
+    dataset_id: UUID
+    label_columns: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Columns to copy onto the anchor points so the layer can be "
+            "labelled on its own. Empty copies none — an anchor layer carrying "
+            "forty attributes is a duplicate of the source that then drifts out "
+            "of date with it."
+        ),
+    )
+    output_name: str | None = None
+    project_id: UUID | None = None
+    visibility: Visibility = Visibility.TEAM
+    owner_team_id: UUID | None = None
+
+    def to_request(self) -> anchor_service.AnchorRequest:
+        return anchor_service.AnchorRequest(
+            dataset_id=self.dataset_id,
+            label_columns=tuple(self.label_columns),
+            output_name=self.output_name,
+            project_id=self.project_id,
+            visibility=self.visibility,
+            owner_team_id=self.owner_team_id,
+        )
+
+
 class StatModel(WebMapModel):
     """One output column of a summarisation (`05` §8)."""
 
@@ -359,6 +390,29 @@ async def submit_clip(
         queue(request),
         kind="clip",
         task="clip_task",
+        parameters=body.to_request().to_parameters(),
+    )
+
+
+@router.post("/label-anchors", response_model=Submitted, status_code=202)
+async def submit_label_anchors(
+    body: AnchorRequestModel,
+    principal: CurrentPrincipal,
+    conn: ScopedConn,
+    request: Request,
+) -> Submitted:
+    """Precompute one label anchor per polygon, as a point dataset.
+
+    The anchor is computed once against the whole geometry rather than per
+    tile, which is what stops a label moving while you pan and appearing twice
+    on a polygon that crosses a tile boundary (`08` §2.4).
+    """
+    return await _submit(
+        conn,
+        principal,
+        queue(request),
+        kind="label_anchors",
+        task="anchor_task",
         parameters=body.to_request().to_parameters(),
     )
 

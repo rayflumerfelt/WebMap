@@ -698,6 +698,64 @@ async def webmap_clip_grid(
     return job_submitted(submitted, what="Clipping job", detail=detail)
 
 
+@mcp.tool(annotations=SUBMITS_JOB)
+async def webmap_label_anchors(
+    dataset_id: Annotated[UUID, Field(description="Polygon layer to anchor.")],
+    label_columns: Annotated[
+        list[str] | None,
+        Field(
+            None,
+            description=(
+                "Columns to copy onto the anchor points so the layer can be "
+                "labelled from itself - normally just the one the label shows. "
+                "Omit to copy none."
+            ),
+        ),
+    ] = None,
+    output_name: Annotated[
+        str | None, Field(None, description="Name for the anchor layer.")
+    ] = None,
+) -> str:
+    """Precompute one label anchor per polygon, as a point layer.
+
+    Returns a job handle. Use this when polygon labels move while panning,
+    appear twice on one feature, or land outside a crescent-shaped or
+    doughnut-shaped polygon.
+
+    MapLibre places a polygon label against the *tile-clipped* geometry, so a
+    lease crossing a tile boundary is a different shape in each tile and gets a
+    different anchor in each. An anchor computed here is computed once against
+    the whole geometry, so it is stable at every zoom, and because it is a
+    dataset it can be inspected, corrected by hand, and exported with the map.
+
+    The result carries `anchor_method` - 'centroid', or 'pole' where the
+    centroid fell outside the polygon - and `clearance`, the distance to the
+    nearest edge, which is how much room the label has.
+
+    Lines do not need this. MapLibre's `symbol-placement: 'line-center'` places
+    them correctly; it is point placement that puts every contour label at the
+    line's first vertex, clustered on the edge of the map.
+    """
+    source = await _get(f"/api/v1/datasets/{dataset_id}")
+    detail = [
+        f"- **Input**: {source.get('name')} ({source.get('feature_count') or '?'} features)"
+    ]
+    if label_columns:
+        detail.append(f"- **Carrying**: {', '.join(label_columns)}")
+
+    submitted = await _post(
+        "/api/v1/jobs/label-anchors",
+        _clean_params(
+            {
+                "dataset_id": str(dataset_id),
+                "label_columns": label_columns,
+                "output_name": output_name,
+            }
+        ),
+    )
+    return job_submitted(submitted, what="Label anchor job", detail=detail)
+
+
 @mcp.tool(annotations=READ_ONLY)
 async def webmap_fit_variogram(
     dataset_id: Annotated[UUID, Field(description="Point layer to analyse.")],

@@ -73,6 +73,14 @@ PHASES: dict[str, list[tuple[str, float]]] = {
         ("Clipping", 0.10),
         ("Writing grid", 0.40),
     ],
+    # Anchoring is `polylabel` on the polygons whose centroid falls outside
+    # them, which on a normal lease layer is a minority. Reading and writing
+    # dominate, which is why the phase the job is named after is the small one.
+    "label_anchors": [
+        ("Loading polygons", 0.40),
+        ("Placing anchors", 0.25),
+        ("Writing features", 0.35),
+    ],
     "contour_filled": [
         ("Loading grid", 0.10),
         ("Choosing levels", 0.03),
