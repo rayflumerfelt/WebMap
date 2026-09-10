@@ -1225,7 +1225,7 @@ every feature table.
 | Vertex add propagation | The §7.3 case that silently creates slivers — assert the neighbour gained a vertex |
 | Version commit | Integration: two sessions commit against one version; one wins, the other gets a 409 **naming the changed features**. And: kill the process between the write and the pointer advance; assert no orphan is visible and the pointer did not move |
 | Undo/redo | Property test — random command sequences, assert `undo(apply(s)) == s` |
-| Command registry | Every command appears in exactly one registry entry; every shortcut is unique |
+| Command registry | Every command appears in exactly one registry entry, and **no *state* resolves a shortcut to two enabled commands** — `conflicts(state)`, over the states a session passes through. Not "every shortcut is unique": `Delete` is deliberately shared, and §8 says why |
 | Edit → render | E2E: edit a fault, re-grid, confirm the surface changed at the fault |
 
 That last test is the one that matters most. It verifies the whole chain — edit, persist,
@@ -1239,17 +1239,25 @@ break silently.
 Each phase independently shippable.
 
 1. **Foundation** — command registry, mode state machine, menus rendered from the registry,
-   `useHotkeys`, command palette. No operations yet.
+   hotkeys, command palette. No operations yet. — **built**
 2. **Selection** — feature store, both selection scopes, click/rectangle/lasso, modifier
-   inversion, active-layer plumbing, the status strip's selection count.
+   inversion, active-layer plumbing, the status strip's selection count. — **the model is
+   built**; the hit testing that turns a click into a feature id is not
 3. **Edit session** — dirty buffer, `Command`/`FeatureDelta`, undo/redo, Save/Discard, IndexedDB
-   durability, the version check. **Before any mutating operation exists.**
+   durability, the version check. **Before any mutating operation exists.** — **built**, except
+   the IndexedDB write itself: `snapshot()` produces what crosses into it, and nothing stores
+   it yet
 4. **Snapping** — the screen-space engine, tolerance conversion, indicator, settings popover,
-   status-strip snap state. Configure unsimplified tiles at edit zooms.
+   status-strip snap state. Configure unsimplified tiles at edit zooms. — **the engine and the
+   status readout are built**; the `queryRenderedFeatures` candidate set, the indicator source
+   and the tile configuration are not
 5. **Vertex editing** — handles, vertex scope, move/add/delete, the exact-resolution protocol.
 6. **Drawing** — Terra Draw for new geometry, wired to the snap engine through `toCustom`.
 7. **Clipboard and simple transforms** — cut/copy/paste, move, rotate, scale.
 8. **Topological editing** — coincidence index, toggle, propagation, the discoverability nudge.
+   — **the index and the propagation rules are built**, ahead of order because §7.3's
+   vertex-add rule is a property of the *index* and is cheaper to get right before anything
+   depends on it
 9. **Backend operations** — split, reshape, combine/explode/dissolve, smooth/simplify, overlay.
 10. **Async jobs** — validate topology, align, preview and progress, the validation indicator.
 11. **Attributes** — panel, bulk edit, resolution strategies.
@@ -1258,3 +1266,10 @@ Each phase independently shippable.
 **Phase 3 is the one most likely to be skipped under schedule pressure and the most expensive to
 retrofit.** Undo built in from the first mutation costs almost nothing; undo added afterwards
 means revisiting every operation that already exists.
+
+**What "built" means for 1–4 and 8.** The rules are right and tested, and none of it is wired
+to a map: no operation mutates geometry yet. That is the order this section asks for, and it is
+worth stating plainly rather than leaving a reader to infer that a geologist can drag a vertex.
+The next piece of work is the MapLibre half — hit testing, the snap candidate set, the
+`edit-overlay` source of §3.3, and the vertex handlers — after which phases 5 onward have
+something to attach to.

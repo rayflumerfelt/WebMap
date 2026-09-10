@@ -1,7 +1,7 @@
 # 00 — Overview
 
 **Project name:** WebMap
-**Status:** Phases 0-3 built, Phase 4 in progress - `12-roadmap.md` is authoritative
+**Status:** Phases 0-3 built; Phases 4 and 5 in progress - `12-roadmap.md` is authoritative
 **Audience:** Engineers and AI coding agents implementing the system
 
 ---

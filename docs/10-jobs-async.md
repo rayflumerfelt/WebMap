@@ -85,9 +85,15 @@ class JobContext:
 
 ## 3. Worker
 
-> **Built today: `ping`, `interpolate_task`, `contour_task`, and no cron jobs.** The
-> `aggregate`, `ingest`, `sync` and `export` tasks below are Phase 4 and 6 work, and the four
-> cron entries with them. `apps/worker/src/webmap_worker/main.py` carries the same note.
+> **Built today: `ping`, `interpolate_task`, `contour_task`, `aggregate_task`,
+> `clip_task`, `anchor_task`, and no cron jobs.** The `ingest`, `sync` and `export` tasks
+> below are still owed — Phase 4 for the first, Phase 6 for the other two — and the four cron
+> entries with them.
+>
+> Every registered kind has an entry in `webmap_worker.progress.PHASES`, and
+> `ProgressReporter` refuses to construct without one. A job with no phases reports nothing
+> for its whole run, which reads as a hang; making that a construction error rather than a
+> silent zero is why the two lists cannot drift.
 
 ```python
 # apps/worker/src/webmap_worker/main.py
@@ -160,6 +166,11 @@ class ProgressReporter:
             ("Solving",                     0.55),
             ("Writing grid",                0.10),
         ],
+        # …and one entry per registered kind: `contour`, `contour_filled`,
+        # `aggregate`, `clip`, `label_anchors`. Weights are measured
+        # proportions of a real run, not guesses about which step sounds like
+        # the work — which is why `clip` gives its own operation 10% and the
+        # two reads and the COG write the other 90%.
     }
 
     def __init__(self, db, job_id: UUID, kind: str, min_interval: float = 1.0):

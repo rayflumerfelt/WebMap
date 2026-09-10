@@ -11,12 +11,22 @@ packages/
 ├── style-model/          @webmap/style-model   (no React, no MapLibre)
 │   └── Symbology types + compilers to MapLibre Style JSON
 ├── ui/                   @webmap/ui            (React + Mantine, no MapLibre)
-│   └── Layer tree, legend, scale bar, north arrow today; ramp editor and style property editor in Phase 5
+│   ├── Layer tree, legend, scale bar, north arrow
+│   └── controls/         the nine shared formatting controls of §6.3
+│                         (the schema-driven property editor of `08` §6 is still owed)
 └── map/                  @webmap/map           (React + MapLibre + @webmap/*)
     └── The map component
 apps/
 └── web/                                        (consumes all of the above)
+    ├── symbology/        the per-layer formatting dialog of §6.2
+    └── editing/          the `09` model — registry, session, modes, snapping,
+                          topology — and the four surfaces that render from it
 ```
+
+**Why the editing model lives in `apps/web` rather than a package.** It is not reusable
+today and pretending otherwise would cost the indirection now for a payoff nobody has
+asked for. The pieces that *are* reusable went to `@webmap/ui`: §6.3's controls take a
+value and an `onChange` and know nothing about layers, maps or this application.
 
 ### 1.1 Boundary rules
 

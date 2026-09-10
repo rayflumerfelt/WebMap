@@ -18,6 +18,10 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 Updated 2026-09-10 (Phases 4 and 5 in progress). A phase is complete only when every
 criterion passes; a criterion met with a caveat says so rather than being ticked quietly.
 
+Acceptance criteria read `[x]` met, `[ ]` not met, and **`[~]` met in part** — the caveat is
+always stated, because a tick that quietly stands for "mostly" is how a phase gets called
+complete twice.
+
 Verified on this date against a live stack: **1,080 Python tests pass and 12 skip** —
 the skips name the service they need — with 487 TypeScript tests (97 style-model, 76 ui,
 22 map, 292 web), and lint, formatting, typechecking and the package-boundary contracts
@@ -27,7 +31,7 @@ clean in both languages. Migrations apply, roll back to base and re-apply.
 tested — registry, session, modes, snapping, topology — and none of it is wired to a map yet.
 An operation that mutates geometry needs the MapLibre half: hit testing, the candidate set for
 snapping, the edit-overlay source, and the vertex handlers. The model was built first on
-purpose (`09` §14), and it is worth being precise that "built" here means the rules are right,
+purpose (`09` §20), and it is worth being precise that "built" here means the rules are right,
 not that a geologist can drag a vertex.
 
 | Phase | State |
@@ -57,9 +61,10 @@ than the empty directory was.
 surface — but it tests reachability rather than tool *selection*, which is the half
 §10 cares most about and the half that needs a model.
 
-Second, `CLAUDE.md` §6.1 puts reference comparison at the highest bar in the repo for
-`webmap_geo`, and no test in the suite carries the `reference` marker. Minimum curvature
-against a Surfer grid is blocked on having a reference grid at all.
+**The other gap is reference comparison.** `CLAUDE.md` §6.1 puts it at the highest bar in
+the repo for `webmap_geo`, and no test in the suite carries the `reference` marker. Minimum
+curvature against a Surfer grid is blocked on having a Surfer grid at all — which is a thing
+to be supplied rather than written.
 
 ### Carried forward from Phase 1
 
@@ -74,14 +79,26 @@ Neither blocks later phases; the first must be closed on deployment day.
   in `apps/api/routes/auth.py`: written, reviewed, never run against a tenant.
   The three things most likely to be wrong are the audience value, the groups
   claim name, and whether groups arrive as object ids or display names.
-- **Ownership transfer is blocked, not implemented.** Migration `0002` installs
-  a trigger refusing ownership changes through an ordinary UPDATE, because the
-  RLS `WITH CHECK` did not catch them, and leaves
+- **Ownership transfer is blocked, and now blocked for a second reason.**
+  Migration `0002` installs a trigger refusing ownership changes through an
+  ordinary UPDATE, because the RLS `WITH CHECK` did not catch them, and leaves
   `webmap.allow_ownership_transfer` as a transaction-local escape for the
-  audited operation `03-auth-security.md` §3.3 describes.
-  **`adr/0010` §5 is the driver that was missing**: recovering a departed
-  colleague's private work is a transfer rather than an administrator read, so
-  this lands in Phase 5 with layers and basemaps.
+  audited operation `03-auth-security.md` §3.3 describes. Migration `0006`
+  extends that trigger to `layer` and `basemap`, which `adr/0010` added two
+  revisions after it was written — so the two objects the sharing model exists
+  *for* were the two an ordinary UPDATE could reassign.
+
+  The operation itself was **attempted on 2026-09-10 and backed out**. It exists
+  to recover objects an administrator cannot read, and every route to them is
+  closed by design: ordinary service code gets `NotFound` because the app role
+  is `NOBYPASSRLS`, and a `SECURITY DEFINER` function owned by the table owner
+  fares no better, because migration `0004` sets `FORCE ROW LEVEL SECURITY`,
+  which applies to the owner and refuses `row_security = off`. Both were
+  written and run; the function reported "No layer with id …" for the object it
+  had just been handed. Finishing it needs a narrowly scoped `BYPASSRLS` role —
+  one that owns two functions and nothing else — which is a **new role in the
+  security model** and belongs in a decision rather than a commit. `adr/0010`
+  §5 carries the reasoning.
 
 ### Operational notes
 
@@ -100,8 +117,7 @@ something to check, and are empty until their phase. They are not oversights:
 
 | Module | Phase |
 |---|---|
-| `packages/ui` ramp editor, schema-driven property editor | 5 |
-| `webmap_geo.aggregate` | 4 (still owed) |
+| `packages/ui` schema-driven property editor | 5 — the nine shared controls of `07` §6.3 are built; this is the §6 escape hatch generated from the MapLibre style spec |
 | `webmap_io.connectors` (file share, PostGIS) | 6 — **but the directory is empty**: no `__init__.py`, so it is not importable and no contract names it |
 | `webmap_io` readers for `.grd`, ZMAP+, KML, DXF | 6 |
 | Export and loss reporting (`11-file-io.md` §4.2, §7) | 6 |
@@ -208,7 +224,9 @@ First phase with something a geologist recognizes.
 
 **Acceptance**
 
-- [ ] A 500k-feature layer pans and zooms at 30+ fps — **needs a browser**; no harness yet
+- [ ] A 500k-feature layer pans and zooms at 30+ fps — the browser harness exists now
+      (`tests/e2e/`), and **no case measures frame rate**; that needs a trace, not an
+      assertion
 - [x] Tile requests without a valid scoped token return 403 — bearer, scoped, tampered,
       malformed, and cross-dataset cases all covered
 - [x] TypeScript and Python compilers produce identical Style JSON for every test vector
@@ -218,11 +236,14 @@ First phase with something a geologist recognizes.
       property the three-latitude check was standing in for
 - [x] Layer reorder, visibility, and opacity persist across reload
 - [ ] At 1920×1080, layer tree + symbology + attribute table are all usable without
-      occluding the map — **needs a browser at that resolution**
+      occluding the map — the harness drives that resolution and checks the breakpoint
+      widens the panels; **"usable without occluding" is not yet asserted**
 - [x] Panel widths and collapsed state persist per user across sessions
-- [ ] Below 1280 px the app shows the minimum-width notice rather than reflowing —
-      implemented in `AppShell`, but **no test covers it**; the shell suite's docstring
-      claims it and none of its cases exercise it
+- [~] Below 1280 px the app shows the minimum-width notice rather than reflowing —
+      **now covered**, by `tests/e2e/test_shell.py` at a 1024 px viewport. It asserts the
+      notice is visible and the shell is not, which is the pair that matters. Tilde rather
+      than tick because the case skips when the stack is down, so it is green in CI and
+      absent on a workstation with nothing running
 - [x] Status bar shows analysis CRS, live cursor coordinates in that CRS, and map scale
 - [x] Every documented keyboard shortcut works; every context menu is reachable via
       `Shift+F10`
@@ -248,8 +269,10 @@ The point of the project.
       actually displays — an image content block, not a markdown URI. Measured at
       0.9–1.1 s for three 2560×1440 renders with zero failed requests; **the p95 is a
       spot measurement, not a standing test**
-- [ ] The rendered image is pixel-comparable to the same view in the browser — **needs the
-      visual harness**, `tests/visual/golden/` is empty
+- [ ] The rendered image is pixel-comparable to the same view in the browser — **the
+      harness is built and its goldens are not**. `tests/visual/` renders six cases and
+      compares them at a 0.1% tolerance; every case skips, naming the command that would
+      generate a golden and the reminder to look at it first
 - [ ] Render metadata contains value range, units, CRS, and vintage — verified against the
       source. The *formatter* is tested over a hand-built record; **nothing checks the
       values against the dataset they came from**, which is the half that matters
@@ -314,12 +337,16 @@ fault is gridded with it.
       so the highest bar in `CLAUDE.md` §6.1 is currently unmet for every algorithm
 - [x] Kriging with a known synthetic variogram recovers the field within tolerance
 - [x] A surface gridded across a sealing fault with **minimum curvature** shows the correct
-      discontinuity — sampled either side; the visual half awaits the render harness
+      discontinuity — sampled either side. The visual half now has a harness
+      (`faults_over_grid` in `tests/visual/`) and no golden, so it is written and not yet
+      exercised
 - [x] Kriging with a fault network supplied warns that it does not honour it, and names the
       method that does
-- [ ] A breakline produces gradient discontinuity with value continuity — **not
-      implemented.** Breaklines are modelled, validated and carried through the mesh, but
-      no interpolator honours them yet
+- [x] A breakline produces gradient discontinuity with value continuity — asserted on the
+      surface rather than on the operator: over a terrace with a control gap straddling the
+      break, the corner turns in one cell with the breakline and is rounded off without it,
+      while the largest step across the line stays under one cell of honest dip. A fault on
+      the same line is the control, and produces a different surface
 - [x] Fault network validation catches all defects in the hostile fault fixture, each with a
       location
 - [x] 1000×1000 with faults completes in under 5 minutes (minimum curvature) — **measured
@@ -357,13 +384,6 @@ the display range and the extrapolation fraction, reachable as `webmap_clip_grid
 a job, `POST /api/v1/jobs/aggregate`, and `webmap_aggregate`. **`webmap_fit_variogram` is
 done** and runs inline rather than as a job (`10` §6).
 
-**Label anchors are half done.** The geoprocessing exists and is tested — `webmap_geo.label`
-places one anchor per feature, centroid where it falls inside and pole of inaccessibility where
-it does not, with the clearance around it (`05` §7.2). What is missing is the job that turns a
-polygon layer into an anchor *dataset*: without it the anchors cannot be stored, inspected,
-hand-corrected or referenced by a style, which is most of the reason for computing them here
-rather than letting MapLibre do it per tile.
-
 **Filled contour bands are done** (`05` §7.1). `webmap_contour` takes `fill`, and produces the
 polygons between levels as a second layer from the same level list — with each band's bounds,
 midpoint, area and whether it is open-ended.
@@ -381,8 +401,10 @@ produces the same wrong surface with nothing said about it.
 
 **Deliverables**
 
-- Ramp editor with histogram underlay
-- Palette import: `.clr`, `.cpt`, QGIS XML
+- Ramp editor with histogram underlay — **built**, and the underlay is the point of it
+  rather than decoration: a ramp is only right relative to the values it colours
+- Palette import: `.clr`, `.cpt`, QGIS XML — **built**, plus WebMap's own `.json` for
+  round-tripping, with `.clr`, `.cpt` and `.json` written back out
 - Schema-driven property editor generated from the MapLibre style spec
 - Graduated and rule-based symbology; all classification methods
 - Style templates with resolution order
@@ -461,8 +483,6 @@ produces the same wrong surface with nothing said about it.
   precomputed anchor source Phase 4 produces
 - **Grid colouring** (`08` §5.2): interval bands snapped to the contour interval, gradient
   over a P5-P95 display range, and clip-to-polygon
-- **Ownership transfer** for a deactivated user's objects — the audited operation
-  `03-auth-security.md` §3.3 specifies and `migration 0002` left an escape hatch for
 
 **Acceptance**
 
@@ -470,9 +490,15 @@ produces the same wrong surface with nothing said about it.
 - [ ] The property editor exposes every paint and layout property for each layer type,
       correctly filtered by geometry
 - [ ] A feature round-trips through every engine hop with bit-identical coordinates (`09` §2.4)
-- [ ] A topological vertex move leaves every previously coincident vertex still coincident
-- [ ] Vertex add propagates to the neighbour sharing that edge — the case that silently creates
-      slivers when implemented halfway (`09` §7.3)
+- [ ] A topological vertex move leaves every previously coincident vertex still coincident —
+      the coincidence index that answers "which vertices" is built and tested; nothing moves a
+      vertex yet
+- [~] Vertex add propagates to the neighbour sharing that edge — the case that silently creates
+      slivers when implemented halfway (`09` §7.3). **`sharedEdges` is built and its first
+      version reproduced exactly that sliver**: a ring's closing segment has endpoints N-1
+      apart rather than 1, so an adjacency test accepting only 1 never saw it, and on the
+      two-lease fixture the neighbour's shared boundary *was* its closing segment. Tested;
+      not yet wired to a vertex handler
 - [ ] Two sessions commit against one version; the loser gets a 409 **naming the features that
       changed**, not just the version
 - [ ] Snapping lands within tolerance on vertices, edges, and intersections, with visual
@@ -480,24 +506,39 @@ produces the same wrong surface with nothing said about it.
 - [ ] The full snap pass completes in under 4 ms with 50k segments in view (`09` §6.5)
 - [ ] A polygon digitized against an existing boundary with snapping on produces no sliver
 - [ ] Editing a fault and re-gridding produces a surface reflecting the new geometry
-- [ ] Undo restores exact prior state across 20 random operation sequences
+- [~] Undo restores exact prior state across 20 random operation sequences — undo is built
+      and tested on the cases that carry the design (a multi-feature command undone atomically;
+      undoing to the start leaving the session *clean*), but by example rather than by the
+      Hypothesis property `CLAUDE.md` §6.3 asks for
 - [ ] A colour-filled grid's bands land on the contour levels drawn over it
 - [ ] An interval palette renders the exact colours it names, and a value outside every band
       clamps to an end colour rather than rendering transparent
-- [ ] The italic control is disabled for a family that has no italic
+- [x] The italic control is disabled for a family that has no italic — and says so, because
+      a disabled control with no reason is a bug report waiting to be filed
 - [ ] A reference-scale label covers the same ground distance at every zoom, and a fixed label
       the same screen size — measured against MapLibre's expression engine, not eyeballed
 - [ ] Every label draws above every object layer, whatever the layer draw order
 - [ ] A polygon spanning a tile boundary keeps one label in one place while panning and
       zooming — the failure precomputed anchors exist to prevent
-- [ ] Two basemaps share one layer; editing the layer changes both, and soft-deleting it is
-      refused with both basemaps named
-- [ ] Duplicating a layer copies the row and references the same object — verified by storage
-      size, not by inspection
-- [ ] A default basemap resolves user → team → global, presentation-specific before general at
-      each tier, with the source tier reported
-- [ ] A non-administrator cannot set `visibility = 'org'`
-- [ ] A global administrator has no implicit read access to a private layer
+- [~] Two basemaps share one layer; editing the layer changes both, and soft-deleting it is
+      refused with both basemaps named — **the refusal is tested and names them**, in the
+      message rather than as a foreign-key error. "Editing the layer changes both" needs the
+      map, which reads the membership at session open
+- [~] Duplicating a layer copies the row and references the same object — asserted on
+      `dataset_id` rather than on storage size. The same claim, and it runs in a millisecond;
+      the storage-size version is the one that would also catch a copy made somewhere else
+- [x] A default basemap resolves user → team → global, presentation-specific before general at
+      each tier, with the source tier reported — including the rule that is easy to get
+      backwards: a tier is exhausted before resolution descends, so a user's *general* default
+      beats their team's presentation-specific one
+- [~] A non-administrator cannot set `visibility = 'org'` — `require_publish_scope` enforces
+      it and is wired into layers and basemaps. **No test covers it yet**, and it is not wired
+      into the older ownable services
+- [~] A global administrator has no implicit read access to a private layer — **observed, not
+      asserted**. The ownership-transfer attempt was blocked by exactly this property, twice:
+      once through RLS and once through `FORCE ROW LEVEL SECURITY`. That was a development
+      finding and the tests around it were backed out with the feature, so nothing in the
+      suite stands guard over it today
 - [ ] Removing a user from a team leaves everything they own intact
 - [ ] A deactivated user cannot sign in, and their team-visible layers still resolve in a
       colleague's map
@@ -522,7 +563,9 @@ produces the same wrong surface with nothing said about it.
 
 **Acceptance**
 
-- [ ] Every aggregation operation produces results matching a PostGIS/QGIS reference
+- [ ] Every aggregation operation produces results matching a PostGIS/QGIS reference — the
+      fifteen operations are built and tested against closed forms and invariants; **none is
+      compared against another tool's output**, which is the bar this criterion sets
 - [ ] Share-sourced datasets sync on schedule and show `synced_at` in the UI
 - [ ] Path traversal via a crafted share URI is blocked
 - [ ] Shapefile export reports truncation and collision before writing

@@ -662,6 +662,11 @@ Retention: 2 years minimum. Confirm against corporate policy before launch.
 - [ ] Ownership transfer is refused for an **active** user's objects — the loophole that would
       turn transfer into read access (`adr/0010` §5)
 - [ ] A transfer emits an audit record naming source owner, target owner and reason
+- [ ] The role that performs a transfer holds `BYPASSRLS` and **owns nothing else** — no
+      table, no other function. The operation needs to read what RLS hides from everyone
+      including the administrator running it, so the privilege is real; keeping it to two
+      functions is what keeps it auditable. See `adr/0010` §5's implementation note for why
+      the ordinary routes cannot work
 
 **Local credentials — `managed` mode only.** None of this applies to a `directory`
 deployment, which has no local credential to protect.

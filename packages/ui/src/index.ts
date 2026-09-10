@@ -13,7 +13,8 @@
  * formatting dialog composes them rather than reimplementing them and they can
  * be lifted into another application unchanged.
  *
- * The schema-driven property editor lands later in Phase 5.
+ * The schema-driven property editor — `08` §6's escape hatch, generated from the
+ * MapLibre style spec — is the one piece of Phase 5's UI still owed here.
  */
 export { webmapTheme } from './theme.js';
 export { Legend } from './Legend/Legend.js';
