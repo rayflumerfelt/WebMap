@@ -86,6 +86,73 @@ def crossing(y: float, level: float) -> float | None:
     return None
 
 
+#: Degrees per pixel this case is rendered at: the township is 0.2° across in a
+#: 2560 px image, less the fit padding. The gaps are cut for that, which is what
+#: `adr/0015` means by a reference scale — and doing it here rather than by hand
+#: means the fixture exercises the same code the contour job runs.
+DEGREES_PER_PIXEL = (EAST - WEST) / 2400.0
+
+
+def gapped_contours() -> list[dict[str, Any]]:
+    """The contours, cut around their labels, plus the label anchors.
+
+    Two kinds of feature in one collection, as a real contour dataset holds
+    them: `kind = 'contour'` for the line pieces and `kind = 'label'` for the
+    points the text is drawn at.
+    """
+    from shapely.geometry import LineString
+
+    from webmap_geo.contour.labels import gap_length, label_contour
+
+    features: list[dict[str, Any]] = []
+    for source in contour_lines():
+        properties = source["properties"]
+        geometry = LineString(source["geometry"]["coordinates"])
+
+        if not properties["is_index"]:
+            features.append(source)
+            continue
+
+        text = properties["label"]
+        gap = gap_length(text, metres_per_pixel=DEGREES_PER_PIXEL)
+        labelled = label_contour(
+            geometry,
+            float(properties["value"]),
+            gap=gap,
+            # A quarter of the township's height, so a contour crossing the
+            # map is labelled about four times.
+            spacing=max((NORTH - SOUTH) / 4.0, 3.0 * gap),
+        )
+
+        for piece in labelled.pieces:
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[round(x, 7), round(y, 7)] for x, y in piece.coords],
+                    },
+                    "properties": {**properties, "kind": "contour"},
+                }
+            )
+        for label in labelled.labels:
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [round(label.point.x, 7), round(label.point.y, 7)],
+                    },
+                    "properties": {
+                        **properties,
+                        "kind": "label",
+                        "bearing": round(label.bearing, 3),
+                    },
+                }
+            )
+    return features
+
+
 def contour_lines() -> list[dict[str, Any]]:
     """Contours as polylines sampled along the surface's own level sets.
 
@@ -107,6 +174,9 @@ def contour_lines() -> list[dict[str, Any]]:
                     "type": "Feature",
                     "geometry": {"type": "LineString", "coordinates": points},
                     "properties": {
+                        # Whole lines are contours; `gapped_contours` cuts the
+                        # index ones and adds the label points.
+                        "kind": "contour",
                         "value": level,
                         # Every fifth contour is an index contour — the rule
                         # `08` §6.2 calls the most important piece of contour
@@ -248,7 +318,7 @@ write(
     {
         "style": {
             **base_style(
-                {"contours": geojson(contour_lines())},
+                {"contours": geojson(gapped_contours())},
                 [
                     {
                         "id": "background",
@@ -259,6 +329,7 @@ write(
                         "id": "contours",
                         "type": "line",
                         "source": "contours",
+                        "filter": ["==", ["get", "kind"], "contour"],
                         "paint": {
                             "line-color": "#6b4f2a",
                             "line-width": ["case", ["get", "is_index"], 1.8, 0.8],
@@ -268,16 +339,20 @@ write(
                         "id": "contour-labels",
                         "type": "symbol",
                         "source": "contours",
-                        "filter": ["get", "is_index"],
+                        "filter": ["==", ["get", "kind"], "label"],
                         "layout": {
                             "text-field": ["get", "label"],
                             "text-font": ["Inter Regular"],
                             "text-size": 12,
-                            # `08` §2.4: line-center, never point. Point
-                            # placement anchors at the line's first vertex, so
-                            # every label ends up on the edge of the map — the
-                            # exact failure this case exists to catch.
-                            "symbol-placement": "line-center",
+                            # **Point placement, against `08` §2.4's rule and
+                            # with its blessing** (`adr/0015`): the anchor is
+                            # ours, computed at the middle of a gap cut into
+                            # the line, so MapLibre is not choosing an end.
+                            # `line-center` would draw the label on top of the
+                            # contour it names.
+                            "symbol-placement": "point",
+                            "text-rotate": ["get", "bearing"],
+                            "text-rotation-alignment": "map",
                             "text-allow-overlap": True,
                             "text-ignore-placement": True,
                         },

@@ -155,7 +155,10 @@ async def test_the_lines_are_registered_as_a_line_layer_with_lineage(
         lineage = await get_lineage(conn, owner, output_id)
 
     assert row.kind == DatasetKind.VECTOR
-    assert row.geometry_kind == GeometryKind.LINESTRING
+    # Mixed, not linestring: an index contour's label anchors travel with the
+    # lines they were cut for (`adr/0015`), because the gap and the label that
+    # sits in it are one decision and two datasets is how they come to disagree.
+    assert row.geometry_kind == GeometryKind.MIXED
     assert row.parquet_key is not None
     assert row.feature_count == document["feature_count"]
     assert row.storage_srid == TEXAS_CENTRAL
@@ -266,7 +269,12 @@ async def test_the_contours_sit_on_the_grid_they_came_from(
         for wkb, props in rows:
             import json
 
-            value = json.loads(props)["value"]
+            attributes = json.loads(props)
+            # Label anchors share the object with the lines now (`adr/0015`).
+            # They sit on the contour too, but this test is about the lines.
+            if attributes.get("kind") == "label":
+                continue
+            value = attributes["value"]
             line = shapely.from_wkb(bytes(wkb))
             # Sample the surface along the contour. Where the line runs, the
             # grid must read its own label back.
@@ -694,3 +702,74 @@ async def test_a_filled_job_reports_progress_through_its_own_phases(
     assert sum(weight for _, weight in PHASES["contour_filled"]) == pytest.approx(1.0)
     assert "Filling bands" in [name for name, _ in PHASES["contour_filled"]]
     assert "Filling bands" not in [name for name, _ in PHASES["contour"]]
+
+
+async def test_index_contours_are_gapped_and_labelled(
+    engine: AsyncEngine,
+    storage: Any,
+    object_store: Any,
+    picks: str,
+    principals: dict[str, object],
+) -> None:
+    """`adr/0015`: the label sits in a break in its own line.
+
+    Asserted on the object rather than on a picture, because the picture is a
+    visual golden and this is the part that has to be true before the picture
+    is worth taking: every label carries the text its gap was cut for, and no
+    line piece runs through a label.
+    """
+    import json
+
+    import shapely
+
+    from webmap_geo.dataplane import connect
+
+    owner = principals["owner"]
+    assert isinstance(owner, Principal)
+    grid_id = await make_grid(engine, storage, object_store, owner, picks)
+
+    _, document = await run_contour(
+        engine, storage, object_store, owner, contours.ContourRequest(dataset_id=grid_id)
+    )
+
+    async with principal_session(engine, owner) as conn:
+        parquet_key = (
+            await conn.execute(
+                text("SELECT parquet_key FROM dataset WHERE id = :id"),
+                {"id": UUID(document["dataset_id"])},
+            )
+        ).scalar_one()
+
+    with connect(object_store) as duck:
+        rows = duck.execute(
+            "SELECT geometry, props FROM read_parquet($key)",
+            {"key": f"s3://{BUCKET}/{parquet_key}"},
+        ).fetchall()
+
+    lines: list[tuple[Any, dict[str, Any]]] = []
+    labels: list[tuple[Any, dict[str, Any]]] = []
+    for wkb, props in rows:
+        attributes = json.loads(props)
+        geometry = shapely.from_wkb(bytes(wkb))
+        (labels if attributes.get("kind") == "label" else lines).append((geometry, attributes))
+
+    assert labels, "no index contour was labelled"
+    assert document["label_count"] == len(labels)
+    assert document["contour_count"] < document["feature_count"], (
+        "an index contour cut around its labels must produce more features than "
+        "there are contours"
+    )
+
+    for _anchor, attributes in labels:
+        assert attributes["is_index"] is True, "only index contours are labelled"
+        # The gap was cut for this exact string, so the string travels with the
+        # geometry — a style that formatted the number itself could render one
+        # that does not fit the gap.
+        assert attributes["label"] == f"{attributes['value']:,.0f}"
+        assert -90.0 <= attributes["bearing"] < 90.0
+
+    # The whole point. A line piece running through a label anchor is a label
+    # drawn on top of its own contour, which is what this change removes.
+    for anchor, _ in labels:
+        nearest = min(line.distance(anchor) for line, _ in lines)
+        assert nearest > 0.0, "a contour runs through its own label"

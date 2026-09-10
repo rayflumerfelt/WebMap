@@ -55,6 +55,15 @@ class ContourRequest:
     #: the fill edge sits under the line. Two datasets, one job, one level
     #: list.
     fill: bool = False
+    #: Units per pixel the label gaps are cut for (`adr/0015`). A label is a
+    #: fixed number of pixels wide and a gap a fixed number of feet, so the two
+    #: agree at one scale only. `None` uses half the grid's cell size, which is
+    #: about where a contour map stops showing detail the grid does not have.
+    label_scale: float | None = None
+    #: Distance along a contour between labels, in the grid's units. `None`
+    #: takes a quarter of the grid's width, so a contour crossing the map is
+    #: labelled about four times.
+    label_spacing: float | None = None
     output_name: str | None = None
     project_id: UUID | None = None
     visibility: Visibility = Visibility.TEAM
@@ -69,6 +78,8 @@ class ContourRequest:
             "smoothing": self.smoothing,
             "index_every": self.index_every,
             "min_length": self.min_length,
+            "label_scale": self.label_scale,
+            "label_spacing": self.label_spacing,
             "fill": self.fill,
             "output_name": self.output_name,
             "project_id": str(self.project_id) if self.project_id else None,
@@ -405,6 +416,124 @@ def caption(source: GridSource, lines: list[Any], levels: Any) -> str:
     )
 
 
+@dataclass(frozen=True)
+class ContourOutput:
+    """What a contour run produced.
+
+    Three counts rather than one, because they answer different questions and
+    a single "feature count" answers none of them well: a geologist asks how
+    many contours, the map asks how many features it must draw, and a support
+    question about a missing label asks how many labels were placed.
+    """
+
+    dataset_id: UUID
+    #: Rows written — line pieces and label points together.
+    feature_count: int
+    #: Contours, as a reader counts them: one per traced line.
+    contour_count: int
+    label_count: int
+
+
+#: Pixels across a map pane on a workstation, for the default label scale.
+#: `07-frontend.md` §5.1 targets 1440 px wide with panels either side, so the
+#: map itself is about this. It only has to be right to within a factor of two:
+#: it sets how long a gap is, and a gap half a character out is invisible.
+REFERENCE_VIEW_PX = 1000.0
+
+
+def label_text(value: float, levels: Any) -> str:
+    """The string drawn on the contour, formatted here rather than in the style.
+
+    **The gap was cut for this exact string** (`adr/0015`), so the string has to
+    travel with the geometry — a style that formatted the number itself could
+    render "-12800.0" into a gap cut for "-12,800" and overflow it.
+
+    Decimals come from the levels: a 25 ft interval reads as integers and a
+    0.25 ft interval does not, and showing "-12,800.00" on a structure map is
+    four characters of noise on every contour.
+    """
+    decimals = 0
+    for level in levels:
+        remainder = abs(float(level) - round(float(level)))
+        if remainder > 1e-9:
+            decimals = 2
+            break
+    return f"{float(value):,.{decimals}f}"
+
+
+def contour_features(
+    lines: list[Any],
+    levels: Any,
+    *,
+    grid: Any,
+    request: ContourRequest,
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Contour geometry with label gaps cut into it, and the labels.
+
+    Only **index** contours are labelled and therefore only index contours are
+    cut — `05` §7 already says the intermediates carry no label, and cutting an
+    unlabelled line would be a break with nothing in it.
+
+    Returns geometry and properties in step, ready for `write_features`.
+    """
+    from webmap_geo.contour.labels import gap_length, label_contour
+
+    width = grid.nx * grid.cell_size
+    # The scale the map is *read* at: the whole grid across a map pane. Half a
+    # cell per pixel was the first guess and it is far too fine — on a 4,600 ft
+    # grid it puts the whole surface in 200 pixels and asks for a gap 144,000 ft
+    # long, wider than the spacing between labels. A gap is only meaningful at
+    # the scale somebody looks at the map (`adr/0015`).
+    scale = request.label_scale or width / REFERENCE_VIEW_PX
+    spacing = request.label_spacing or width / 4.0
+
+    geometry: list[Any] = []
+    props: list[dict[str, Any]] = []
+
+    for line in lines:
+        base = {
+            "value": float(line.value),
+            # The flag a style reads to draw every fifth line heavier. Without
+            # it a dense structure map is a field of identical hairlines.
+            "is_index": bool(line.is_index),
+            "closed": bool(line.closed),
+        }
+
+        if not line.is_index:
+            geometry.append(line.geometry)
+            props.append({**base, "kind": "contour", "bearing": None, "label": None})
+            continue
+
+        text = label_text(line.value, levels)
+        gap = gap_length(text, metres_per_pixel=scale)
+        labelled = label_contour(
+            line.geometry,
+            float(line.value),
+            gap=gap,
+            # Never closer together than three gaps, whatever the default or
+            # the caller worked out: labels packed tighter than that leave a
+            # contour that is more break than line.
+            spacing=max(spacing, 3.0 * gap),
+        )
+
+        for piece in labelled.pieces:
+            geometry.append(piece)
+            props.append({**base, "kind": "contour", "bearing": None, "label": None})
+        for label in labelled.labels:
+            geometry.append(label.point)
+            props.append(
+                {
+                    **base,
+                    "kind": "label",
+                    # `text-rotate` degrees, so the label follows the contour.
+                    "bearing": float(label.bearing),
+                    "label": text,
+                }
+            )
+
+    return geometry, props
+
+
 async def write_contour_dataset(
     conn: AsyncConnection,
     principal: Principal,
@@ -414,10 +543,14 @@ async def write_contour_dataset(
     lines: list[Any],
     levels: Any,
     *,
+    grid: Any,
     store: Any,
     bucket: str,
-) -> UUID:
+) -> ContourOutput:
     """Write the GeoParquet object, then register it.
+
+    The grid comes in because the label gaps are sized from its cell size and
+    spaced across its width (`adr/0015`); nothing else here needs it.
 
     Object first, row second — an orphaned object is recoverable by a sweep,
     a row pointing at a key that was never written is a layer that 404s
@@ -432,17 +565,9 @@ async def write_contour_dataset(
     dataset_id = uuid4()
     key = feature_key(str(dataset_id), 1)
 
-    geometry = np.asarray([line.geometry for line in lines], dtype=object)
-    props: list[dict[str, Any]] = [
-        {
-            "value": line.value,
-            # The flag a style reads to draw every fifth line heavier. Without
-            # it a dense structure map is a field of identical hairlines.
-            "is_index": line.is_index,
-            "closed": line.closed,
-        }
-        for line in lines
-    ]
+    features, props = contour_features(lines, levels, grid=grid, request=request)
+    geometry = np.asarray(features, dtype=object)
+    label_count = sum(1 for entry in props if entry["kind"] == "label")
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "contours.parquet"
@@ -460,12 +585,15 @@ async def write_contour_dataset(
         principal,
         name=name,
         kind=DatasetKind.VECTOR,
-        geometry_kind=GeometryKind.LINESTRING,
+        # Lines and their label anchors travel together: the gap and the label
+        # that sits in it are one decision, and splitting them across two
+        # datasets is how they come to disagree (`adr/0015`).
+        geometry_kind=GeometryKind.MIXED,
         storage_srid=source.storage_srid,
         connector="derived",
         project_id=request.project_id or source.project_id,
         parquet_key=key,
-        feature_count=len(lines),
+        feature_count=len(features),
         # Inherited from the grid rather than recomputed: contours are a
         # subset of the surface's extent by construction, and reprojecting a
         # planar bound to 4326 here would be a second, avoidable conversion.
@@ -474,6 +602,11 @@ async def write_contour_dataset(
             {"name": "value", "type": "double"},
             {"name": "is_index", "type": "boolean"},
             {"name": "closed", "type": "boolean"},
+            # 'contour' or 'label'. The style draws the first as lines and the
+            # second as point-placed text rotated by `bearing`.
+            {"name": "kind", "type": "text"},
+            {"name": "bearing", "type": "double"},
+            {"name": "label", "type": "text"},
         ],
         owner_team_id=request.owner_team_id,
         visibility=request.visibility,
@@ -497,7 +630,12 @@ async def write_contour_dataset(
         input_dataset_ids=[source.dataset_id],
         job_id=context.job_id,
     )
-    return dataset_id
+    return ContourOutput(
+        dataset_id=dataset_id,
+        feature_count=len(features),
+        contour_count=len(lines),
+        label_count=label_count,
+    )
 
 
 async def contours_of(

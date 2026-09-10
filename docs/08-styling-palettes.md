@@ -326,6 +326,16 @@ For lines, `symbol-placement: 'line-center'` rather than a precomputed point. Ma
 a `point`-placed line label at the line's **first vertex** — an end, not the middle — which is
 why contour labels drawn that way all cluster at the edge of the map.
 
+**Contours are the exception, and for a reason this rule does not cover**
+([`adr/0015`](adr/0015-contour-labels-gap-the-line.md)). `line-center` draws the label *on top
+of* the contour, and a contour that runs through its own value is harder to read at exactly the
+moment somebody is reading values off the map. Every tool a geologist has used breaks the line
+for a character either side instead, MapLibre cannot express that, and a halo is the wrong fix
+over a filled map. So a contour dataset arrives with the gaps already cut and label points
+beside them, carrying a `bearing`; the label layer is `point`-placed over those. The objection
+above does not apply, because MapLibre is no longer choosing the anchor — we are, and it is in
+the middle of the gap by construction.
+
 **All label layers are added after all object layers, so nothing draws over a label.** MapLibre
 paints in array order, so this is the entire mechanism: `compileStyle` holds symbol layers back
 and appends them, preserving draw order among themselves. The basemap is deliberately exempt —

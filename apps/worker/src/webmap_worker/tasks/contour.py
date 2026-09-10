@@ -96,15 +96,32 @@ async def _run(
 
     await reporter.phase("Writing features")
     async with principal_session(engine, principal) as conn:
-        dataset_id = await contours.write_contour_dataset(
-            conn, principal, context, request, source, lines, levels, store=store, bucket=bucket
+        output = await contours.write_contour_dataset(
+            conn,
+            principal,
+            context,
+            request,
+            source,
+            lines,
+            levels,
+            grid=grid,
+            store=store,
+            bucket=bucket,
         )
         document = {
-            "dataset_id": str(dataset_id),
+            "dataset_id": str(output.dataset_id),
             "interval": contours.interval_of(levels),
             "levels": [float(level) for level in levels],
             "index_levels": contours.index_values(lines),
-            "feature_count": len(lines),
+            # Features written, which is line pieces plus label points and no
+            # longer the same as the contour count: an index contour is cut
+            # into pieces around its labels (`adr/0015`). Both are reported,
+            # because "how many contours" and "how many features" are different
+            # questions and answering one with the other is how a caller comes
+            # to believe the tracer produced twice as many contours as it did.
+            "feature_count": output.feature_count,
+            "contour_count": output.contour_count,
+            "label_count": output.label_count,
             "caption": contours.caption(source, lines, levels),
         }
         if bands:
@@ -130,8 +147,9 @@ async def _run(
     log.info(
         "contour_succeeded",
         job_id=str(context.job_id),
-        dataset_id=str(dataset_id),
+        dataset_id=str(output.dataset_id),
         lines=len(lines),
+        labels=output.label_count,
         bands=len(bands),
     )
     return document

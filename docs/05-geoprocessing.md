@@ -753,7 +753,15 @@ def auto_levels(vmin: float, vmax: float, target_count: int = 15) -> np.ndarray:
 ```
 
 Contour output carries attributes: `value`, `is_index` (every Nth for heavier styling), and
-`closed`. Index contours drive label placement in the style.
+`closed`, `kind`, `bearing` and `label`.
+
+**Index contours arrive with their labels, and with the gaps to put them in**
+([`adr/0015`](adr/0015-contour-labels-gap-the-line.md)). `kind` is `'contour'` or `'label'`: an
+index contour is cut into pieces around each label and a point feature is written at the middle
+of every gap, carrying the rotation to draw the text at and the text itself. The text travels
+with the geometry because the gap was cut for that exact string — a style that formatted the
+number itself could render one that does not fit. Intermediate contours are unlabelled and
+therefore uncut.
 
 ### 7.1 Filled bands
 
