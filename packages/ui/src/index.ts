@@ -8,7 +8,12 @@
  * is the specification as data, and the schema-driven property editor is
  * generated from it (`08-styling-palettes.md` §6).
  *
- * The ramp editor and the schema-driven property editor land in Phase 5.
+ * The §6.3 shared controls live under `controls/`. Each takes a value and an
+ * `onChange` and knows nothing about layers, maps or this application, so a
+ * formatting dialog composes them rather than reimplementing them and they can
+ * be lifted into another application unchanged.
+ *
+ * The schema-driven property editor lands later in Phase 5.
  */
 export { webmapTheme } from './theme.js';
 export { Legend } from './Legend/Legend.js';
@@ -21,3 +26,23 @@ export { NorthArrow } from './NorthArrow/NorthArrow.js';
 export type { NorthArrowProps } from './NorthArrow/NorthArrow.js';
 export { LayerTree } from './LayerTree/LayerTree.js';
 export type { LayerTreeProps, SessionLayerView } from './LayerTree/LayerTree.js';
+
+// --- `07-frontend.md` §6.3 shared controls ---------------------------------
+export { ColorPicker, expandHex } from './controls/ColorPicker.js';
+export type { ColorPickerProps } from './controls/ColorPicker.js';
+export { RampEditor } from './controls/RampEditor.js';
+export type { RampEditorProps } from './controls/RampEditor.js';
+export { IntervalEditor } from './controls/IntervalEditor.js';
+export type { IntervalBand, IntervalEditorProps } from './controls/IntervalEditor.js';
+export { CategoryTable, OTHER_DEFAULT } from './controls/CategoryTable.js';
+export type { CategoryRow, CategoryTableProps } from './controls/CategoryTable.js';
+export { DASH_PATTERNS, LinePicker, patternName } from './controls/LinePicker.js';
+export type { LinePickerProps, LineValue } from './controls/LinePicker.js';
+export { MarkerPicker } from './controls/MarkerPicker.js';
+export type { MarkerPickerProps, MarkerShape, MarkerValue } from './controls/MarkerPicker.js';
+export { composeStack, FontPicker, splitStack } from './controls/FontPicker.js';
+export type { FontFamily, FontPickerProps } from './controls/FontPicker.js';
+export { formatOf, PaletteIO } from './controls/PaletteIO.js';
+export type { PaletteFormat, PaletteIOProps } from './controls/PaletteIO.js';
+export { LegendPreview } from './controls/LegendPreview.js';
+export type { LegendPreviewProps } from './controls/LegendPreview.js';
