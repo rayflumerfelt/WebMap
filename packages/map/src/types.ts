@@ -1,3 +1,4 @@
+import type { Feature as GeoJsonFeature } from 'geojson';
 import type {
   FitBoundsOptions,
   LayerSpecification,
@@ -96,7 +97,7 @@ export interface WebMapProps {
  */
 export interface EditOverlay {
   /** Dirty features in WGS84, each carrying the `id` its base layer uses. */
-  features: GeoJSON.Feature[];
+  features: GeoJsonFeature[];
   /**
    * How to draw them, appended above every other layer. Their `source` is
    * overwritten with the overlay's own, so a caller cannot accidentally point

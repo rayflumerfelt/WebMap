@@ -12,6 +12,7 @@
  * dependency list; every prop change afterwards mutates the existing map.
  */
 
+import type { FeatureCollection } from 'geojson';
 import maplibregl from 'maplibre-gl';
 import type { StyleSpecification } from 'maplibre-gl';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
@@ -170,9 +171,9 @@ export const WebMap = forwardRef<WebMapHandle, WebMapProps>(function WebMap(prop
       }
 
       const source = map.getSource(EDIT_SOURCE) as
-        | { setData(data: GeoJSON.FeatureCollection): void }
+        | { setData(data: FeatureCollection): void }
         | undefined;
-      const data: GeoJSON.FeatureCollection = {
+      const data: FeatureCollection = {
         type: 'FeatureCollection',
         features: overlay.features,
       };
