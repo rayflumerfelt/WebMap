@@ -28,6 +28,7 @@ from webmap_core.db.session import principal_session
 from webmap_core.models import Visibility
 from webmap_core.permissions import Principal
 from webmap_core.services import jobs
+from webmap_io.exceptions import UnsupportedFormat
 from webmap_worker.tasks.ingest import ingest_task, options_from
 
 pytestmark = pytest.mark.integration
@@ -204,7 +205,10 @@ class TestQueuedIngest:
         async with principal_session(engine, owner) as conn:
             before = (await conn.execute(text("SELECT count(*) FROM dataset"))).scalar_one()
 
-        with pytest.raises(Exception):
+        # The specific failure: a CSV with no geometry and no column mapping
+        # that matches it. Asserting the type rather than `Exception` keeps
+        # this from passing on an unrelated crash.
+        with pytest.raises(UnsupportedFormat):
             await run_ingest(
                 engine,
                 storage,
