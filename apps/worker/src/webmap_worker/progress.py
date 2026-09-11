@@ -73,6 +73,14 @@ PHASES: dict[str, list[tuple[str, float]]] = {
         ("Clipping", 0.10),
         ("Writing grid", 0.40),
     ],
+    # Reading the object and writing the file are both whole-layer passes; the
+    # audit record at the end is one insert. Weighting them evenly would leave
+    # the bar at two thirds for the entire conversion.
+    "export": [
+        ("Reading the layer", 0.40),
+        ("Writing the file", 0.55),
+        ("Recording", 0.05),
+    ],
     # A sync is dominated by moving bytes, not by thinking about them: the
     # fetch from a share and the Parquet write are the two that take time, and
     # the read between them is fast enough that weighting it higher would make

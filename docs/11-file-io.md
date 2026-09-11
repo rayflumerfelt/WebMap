@@ -328,6 +328,20 @@ def plan_shapefile_export(schema: list[AttributeField], geometry_kind: str) -> l
 in the same dialog, with a one-line reason. Most recipients can read it, and none of the above
 applies.
 
+**Built** as `webmap_io.export` and `webmap_io.write`, with two additions this section implies
+and does not state:
+
+**The warning and the writer share one function.** `shapefile_field_names` assigns the truncated,
+de-collided names, and both the loss report and the DBF header come from it. A warning that
+predicted `porosity_a` while the writer produced `porosity_1` would be worse than no warning,
+because it would be believed.
+
+**Loss blocks, advice does not.** `prefer_gpkg` and CSV's note about its missing CRS are facts
+about the format somebody chose on purpose; truncation, collision and null-to-zero are data
+leaving the file. Only the second kind stops an export, and then only until `accept_loss` says
+to go ahead — the warnings come back in the result either way, because §4.2 wants them in the
+MCP response and not only in a dialog that has already been dismissed.
+
 ---
 
 ## 5. Grid I/O

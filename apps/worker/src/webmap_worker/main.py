@@ -12,6 +12,7 @@ from webmap_worker.tasks.aggregate import aggregate_task
 from webmap_worker.tasks.anchors import anchor_task
 from webmap_worker.tasks.clip import clip_task
 from webmap_worker.tasks.contour import contour_task
+from webmap_worker.tasks.export import export_task
 from webmap_worker.tasks.health import ping
 from webmap_worker.tasks.interpolate import interpolate_task
 from webmap_worker.tasks.sync import sync_task
@@ -85,6 +86,7 @@ class WorkerSettings:
         clip_task,
         anchor_task,
         sync_task,
+        export_task,
     ]
     cron_jobs: ClassVar[list[Any]] = []
 

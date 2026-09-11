@@ -25,6 +25,7 @@ from webmap_core.services import aggregation as aggregation_service
 from webmap_core.services import anchors as anchor_service
 from webmap_core.services import clipping as clip_service
 from webmap_core.services import contours as contour_service
+from webmap_core.services import exports as export_service
 from webmap_core.services import gridding as grid_service
 from webmap_core.services import jobs as service
 from webmap_core.services import sync as sync_service
@@ -391,6 +392,53 @@ async def submit_clip(
         queue(request),
         kind="clip",
         task="clip_task",
+        parameters=body.to_request().to_parameters(),
+    )
+
+
+class ExportRequestModel(WebMapModel):
+    dataset_id: UUID
+    fmt: str = "gpkg"
+    columns: list[str] = Field(default_factory=list)
+    target_srid: int | None = None
+    #: Proceed even where the format loses information. The warnings come back
+    #: either way; this decides whether they stop the export (`11` §4.2).
+    accept_loss: bool = False
+
+    def to_request(self) -> export_service.ExportRequest:
+        return export_service.ExportRequest(
+            dataset_id=self.dataset_id,
+            fmt=self.fmt,
+            columns=self.columns,
+            target_srid=self.target_srid,
+            accept_loss=self.accept_loss,
+        )
+
+
+@router.post("/export", response_model=Submitted, status_code=202)
+async def submit_export(
+    body: ExportRequestModel,
+    principal: CurrentPrincipal,
+    conn: ScopedConn,
+    request: Request,
+) -> Submitted:
+    """Export a dataset to a downloadable file.
+
+    A job because the duration is the caller's to discover, not to predict: a
+    half-million lease polygons to shapefile is a whole-object read, a format
+    conversion and a zip.
+
+    The result carries the object key rather than a URL. A job result lives a
+    day and a download link lives fifteen minutes, so the link is minted when
+    the result is collected — after re-checking the permission, which means a
+    link cannot outlive the access that produced it.
+    """
+    return await _submit(
+        conn,
+        principal,
+        queue(request),
+        kind="export",
+        task="export_task",
         parameters=body.to_request().to_parameters(),
     )
 
