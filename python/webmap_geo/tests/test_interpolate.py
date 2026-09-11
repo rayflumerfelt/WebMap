@@ -77,12 +77,12 @@ def test_a_variogram_is_fitted_when_none_is_given() -> None:
 
     result = interpolate(points, values, g, rng=rng)
 
-    assert result.lineage["variogram"]["model"] in {
-        "spherical",
-        "exponential",
-        "gaussian",
-        "power",
-    }
+    # Against the registry rather than a list: this asserts that *a* model was
+    # fitted, and an enumeration here goes stale the moment a family is added —
+    # which is how it failed when Matérn arrived and won.
+    from webmap_geo.variogram.model import MODELS
+
+    assert result.lineage["variogram"]["model"] in MODELS
     assert result.lineage["variogram"]["range"] > 0
 
 

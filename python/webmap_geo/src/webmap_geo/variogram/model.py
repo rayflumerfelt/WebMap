@@ -37,7 +37,17 @@ from webmap_geo.exceptions import DegenerateInput
 #:   for porosity and permeability.
 #: - `gaussian` is smooth at the origin, which suits structure but produces an
 #:   ill-conditioned kriging system without a nugget.
-MODELS = ("spherical", "exponential", "gaussian", "power")
+MODELS = ("spherical", "exponential", "gaussian", "power", "matern", "stable")
+
+#: Matérn smoothness. ν = 0.5 is exponential and ν → ∞ is Gaussian, so the
+#: default sits between them: smoother than an exponential, without the
+#: Gaussian's infinitely differentiable field, which produces a surface that
+#: looks more confident near the data than the data supports.
+DEFAULT_MATERN_NU = 1.5
+
+#: Stable exponent. 2 is Gaussian and 1 is exponential; 1.5 is the usual
+#: compromise for a surface with some short-range smoothness.
+DEFAULT_STABLE_ALPHA = 1.5
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,14 @@ class FittedVariogram:
     anisotropy_angle: float = 0.0
     fit_residual: float = 0.0
     n_pairs_used: int = 0
+    #: Matérn smoothness ν, or the stable exponent α. Ignored by the other
+    #: models. One field rather than two because a model has at most one shape
+    #: parameter and two would let a caller set the wrong one silently.
+    shape: float | None = None
+    #: Additional structures, each `(model, partial_sill, range)`. §7.2's nested
+    #: variograms: a short structure for the facies and a long one for the
+    #: regional trend is the ordinary case, not an exotic one.
+    nested: tuple[tuple[str, float, float], ...] = ()
 
     def __post_init__(self) -> None:
         if self.model not in MODELS:
@@ -84,6 +102,16 @@ class FittedVariogram:
                 f"{self.anisotropy_ratio:g}. To express a shorter range in the "
                 f"stated azimuth, rotate the azimuth by 90 degrees instead."
             )
+
+    @property
+    def total_sill(self) -> float:
+        """Every structure's contribution plus the nugget.
+
+        The number a nugget-to-sill ratio should be taken against: with a nested
+        model, `sill` is the first structure's plateau and not the variance the
+        surface actually reaches.
+        """
+        return self.sill + sum(partial for _, partial, _ in self.nested)
 
     @property
     def partial_sill(self) -> float:
@@ -125,25 +153,9 @@ class FittedVariogram:
         scaled = far / self.range_
         partial = self.partial_sill
 
-        if self.model == "spherical":
-            structured = np.where(
-                scaled >= 1.0,
-                partial,
-                partial * (1.5 * scaled - 0.5 * scaled**3),
-            )
-        elif self.model == "exponential":
-            # 3/range so that `range_` means the *practical* range — the lag at
-            # 95% of the sill. Without the 3, "range" would mean the e-folding
-            # distance, which is a third as far and would silently make every
-            # fitted range look three times too short.
-            structured = partial * (1.0 - np.exp(-3.0 * scaled))
-        elif self.model == "gaussian":
-            structured = partial * (1.0 - np.exp(-3.0 * scaled**2))
-        else:  # power
-            # No sill: variance grows without bound. Legitimate for a surface
-            # with regional trend, and the reason `sill` is read as a scale
-            # factor here rather than as a plateau.
-            structured = partial * np.power(scaled, min(self.range_, 1.99))
+        structured = _structure(self.model, far, self.range_, partial, self.shape)
+        for model, nested_sill, nested_range in self.nested:
+            structured = structured + _structure(model, far, nested_range, nested_sill, None)
 
         result[positive] = self.nugget + structured
         return result
@@ -176,6 +188,83 @@ class FittedVariogram:
         return text
 
 
+def _structure(
+    model: str,
+    lag: NDArray[np.float64],
+    range_: float,
+    partial: float,
+    shape: float | None,
+) -> NDArray[np.float64]:
+    """One structure's contribution to the semivariance.
+
+    Split out because a nested variogram is a sum of these, and `13` §7.2 makes
+    nesting ordinary rather than exotic — a short structure for the facies and a
+    long one for the regional trend is what most real surfaces look like.
+    """
+    scaled = lag / range_
+
+    if model == "spherical":
+        return np.asarray(
+            np.where(scaled >= 1.0, partial, partial * (1.5 * scaled - 0.5 * scaled**3)),
+            dtype=np.float64,
+        )
+    if model == "exponential":
+        # 3/range so that `range_` means the *practical* range — the lag at
+        # 95% of the sill. Without the 3, "range" would mean the e-folding
+        # distance, which is a third as far and would silently make every
+        # fitted range look three times too short.
+        return np.asarray(partial * (1.0 - np.exp(-3.0 * scaled)), dtype=np.float64)
+    if model == "gaussian":
+        return np.asarray(partial * (1.0 - np.exp(-3.0 * scaled**2)), dtype=np.float64)
+    if model == "matern":
+        return _matern(scaled, partial, shape if shape is not None else DEFAULT_MATERN_NU)
+    if model == "stable":
+        alpha = shape if shape is not None else DEFAULT_STABLE_ALPHA
+        return np.asarray(
+            partial * (1.0 - np.exp(-3.0 * np.power(scaled, alpha))), dtype=np.float64
+        )
+
+    # power: no sill, variance grows without bound. Legitimate for a surface
+    # with regional trend, and the reason `sill` is read as a scale factor here
+    # rather than as a plateau.
+    return np.asarray(partial * np.power(scaled, min(range_, 1.99)), dtype=np.float64)
+
+
+def _matern(scaled: NDArray[np.float64], partial: float, nu: float) -> NDArray[np.float64]:
+    """Matérn semivariance, with ν free.
+
+    The family the other models are corners of: ν = 0.5 is exponential, ν → ∞ is
+    Gaussian. It earns its place because ν *is* the smoothness of the field, and
+    a geologist choosing between "exponential" and "Gaussian" is really choosing
+    between two points on this axis without being able to say where between
+    them the surface actually sits.
+
+    Evaluated through `scipy.special.kv`, which is undefined at zero — handled
+    by the caller's `h > 0` mask, and again here for the scaled lag, because a
+    nested structure can reach this with a lag that rounds to zero.
+    """
+    from scipy import special
+
+    # The scaling that keeps `range_` meaning the practical range across ν, so
+    # switching model families does not silently change what "range" means.
+    factor = np.sqrt(2.0 * nu) * 3.0 * scaled
+    correlation = np.ones_like(scaled)
+
+    positive = factor > 0
+    if np.any(positive):
+        value = factor[positive]
+        correlation[positive] = (
+            np.power(2.0, 1.0 - nu)
+            / special.gamma(nu)
+            * np.power(value, nu)
+            * special.kv(nu, value)
+        )
+    # `kv` underflows to zero for a large argument, which is the right limit;
+    # it can also return NaN there, which is not.
+    correlation = np.nan_to_num(correlation, nan=0.0)
+    return np.asarray(partial * (1.0 - correlation), dtype=np.float64)
+
+
 def anisotropy_transform(ratio: float, angle_deg: float) -> NDArray[np.float64]:
     """The 2x2 matrix that maps coordinates into the variogram's frame.
 
@@ -206,4 +295,10 @@ def anisotropy_transform(ratio: float, angle_deg: float) -> NDArray[np.float64]:
     return np.asarray(scaling @ rotation, dtype=np.float64)
 
 
-__all__ = ["MODELS", "FittedVariogram", "anisotropy_transform"]
+__all__ = [
+    "DEFAULT_MATERN_NU",
+    "DEFAULT_STABLE_ALPHA",
+    "MODELS",
+    "FittedVariogram",
+    "anisotropy_transform",
+]
