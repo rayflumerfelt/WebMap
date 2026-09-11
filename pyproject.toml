@@ -166,6 +166,9 @@ module = [
     "skgstat.*",
     "msal.*",
     "scipy.*",
+    # Ships no py.typed marker. Used only by `webmap_geo.trend.forms`, to parse
+    # a user-supplied trend expression without `eval` (`adr/0012`).
+    "sympy.*",
     # Ships no py.typed marker. Used only by scripts/fetch_fonts.py to pin a
     # variable font's weight axis before the glyphs are built.
     "fontTools.*",

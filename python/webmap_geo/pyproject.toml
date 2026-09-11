@@ -18,6 +18,11 @@ dependencies = [
     "triangle>=20230923",  # Shewchuk constrained Delaunay
     "pyamg>=5.2",          # algebraic multigrid for sparse solves
     "pyproj>=3.6",
+    # `13-kriging.md` §3 and `adr/0012`: sandboxed parsing and `lambdify` of a
+    # user-supplied trend expression. The alternative is `eval` on a string a
+    # user typed, in a service holding everybody's data, which is not an
+    # alternative. Used by `trend/forms.py` and nothing else.
+    "sympy>=1.13",
 ]
 
 [build-system]

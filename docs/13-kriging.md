@@ -554,6 +554,17 @@ Three ways to supply `f`:
 3. **A raw Python callable** `f(X, *theta) -> ndarray`. The caller's responsibility, and not
    reachable from the API or MCP surfaces — only from a notebook.
 
+> **`sympy.parse_expr` is not itself the sandbox.** It tokenises and then *evaluates*, with
+> sympy's namespace as globals, so a name the local dictionary does not define can still
+> resolve — and checking the parsed tree afterwards is checking after the dangerous step. The
+> implementation therefore validates the raw string first, against Python's own tokeniser:
+> every NAME must be a declared covariate, a coefficient, or a permitted function, and the
+> only operators accepted are arithmetic. Attribute access is refused outright, because it is
+> how an expression reaches something that is not arithmetic. Written down because the
+> obvious reading of "parse with sympy against an allow-list" is the unsafe one: two attacks
+> — `__import__(...)` and a walk to `__class__` — reached `lambdify` before this pass existed
+> and failed there by luck rather than by design.
+
 All three go through the same validation: finite output over the observed covariate range,
 correct output shape, and a finite-difference check against any analytic Jacobian supplied.
 
