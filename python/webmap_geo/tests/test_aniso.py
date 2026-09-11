@@ -9,6 +9,8 @@ structural direction.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -25,7 +27,7 @@ from webmap_geo.variogram.aniso import (
 FAST = 19
 
 
-def isotropic_field(rng: np.random.Generator, count: int = 300) -> tuple:
+def isotropic_field(rng: np.random.Generator, count: int = 300) -> tuple[Any, Any]:
     """A field with the same structure in every direction."""
     points = rng.uniform(0.0, 10_000.0, size=(count, 2))
     # A smooth field built from a few random cosines: correlated at short range,
@@ -40,7 +42,7 @@ def isotropic_field(rng: np.random.Generator, count: int = 300) -> tuple:
     return points, values
 
 
-def anisotropic_field(rng: np.random.Generator, count: int = 300) -> tuple:
+def anisotropic_field(rng: np.random.Generator, count: int = 300) -> tuple[Any, Any]:
     """A field that varies slowly east-west and quickly north-south.
 
     What a channel system or a shoreline trend looks like: the same value

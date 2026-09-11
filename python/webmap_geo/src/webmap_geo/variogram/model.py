@@ -39,14 +39,14 @@ from webmap_geo.exceptions import DegenerateInput
 #:   ill-conditioned kriging system without a nugget.
 MODELS = ("spherical", "exponential", "gaussian", "power", "matern", "stable")
 
-#: Matérn smoothness. ν = 0.5 is exponential and ν → ∞ is Gaussian, so the
-#: default sits between them: smoother than an exponential, without the
-#: Gaussian's infinitely differentiable field, which produces a surface that
-#: looks more confident near the data than the data supports.
+#: Matern smoothness `nu`. At 0.5 the model is exponential and in the limit it
+#: is Gaussian, so the default sits between them: smoother than an exponential,
+#: without the Gaussian's infinitely differentiable field, which produces a
+#: surface that looks more confident near the data than the data supports.
 DEFAULT_MATERN_NU = 1.5
 
-#: Stable exponent. 2 is Gaussian and 1 is exponential; 1.5 is the usual
-#: compromise for a surface with some short-range smoothness.
+#: Stable exponent `alpha`. 2 is Gaussian and 1 is exponential; 1.5 is the
+#: usual compromise for a surface with some short-range smoothness.
 DEFAULT_STABLE_ALPHA = 1.5
 
 
@@ -70,9 +70,9 @@ class FittedVariogram:
     anisotropy_angle: float = 0.0
     fit_residual: float = 0.0
     n_pairs_used: int = 0
-    #: Matérn smoothness ν, or the stable exponent α. Ignored by the other
-    #: models. One field rather than two because a model has at most one shape
-    #: parameter and two would let a caller set the wrong one silently.
+    #: Matern smoothness, or the stable exponent. Ignored by the other models.
+    #: One field rather than two because a model has at most one shape parameter
+    #: and two would let a caller set the wrong one silently.
     shape: float | None = None
     #: Additional structures, each `(model, partial_sill, range)`. §7.2's nested
     #: variograms: a short structure for the facies and a long one for the
@@ -150,7 +150,6 @@ class FittedVariogram:
             return result
 
         far = lag[positive]
-        scaled = far / self.range_
         partial = self.partial_sill
 
         structured = _structure(self.model, far, self.range_, partial, self.shape)
@@ -231,10 +230,10 @@ def _structure(
 
 
 def _matern(scaled: NDArray[np.float64], partial: float, nu: float) -> NDArray[np.float64]:
-    """Matérn semivariance, with ν free.
+    """Matérn semivariance, with nu free.
 
-    The family the other models are corners of: ν = 0.5 is exponential, ν → ∞ is
-    Gaussian. It earns its place because ν *is* the smoothness of the field, and
+    The family the other models are corners of: nu = 0.5 is exponential, nu → ∞ is
+    Gaussian. It earns its place because nu *is* the smoothness of the field, and
     a geologist choosing between "exponential" and "Gaussian" is really choosing
     between two points on this axis without being able to say where between
     them the surface actually sits.
@@ -245,7 +244,7 @@ def _matern(scaled: NDArray[np.float64], partial: float, nu: float) -> NDArray[n
     """
     from scipy import special
 
-    # The scaling that keeps `range_` meaning the practical range across ν, so
+    # The scaling that keeps `range_` meaning the practical range across nu, so
     # switching model families does not silently change what "range" means.
     factor = np.sqrt(2.0 * nu) * 3.0 * scaled
     correlation = np.ones_like(scaled)
