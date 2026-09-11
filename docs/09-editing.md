@@ -950,6 +950,28 @@ boundary is exactly the failure §7 exists to prevent.
 > different rules is the same class of bug as the fill-versus-line divergence that module's
 > docstring describes.
 
+**Built** as `webmap_geo.edit` — `split.py`, `combine.py`, `shape.py` — because every one of
+these reads and writes geometry, which [`adr/0004`](adr/0004-geoprocessing-owns-geometry.md)
+puts in that package. The editing UI decides *when* an operation runs and what its undo entry
+says; what the geometry becomes is decided once, for the browser and the MCP tool alike.
+
+Three things the catalog above implies and the implementation had to settle:
+
+**A partial cut needs a boundary tolerance.** A user tracing a lease snaps the end of their cut
+line *to* the boundary, and a cut that ends exactly on it is a cut that stops there — a partial
+cut arrived at by being too accurate. The interior test carries a tolerance so that snapping to
+the edge you are cutting across is not punished for working.
+
+**`simplify` has no empty case.** `preserve_topology=True` never returns empty — measured, at a
+tolerance a thousand times the feature's size, a polygon comes back as its minimal valid form.
+An earlier revision guarded an empty result and the guard was unreachable. What the live preview
+shows instead is `simplification_loss`: the fraction of area or length the tolerance took, which
+is the number that says a lease has stopped being that lease where a vertex count does not.
+
+**A boolean is not a number.** `True + True` is 2 in Python, so a Dissolve summing numerics would
+turn an `is_producing` column into a count. Booleans are excluded from the sum, which matters
+because a column that comes back as 2 is worse than one that comes back wrong.
+
 ### 11.6 Vertex operations
 
 | Operation | Trigger | Notes |
