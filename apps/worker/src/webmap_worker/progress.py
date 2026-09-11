@@ -73,6 +73,16 @@ PHASES: dict[str, list[tuple[str, float]]] = {
         ("Clipping", 0.10),
         ("Writing grid", 0.40),
     ],
+    # A sync is dominated by moving bytes, not by thinking about them: the
+    # fetch from a share and the Parquet write are the two that take time, and
+    # the read between them is fast enough that weighting it higher would make
+    # the bar sit still through the part that actually takes a minute.
+    "sync": [
+        ("Checking the source", 0.05),
+        ("Fetching", 0.45),
+        ("Reading", 0.15),
+        ("Writing features", 0.35),
+    ],
     # Anchoring is `polylabel` on the polygons whose centroid falls outside
     # them, which on a normal lease layer is a minority. Reading and writing
     # dominate, which is why the phase the job is named after is the small one.

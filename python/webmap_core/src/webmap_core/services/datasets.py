@@ -282,6 +282,11 @@ async def create_dataset(
     description: str | None = None,
     source_uri: str | None = None,
     source_checksum: str | None = None,
+    #: What it takes to read `source_uri` again — the column mapping for a CSV,
+    #: the layer of a multi-layer file, the encoding. Kept because a sync must
+    #: re-read the same way a person chose at ingest, and `11` §3.1 forbids
+    #: sniffing it (`11` §2.4).
+    source_options: dict[str, Any] | None = None,
     dataset_id: UUID | None = None,
 ) -> UUID:
     """Register a dataset.
@@ -303,14 +308,16 @@ async def create_dataset(
             INSERT INTO dataset (
                 id,
                 project_id, name, description, kind, geometry_kind, connector,
-                source_uri, source_checksum, sync_state, storage_srid,
+                source_uri, source_checksum, source_options, sync_state,
+                storage_srid,
                 bbox_4326, parquet_key, version, feature_count,
                 attribute_schema, value_min, value_max, cog_key, caption,
                 owner_user_id, owner_team_id, visibility)
             VALUES (
                 coalesce(CAST(:dataset_id AS uuid), gen_random_uuid()),
                 :project_id, :name, :description, :kind, :geometry_kind,
-                :connector, :source_uri, :source_checksum, 'ready',
+                :connector, :source_uri, :source_checksum,
+                CAST(:source_options AS jsonb), 'ready',
                 :storage_srid, :bbox_4326, :parquet_key, 1, :feature_count,
                 CAST(:attribute_schema AS jsonb), :value_min, :value_max,
                 :cog_key, :caption,
@@ -328,6 +335,7 @@ async def create_dataset(
             "connector": connector,
             "source_uri": source_uri,
             "source_checksum": source_checksum,
+            "source_options": json.dumps(source_options) if source_options else None,
             "storage_srid": storage_srid,
             "bbox_4326": bbox_4326,
             "parquet_key": parquet_key,

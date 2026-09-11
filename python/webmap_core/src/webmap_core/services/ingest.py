@@ -174,6 +174,10 @@ async def ingest_upload(
         caption=caption,
         source_uri=f"upload://{source.name}",
         source_checksum=_checksum(source),
+        # Kept for the sync path, which has to read the file the way the person
+        # importing it said to — the column mapping especially, which `11` §3.1
+        # forbids sniffing and which is otherwise lost the moment this returns.
+        source_options=_reader_options(options),
         dataset_id=dataset_id,
     )
 
@@ -196,6 +200,23 @@ async def ingest_upload(
         caption=caption,
         warnings=warnings,
     )
+
+
+def _reader_options(options: IngestOptions) -> dict[str, Any] | None:
+    """The subset of the ingest options a later read needs.
+
+    Only what `read_xyz` and `read_vector` take. The rest of `IngestOptions` is
+    about registration — name, project, visibility — and storing it here would
+    make this a second, staler copy of the dataset row.
+    """
+    stored = {
+        "x_column": options.x_column,
+        "y_column": options.y_column,
+        "z_column": options.z_column,
+        "encoding": options.encoding,
+    }
+    kept = {key: value for key, value in stored.items() if value}
+    return kept or None
 
 
 def _read_tabular(path: Path, options: IngestOptions) -> Any:

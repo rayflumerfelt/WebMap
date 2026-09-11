@@ -166,6 +166,23 @@ async def sync_dataset(ctx: JobContext, dataset_id: UUID) -> SyncResult:
 The UI shows `synced_at` on every share- or database-sourced layer, so nobody misinterprets
 stale data as current.
 
+**Built**, as `webmap_core.services.sync` and the worker's `sync` task, with three things this
+section did not say and the implementation had to settle:
+
+**A sync needs to know how to *read* the source, and that is not derivable.** A CSV of picks has
+no intrinsic geometry, and §3.1 forbids sniffing which columns hold X and Y. The mapping a person
+chose at ingest is therefore kept on `dataset.source_options` and re-used; a tabular source that
+arrived without one is refused with an instruction rather than guessed at. Without this, a
+share-sourced CSV — most of what a share holds — is a dataset that can never be refreshed.
+
+**The SRID is not re-derived either.** `storage_srid` is what every tile, grid and export of the
+dataset has used, and letting an upstream file change it mid-life would silently reproject a
+layer under the maps built on it. A file that now declares a different CRS is a new dataset.
+
+**The guarded update is what makes it safe beside an edit.** The pointer moves with
+`WHERE version = :base`, so a sync that ran while somebody saved changes nothing and says so,
+rather than overwriting their save with an upstream copy.
+
 ---
 
 ## 3. Reading

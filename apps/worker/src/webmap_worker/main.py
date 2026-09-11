@@ -14,6 +14,7 @@ from webmap_worker.tasks.clip import clip_task
 from webmap_worker.tasks.contour import contour_task
 from webmap_worker.tasks.health import ping
 from webmap_worker.tasks.interpolate import interpolate_task
+from webmap_worker.tasks.sync import sync_task
 
 log = get_logger(__name__)
 
@@ -75,7 +76,7 @@ class WorkerSettings:
     # `ping` is not a placeholder: it is the round-trip smoke test for the
     # queue path, and arq refuses to start a worker whose function list is
     # empty — which is how this container silently crashlooped the first time
-    # the stack came up. Phase 4 still owes ingest, sync and export.
+    # the stack came up.
     functions: ClassVar[list[Any]] = [
         ping,
         interpolate_task,
@@ -83,6 +84,7 @@ class WorkerSettings:
         aggregate_task,
         clip_task,
         anchor_task,
+        sync_task,
     ]
     cron_jobs: ClassVar[list[Any]] = []
 

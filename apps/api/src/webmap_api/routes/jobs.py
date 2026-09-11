@@ -27,6 +27,7 @@ from webmap_core.services import clipping as clip_service
 from webmap_core.services import contours as contour_service
 from webmap_core.services import gridding as grid_service
 from webmap_core.services import jobs as service
+from webmap_core.services import sync as sync_service
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
@@ -390,6 +391,43 @@ async def submit_clip(
         queue(request),
         kind="clip",
         task="clip_task",
+        parameters=body.to_request().to_parameters(),
+    )
+
+
+class SyncRequestModel(WebMapModel):
+    dataset_id: UUID
+    #: Re-read even when the checksum matches. Rare, and worth having for the
+    #: case where somebody has reason to doubt the checksum.
+    force: bool = False
+
+    def to_request(self) -> sync_service.SyncRequest:
+        return sync_service.SyncRequest(dataset_id=self.dataset_id, force=self.force)
+
+
+@router.post("/sync", response_model=Submitted, status_code=202)
+async def submit_sync(
+    body: SyncRequestModel,
+    principal: CurrentPrincipal,
+    conn: ScopedConn,
+    request: Request,
+) -> Submitted:
+    """Refresh a share- or database-sourced dataset from its upstream.
+
+    A job rather than an inline call because the work is a network fetch plus a
+    full re-read of a file that may be gigabytes — and because the caller
+    cannot tell which of those they are asking for, which is exactly the tail
+    `10` §6 puts on the queue.
+
+    Editor, not viewer: a sync advances the dataset's version and replaces what
+    every reader of it sees.
+    """
+    return await _submit(
+        conn,
+        principal,
+        queue(request),
+        kind="sync",
+        task="sync_task",
         parameters=body.to_request().to_parameters(),
     )
 
