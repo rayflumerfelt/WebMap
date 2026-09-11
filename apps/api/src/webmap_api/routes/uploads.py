@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, Request, UploadFile, status
 
 from webmap_api.dependencies import AppSettings, CurrentPrincipal, ScopedConn
+from webmap_api.routes.jobs import queue, submit_job
 from webmap_core.models import DatasetKind
 from webmap_core.permissions import Visibility
 from webmap_core.services.ingest import IngestOptions, ingest_upload, preview
@@ -24,6 +25,16 @@ router = APIRouter(prefix="/api/v1/datasets", tags=["datasets"])
 #: memory first, which is how the cap gets reached by the API rather than by
 #: the file.
 CHUNK_BYTES = 1024 * 1024
+
+#: Above this, the read goes to the queue. `10-jobs-async.md` §6: blocking an
+#: API worker for five seconds is acceptable and thirty is not, because it
+#: starves every other request on the process.
+#:
+#: Bytes rather than an estimate of seconds, because at upload time the file is
+#: the only thing known — the feature count is on the far side of the read this
+#: threshold decides whether to do. 32 MB of shapefile is a few hundred thousand
+#: polygons, which is seconds of pyogrio and comfortably inside the budget.
+INLINE_LIMIT_BYTES = 32 * 1024 * 1024
 
 
 async def _spool(file: UploadFile, directory: Path) -> Path:
@@ -104,28 +115,47 @@ async def upload_dataset(
 
     with tempfile.TemporaryDirectory(prefix="webmap-upload-") as workdir:
         source = await _spool(file, Path(workdir))
+        options = IngestOptions(
+            name=name,
+            project_id=project_id,
+            visibility=visibility,
+            owner_team_id=owner_team_id,
+            kind=kind,
+            description=description,
+            srid_override=srid,
+            encoding=encoding,
+            x_column=x_column,
+            y_column=y_column,
+            z_column=z_column,
+        )
+
+        if source.stat().st_size > INLINE_LIMIT_BYTES:
+            # Spooled to object storage, not left in this container's temp
+            # directory: the worker is a different container, and a path that
+            # exists here is a file it cannot open.
+            return await _enqueue_ingest(
+                conn,
+                principal,
+                request,
+                source,
+                options,
+                storage=storage,
+                bucket=settings.s3_bucket,
+            )
+
         result = await ingest_upload(
             conn,
             principal,
             source,
-            IngestOptions(
-                name=name,
-                project_id=project_id,
-                visibility=visibility,
-                owner_team_id=owner_team_id,
-                kind=kind,
-                description=description,
-                srid_override=srid,
-                encoding=encoding,
-                x_column=x_column,
-                y_column=y_column,
-                z_column=z_column,
-            ),
+            options,
             storage=storage,
             bucket=settings.s3_bucket,
         )
 
     return {
+        # Which of the two happened, so Claude knows whether to poll (§6) and
+        # the SPA knows whether to show a progress bar or a layer.
+        "mode": "inline",
         "dataset_id": str(result.dataset_id),
         "name": result.name,
         "kind": result.kind.value,
@@ -139,3 +169,65 @@ async def upload_dataset(
 
 
 __all__ = ["router"]
+
+
+async def _enqueue_ingest(
+    conn: Any,
+    principal: Any,
+    request: Request,
+    source: Path,
+    options: IngestOptions,
+    *,
+    storage: Any,
+    bucket: str,
+) -> dict[str, Any]:
+    """Spool a large upload to object storage and hand it to the queue.
+
+    The object is the source from here on, which is what lets an uploaded
+    dataset be re-read by the same connector a share-sourced one uses
+    (`11` §2.1) — and means the bytes a dataset came from are still there when
+    somebody asks a year later what exactly was imported.
+    """
+    from uuid import uuid4
+
+    from webmap_io.storage import put_file
+
+    key = f"uploads/{uuid4()}/{source.name}"
+    put_file(storage, bucket, key, source)
+
+    parameters: dict[str, Any] = {
+        "object_key": key,
+        "name": options.name,
+        "project_id": str(options.project_id) if options.project_id else None,
+        "visibility": options.visibility.value,
+        "owner_team_id": str(options.owner_team_id) if options.owner_team_id else None,
+        "kind": options.kind.value if options.kind else None,
+        "description": options.description,
+        "srid_override": options.srid_override,
+        "encoding": options.encoding,
+        "x_column": options.x_column,
+        "y_column": options.y_column,
+        "z_column": options.z_column,
+    }
+
+    # Through the jobs route's own submitter, not a second enqueue path: row
+    # first then queue is a property worth having in exactly one place.
+    submitted = await submit_job(
+        conn,
+        principal,
+        queue(request),
+        kind="ingest",
+        task="ingest_task",
+        parameters=parameters,
+    )
+
+    return {
+        "mode": "job",
+        "job_id": str(submitted.job_id),
+        "object_key": key,
+        "size_bytes": source.stat().st_size,
+        "reason": (
+            f"{source.stat().st_size / 1e6:.0f} MB is past the {INLINE_LIMIT_BYTES / 1e6:.0f} MB "
+            f"inline limit, so the read runs on the queue. Poll the job for the dataset."
+        ),
+    }

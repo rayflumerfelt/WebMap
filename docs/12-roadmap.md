@@ -15,7 +15,7 @@ What is gone is `webmap-auth` — the OAuth server with Dynamic Client Registrat
 
 ## Current status
 
-Updated 2026-09-10 (Phases 4 and 5 in progress). A phase is complete only when every
+Updated 2026-09-11 (Phase 4 complete; Phase 5 in progress). A phase is complete only when every
 criterion passes; a criterion met with a caveat says so rather than being ticked quietly.
 
 Acceptance criteria read `[x]` met, `[ ]` not met, and **`[~]` met in part** — the caveat is
@@ -42,7 +42,7 @@ viewport working set §17 describes.
 | 1 — Identity and data plane | **Complete.** Two caveats in "Carried forward" below. |
 | 2 — Display | **Built.** 8 of 11 criteria verified; the rest need a browser — see below. |
 | 3 — Claude integration | **Built.** 4 of 9 verified. The visual harness exists now and its goldens do not; `tests/mcp_eval/` runs ten questions against the live tool surface. |
-| 4 — Gridding | **In progress.** 9 of 10 verified. Jobs, contouring with gapped labels ([`adr/0015`](adr/0015-contour-labels-gap-the-line.md)), lineage, breaklines, clipping, label anchors, dataset sync and export are done; the worker's ingest task is what remains. |
+| 4 — Gridding | **Complete.** All 10 criteria verified. Jobs, contouring with gapped labels ([`adr/0015`](adr/0015-contour-labels-gap-the-line.md)), lineage, breaklines, clipping, label anchors, and the ingest, sync and export tasks. |
 | 5 — Styling and editing | **In progress.** The backend is largely there — layers and basemaps as shared objects, capability roles, the three preference tiers, palette import/export, attribute summaries, and the feature-edit writer with its version pointer. On the front end the nine shared controls, the formatting dialog, all four editing surfaces, and vertex editing on the map — click selection, snapping against exact geometry, handles, move/add/delete, Save and Discard — are built. Drawing new geometry is not, nor is the operation catalog of `09` §11. |
 | 6 — Aggregation and polish | **Partly done ahead of order.** The aggregation catalog and the clip job landed with Phase 4's work, because both were needed by it. |
 | 7 — Geostatistics | Not started. Specified in `13-kriging.md`; the largest single phase in the plan. |
@@ -369,7 +369,12 @@ fault is gridded with it.
 - [x] Filled bands measure the area between their levels — checked against a closed form on a
       cone, and sitting exactly under the contours drawn over them
 
-**Still owed by Phase 4:** the worker's ingest task. **Sync and export are built** — the
+**Phase 4's worker tasks are all built.** Ingest, sync and export: the connector
+abstraction (`11` §2) with a file share connector carrying §2.2's four mitigations, a
+`sync` job that re-materialises a dataset behind a guarded pointer move, an `export` job
+with §4.2's loss reporting, and an `ingest` job for uploads past the 32 MB inline limit
+`10` §6 asks for. The inline and queued ingest paths are asserted to produce the same
+dataset, because two code paths that disagree are worse than one that is slow.
 connector abstraction (`11` §2), a file share connector with §2.2's four mitigations, and a
 `sync` job that re-materialises a dataset from its upstream behind a guarded pointer move.
 

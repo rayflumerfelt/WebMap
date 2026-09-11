@@ -38,14 +38,12 @@ LONG_COLUMNS = [
 ]
 
 
-async def register_leases(
-    engine: AsyncEngine, storage: Any, principal: Principal
-) -> UUID:
+async def register_leases(engine: AsyncEngine, storage: Any, principal: Principal) -> UUID:
     """Three lease polygons with two colliding long field names."""
     from webmap_io.parquet import write_features
     from webmap_io.storage import feature_key, put_bytes
 
-    west, south, east, north = EXTENT
+    west, south, _east, _north = EXTENT
     geometry = np.array(
         [
             shapely.box(

@@ -73,6 +73,13 @@ PHASES: dict[str, list[tuple[str, float]]] = {
         ("Clipping", 0.10),
         ("Writing grid", 0.40),
     ],
+    # Two phases and the second is nearly all of it: the download is bounded by
+    # the network and the read-plus-write is bounded by the file, and for the
+    # sizes that reach this path rather than the inline one the second wins.
+    "ingest": [
+        ("Fetching the upload", 0.20),
+        ("Reading and registering", 0.80),
+    ],
     # Reading the object and writing the file are both whole-layer passes; the
     # audit record at the end is one insert. Weighting them evenly would leave
     # the bar at two thirds for the entire conversion.

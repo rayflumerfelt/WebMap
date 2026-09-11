@@ -298,7 +298,7 @@ def queue(request: Request) -> ArqRedis:
     return pool
 
 
-async def _submit(
+async def submit_job(
     conn: Any,
     principal: Any,
     pool: ArqRedis,
@@ -308,6 +308,9 @@ async def _submit(
     parameters: dict[str, Any],
 ) -> Submitted:
     """Row first, then the queue.
+
+    Public because the upload route submits an ingest through it: a second
+    enqueue path would be a second place for "row first" to be got wrong.
 
     A queued job whose task was never submitted shows as queued and can be
     resubmitted or cancelled. A task with no row has nowhere to report
@@ -345,7 +348,7 @@ async def submit_interpolate(
     is seconds of CPU on a shared API worker, and the whole point of §3's
     `max_jobs = 1` is to keep that off the request path.
     """
-    return await _submit(
+    return await submit_job(
         conn,
         principal,
         queue(request),
@@ -362,7 +365,7 @@ async def submit_contour(
     conn: ScopedConn,
     request: Request,
 ) -> Submitted:
-    return await _submit(
+    return await submit_job(
         conn,
         principal,
         queue(request),
@@ -386,7 +389,7 @@ async def submit_clip(
     it. `10` §6's rule is about the tail, and the caller cannot tell from the
     request which size they asked for.
     """
-    return await _submit(
+    return await submit_job(
         conn,
         principal,
         queue(request),
@@ -433,7 +436,7 @@ async def submit_export(
     the result is collected — after re-checking the permission, which means a
     link cannot outlive the access that produced it.
     """
-    return await _submit(
+    return await submit_job(
         conn,
         principal,
         queue(request),
@@ -470,7 +473,7 @@ async def submit_sync(
     Editor, not viewer: a sync advances the dataset's version and replaces what
     every reader of it sees.
     """
-    return await _submit(
+    return await submit_job(
         conn,
         principal,
         queue(request),
@@ -493,7 +496,7 @@ async def submit_label_anchors(
     tile, which is what stops a label moving while you pan and appearing twice
     on a polygon that crosses a tile boundary (`08` §2.4).
     """
-    return await _submit(
+    return await submit_job(
         conn,
         principal,
         queue(request),
@@ -518,7 +521,7 @@ async def submit_aggregate(
     asked for from the request. One path, always asynchronous, is simpler than
     a threshold that guesses.
     """
-    return await _submit(
+    return await submit_job(
         conn,
         principal,
         queue(request),
